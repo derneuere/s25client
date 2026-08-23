@@ -89,8 +89,12 @@ void iwTools::TransmitSettings()
     if(isReplay)
         return;
     // Wurden Einstellungen verändert?
-    settings_changed |= ordersChanged;
-    if(settings_changed)
+    // Rueckfallebene: eine reine Bestellaenderung ist ebenfalls eine offene Aenderung. Der
+    // Spielerbezug steht dann schon (Msg_ButtonClick merkt ihn beim Setzen von ordersChanged),
+    // das hier ist nur die Verknuepfung der beiden Flags wie bisher.
+    if(ordersChanged)
+        MarkSettingsChanged();
+    if(HasPendingSettings())
     {
         // Einstellungen speichern
         ToolSettings newSettings;
@@ -111,7 +115,7 @@ void iwTools::TransmitSettings()
 
         if(gcFactory.ChangeTools(newSettings, orderDelta))
         {
-            GAMECLIENT.visual_settings.tools_settings = newSettings;
+            GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).tools_settings = newSettings;
             if(ordersChanged)
             {
                 const GamePlayer& localPlayer = gwv.GetPlayer();
@@ -119,8 +123,8 @@ void iwTools::TransmitSettings()
                     localPlayer.ChangeToolOrderVisual(tool, pendingOrderChanges[tool]);
                 std::fill(pendingOrderChanges.begin(), pendingOrderChanges.end(), 0);
             }
-            settings_changed = false;
             ordersChanged = false;
+            OnSettingsTransmitted();
         }
     }
 }
@@ -175,6 +179,9 @@ void iwTools::Msg_ButtonClick(const unsigned ctrl_id)
             ++curOrders;
         }
         ordersChanged = true;
+        // Zweites Vormerkflag desselben Fensters, gleiche Verzoegerung: der Spielerbezug muss
+        // auch hier JETZT festgehalten werden und nicht erst beim Senden.
+        MarkSettingsChanged();
         GetCtrl<ctrlBaseText>(200 + rttr::enum_cast(tool))->SetText(helpers::toString(curOrders));
     } else
         switch(ctrl_id)
@@ -186,13 +193,13 @@ void iwTools::Msg_ButtonClick(const unsigned ctrl_id)
                                              "The higher the value, the more likely this tool is to be produced.")));
                 break;
             case 13: // Standard
-                UpdateSettings(GAMECLIENT.default_settings.tools_settings);
-                settings_changed = true;
+                UpdateSettings(GAMECLIENT.GetDefaultSettings(gwv.GetPlayerId()).tools_settings);
+                MarkSettingsChanged();
                 break;
             case 15: // Zero all
                 ToolSettings zero{};
                 UpdateSettings(zero);
-                settings_changed = true;
+                MarkSettingsChanged();
                 break;
         }
 }
@@ -200,7 +207,7 @@ void iwTools::Msg_ButtonClick(const unsigned ctrl_id)
 void iwTools::Msg_ProgressChange(const unsigned /*ctrl_id*/, const unsigned short /*position*/)
 {
     // Einstellungen wurden geändert
-    settings_changed = true;
+    MarkSettingsChanged();
 }
 
 void iwTools::UpdateSettings(const ToolSettings& tool_settings)
@@ -213,5 +220,5 @@ void iwTools::UpdateSettings(const ToolSettings& tool_settings)
 
 void iwTools::UpdateSettings()
 {
-    UpdateSettings(GAMECLIENT.visual_settings.tools_settings);
+    UpdateSettings(GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).tools_settings);
 }

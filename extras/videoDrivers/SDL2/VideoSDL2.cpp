@@ -53,6 +53,62 @@ struct SDLMemoryDeleter
 template<typename T>
 using SDL_memory = std::unique_ptr<T, SDLMemoryDeleter<T>>;
 
+/// SDL-Knopf -> PadButton. Die beiden Aufzaehlungen sind heute wertgleich
+/// (SDL_gamecontroller.h:301-320 gegen driver/PadEvent.h), aber ein expliziter switch bleibt
+/// auch dann richtig, wenn eine der beiden Seiten umsortiert wird.
+bool toPadButton(const Uint8 sdlButton, PadButton& out)
+{
+    switch(sdlButton)
+    {
+        case SDL_CONTROLLER_BUTTON_A: out = PadButton::A; return true;
+        case SDL_CONTROLLER_BUTTON_B: out = PadButton::B; return true;
+        case SDL_CONTROLLER_BUTTON_X: out = PadButton::X; return true;
+        case SDL_CONTROLLER_BUTTON_Y: out = PadButton::Y; return true;
+        case SDL_CONTROLLER_BUTTON_BACK: out = PadButton::Back; return true;
+        case SDL_CONTROLLER_BUTTON_GUIDE: out = PadButton::Guide; return true;
+        case SDL_CONTROLLER_BUTTON_START: out = PadButton::Start; return true;
+        case SDL_CONTROLLER_BUTTON_LEFTSTICK: out = PadButton::LeftStick; return true;
+        case SDL_CONTROLLER_BUTTON_RIGHTSTICK: out = PadButton::RightStick; return true;
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: out = PadButton::LeftShoulder; return true;
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: out = PadButton::RightShoulder; return true;
+        case SDL_CONTROLLER_BUTTON_DPAD_UP: out = PadButton::DpadUp; return true;
+        case SDL_CONTROLLER_BUTTON_DPAD_DOWN: out = PadButton::DpadDown; return true;
+        case SDL_CONTROLLER_BUTTON_DPAD_LEFT: out = PadButton::DpadLeft; return true;
+        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: out = PadButton::DpadRight; return true;
+        // MISC1 und die Paddles gibt es in SDL 2.0.8 noch nicht, in spaeteren Versionen schon.
+        default: return false;
+    }
+}
+
+/// SDL-Achse -> PadAxis.
+bool toPadAxis(const Uint8 sdlAxis, PadAxis& out)
+{
+    switch(sdlAxis)
+    {
+        case SDL_CONTROLLER_AXIS_LEFTX: out = PadAxis::LeftX; return true;
+        case SDL_CONTROLLER_AXIS_LEFTY: out = PadAxis::LeftY; return true;
+        case SDL_CONTROLLER_AXIS_RIGHTX: out = PadAxis::RightX; return true;
+        case SDL_CONTROLLER_AXIS_RIGHTY: out = PadAxis::RightY; return true;
+        case SDL_CONTROLLER_AXIS_TRIGGERLEFT: out = PadAxis::TriggerLeft; return true;
+        case SDL_CONTROLLER_AXIS_TRIGGERRIGHT: out = PadAxis::TriggerRight; return true;
+        default: return false;
+    }
+}
+
+/// Sint16 -> [-1,1], Trigger entsprechend auf [0,1]. Geteilt wird durch 32767 und danach
+/// geklemmt, damit -32768 nicht auf -1.000031 laeuft.
+/// Die Y-Achse wird bewusst NICHT gespiegelt: SDL liefert "Stick nach oben" als negativen Wert
+/// (SDL_gamecontroller.h:249-252), und in Bildschirmkoordinaten zeigt -y ebenfalls nach oben.
+/// Obergrenze der ungeholten Pad-Warteschlange. Grosszuegig: waehrend einer Partie wird sie
+/// jeden Frame geleert und bleibt weit darunter; die Grenze greift nur ausserhalb.
+constexpr size_t maxQueuedPadEvents = 4096;
+
+float normalizePadAxis(const Sint16 value)
+{
+    const float f = static_cast<float>(value) / 32767.f;
+    return f < -1.f ? -1.f : (f > 1.f ? 1.f : f);
+}
+
 void setSpecialKeys(KeyEvent& ke, const SDL_Keymod mod)
 {
     ke.ctrl = (mod & KMOD_CTRL);
@@ -105,7 +161,135 @@ bool VideoSDL2::Initialize()
     if(CHECK_SDL(SDL_InitSubSystem(SDL_INIT_VIDEO)))
         initialized = true;
 
+    // Bewusst NACH dem Video-Subsystem und bewusst ohne Einfluss auf `initialized`: ein Rechner
+    // ohne Joystick-Treiber darf das Spiel nicht am Starten hindern.
+    if(initialized)
+        InitGamepads();
+
     return initialized;
+}
+
+void VideoSDL2::InitGamepads()
+{
+    rttr::ScopedLeakDisabler _;
+    // SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS steht per Default auf "0" und bleibt so: ein Pad
+    // soll nur wirken, wenn das Fenster den Fokus hat. Alle Gamecontroller-Hints muessten VOR
+    // dem InitSubSystem gesetzt werden (SDL_hints.h:424) - wir setzen keinen.
+    if(SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) < 0)
+    {
+        PrintError(std::string("Gamepad support disabled: ") + SDL_GetError());
+        gamepadsInitialized_ = false;
+        return;
+    }
+    gamepadsInitialized_ = true;
+    // KEINE eigene Schleife ueber SDL_NumJoysticks(): SDL legt fuer bereits gesteckte Pads
+    // SDL_CONTROLLERDEVICEADDED in die Queue, und die wird im ersten MessageLoop() ganz normal
+    // abgearbeitet. Eine Erstenumeration hier waere eine zweite, abweichende Codebahn fuer
+    // denselben Vorgang.
+}
+
+void VideoSDL2::CleanUpGamepads()
+{
+    for(const Gamepad& pad : gamepads_)
+    {
+        if(pad.handle)
+            SDL_GameControllerClose(pad.handle);
+    }
+    gamepads_.clear();
+    padEvents_.clear();
+    if(gamepadsInitialized_)
+    {
+        SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);
+        gamepadsInitialized_ = false;
+    }
+    // nextPadId_ wird bewusst NICHT zurueckgesetzt: die Zusicherung "eine Kennung wird in dieser
+    // Programmlaufzeit nie wiederverwendet" gilt ueber ein DestroyScreen/CreateScreen hinweg.
+}
+
+void VideoSDL2::OnGamepadAdded(const int deviceIdx)
+{
+    // `which` ist hier ein GERAETEINDEX, keine Instanz-ID (SDL_events.h:388-392). Er gilt nur in
+    // genau diesem Moment und taugt ausschliesslich als Argument fuer SDL_IsGameController und
+    // SDL_GameControllerOpen.
+    if(!SDL_IsGameController(deviceIdx))
+        return; // Joystick ohne Mapping - dafuer kaeme ohnehin kein Controller-Ereignis
+    SDL_GameController* const handle = SDL_GameControllerOpen(deviceIdx);
+    if(!handle)
+    {
+        PrintError();
+        return;
+    }
+    const SDL_JoystickID instanceId = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(handle));
+    // Ein bereits gefuehrtes Geraet nicht doppelt aufnehmen: das ergaebe zwei Connected-Ereignisse
+    // fuer dasselbe Pad und im PadRouter zwei belegte Slots.
+    for(const Gamepad& pad : gamepads_)
+    {
+        if(pad.instanceId == instanceId)
+        {
+            SDL_GameControllerClose(handle);
+            return;
+        }
+    }
+    Gamepad pad;
+    pad.handle = handle;
+    pad.instanceId = instanceId;
+    pad.id = nextPadId_++;
+    gamepads_.push_back(pad);
+    padEvents_.push_back(PadEvent::Connected(pad.id));
+}
+
+void VideoSDL2::OnGamepadRemoved(const SDL_JoystickID instanceId)
+{
+    // Hier ist `which` dagegen eine INSTANZ-ID (SDL_events.h:388-392).
+    for(auto it = gamepads_.begin(); it != gamepads_.end(); ++it)
+    {
+        if(it->instanceId != instanceId)
+            continue;
+        if(it->handle)
+            SDL_GameControllerClose(it->handle);
+        // Gedrueckte Knoepfe muessen hier NICHT kuenstlich losgelassen werden: der PadRouter
+        // laesst beim Disconnected alles los, was er als gedrueckt fuehrt
+        // (input/PadRouter.cpp, ReleaseAll). Das gehoert dorthin, weil nur dort der
+        // Druckzustand gefuehrt wird.
+        padEvents_.push_back(PadEvent::Disconnected(it->id));
+        gamepads_.erase(it);
+        return;
+    }
+}
+
+PadDeviceId VideoSDL2::GetPadDeviceId(const SDL_JoystickID instanceId) const
+{
+    for(const Gamepad& pad : gamepads_)
+    {
+        if(pad.instanceId == instanceId)
+            return pad.id;
+    }
+    return InvalidPadDevice;
+}
+
+void VideoSDL2::EnqueuePadEvent(const PadEvent& ev)
+{
+    padEvents_.push_back(ev);
+    if(padEvents_.size() < maxQueuedPadEvents)
+        return;
+    size_t toDrop = padEvents_.size() / 2;
+    const auto isDropped = [&toDrop](const PadEvent& e) {
+        if(e.type == PadEvent::Type::Connected || e.type == PadEvent::Type::Disconnected)
+            return false; // Der Geraetebestand ueberlebt immer
+        if(toDrop == 0)
+            return false;
+        --toDrop;
+        return true;
+    };
+    // remove_if wertet das Praedikat genau einmal je Element und von vorn nach hinten aus - so
+    // trifft es die AELTESTEN Achsen- und Knopfereignisse.
+    padEvents_.erase(std::remove_if(padEvents_.begin(), padEvents_.end(), isDropped), padEvents_.end());
+}
+
+void VideoSDL2::FetchPadEvents(std::vector<PadEvent>& out)
+{
+    out.clear();
+    out.swap(padEvents_);
 }
 
 void VideoSDL2::CleanUp()
@@ -117,6 +301,9 @@ void VideoSDL2::CleanUp()
         SDL_GL_DeleteContext(context);
     if(window)
         SDL_DestroyWindow(window);
+    // Vor SDL_Quit(): das naehme die Subsysteme zwar mit, gamepads_ bliebe aber mit toten
+    // Zeigern zurueck. CleanUp() laeuft auch aus DestroyScreen(), also nicht nur beim Ende.
+    CleanUpGamepads();
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
     SDL_Quit();
     initialized = false;
@@ -526,6 +713,35 @@ bool VideoSDL2::MessageLoop()
                     else
                         CallBack->Msg_WheelDown(mouse_xy);
                 }
+                break;
+            }
+
+            // --- Gamepads -------------------------------------------------------------------
+            // Bewusst KEIN CallBack->...: Pad-Ereignisse gehen nicht ueber das
+            // VideoDriverLoaderInterface und damit nicht durch den WindowManager, sondern werden
+            // hier gesammelt und von s25main mit FetchPadEvents abgeholt. Der Maus- und
+            // Tastaturpfad bleibt dadurch strukturell voellig unberuehrt.
+            case SDL_CONTROLLERDEVICEADDED: OnGamepadAdded(ev.cdevice.which); break;
+            case SDL_CONTROLLERDEVICEREMOVED: OnGamepadRemoved(ev.cdevice.which); break;
+            case SDL_CONTROLLERBUTTONDOWN:
+            case SDL_CONTROLLERBUTTONUP:
+            {
+                PadButton button;
+                if(!toPadButton(ev.cbutton.button, button))
+                    break;
+                const PadDeviceId device = GetPadDeviceId(ev.cbutton.which);
+                if(device != InvalidPadDevice)
+                    EnqueuePadEvent(PadEvent::Button(device, button, ev.cbutton.state == SDL_PRESSED));
+                break;
+            }
+            case SDL_CONTROLLERAXISMOTION:
+            {
+                PadAxis axis;
+                if(!toPadAxis(ev.caxis.axis, axis))
+                    break;
+                const PadDeviceId device = GetPadDeviceId(ev.caxis.which);
+                if(device != InvalidPadDevice)
+                    EnqueuePadEvent(PadEvent::Axis(device, axis, normalizePadAxis(ev.caxis.value)));
                 break;
             }
         }

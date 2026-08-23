@@ -13,4 +13,8 @@
 std::vector<AI::Info> ParseAIOptions(const std::vector<std::string>& aiOptions);
 
 /// Tries to start a game (map, savegame, replay, or ai-battle) and returns whether this was successfull
-bool QuickStartGame(const boost::filesystem::path& mapOrReplayPath, const std::vector<std::string>& ais);
+/// numLocalPlayers > 1 additionally puts slots 1..numLocalPlayers-1 under local (splitscreen) control.
+/// The caller must have clamped it to MAX_VIEWPORTS (world/ViewportLayout.h): there is one view per local
+/// player, and a local player without a view has neither an input device nor an AI.
+bool QuickStartGame(const boost::filesystem::path& mapOrReplayPath, const std::vector<std::string>& ais,
+                    unsigned numLocalPlayers = 1);

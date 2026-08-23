@@ -91,6 +91,16 @@ void GameClient::ChangePlayerIngame(const unsigned char playerId1, const unsigne
         if(player2.ps != PlayerState::AI)
             return;
 
+        // ACHTUNG: Ab hier wird die Welt veraendert. Dieser Block laeuft auf JEDEM Client, weil
+        // der Server GameMessage_Player_Swap an alle broadcastet (GameServer.cpp:1701) und
+        // OnGameMessage(GameMessage_Player_Swap) hier hereinspringt (GameClient.cpp:727).
+        // Er darf deshalb NIEMALS von clientlokalem Zustand abhaengen - insbesondere nicht von
+        // der Menge der lokal gesteuerten Spieler. Sonst haetten die Clients verschiedene
+        // PlayerState und damit verschiedene isHuman()-Ergebnisse in der Simulation:
+        // GameWorld.cpp:270 (AUTOFLAGS setzt Flaggen), GamePlayer.cpp:1803 (CancelPact mutiert
+        // pacts[] sofort statt zu fragen), GamePlayer.cpp:1690 (SuggestPact loest ein Lua-Event
+        // aus). -> Desync. Clientlokale Buchhaltung erst unterhalb, in
+        // OnPlayerSlotsSwappedIngame.
         std::swap(player1.ps, player2.ps);
         std::swap(player1.aiInfo, player2.aiInfo);
         if(IsHost())
@@ -103,17 +113,22 @@ void GameClient::ChangePlayerIngame(const unsigned char playerId1, const unsigne
         GetPlayer(playerId2).ps = PlayerState::Occupied;
     }
 
-    // Wenn wir betroffen waren, unsere ID neu setzen
+    // Wenn wir betroffen waren, unsere ID neu setzen. Ebenfalls unbedingt: der Server hat die
+    // Zuordnung Verbindung<->Slot bereits umgehaengt (GameServer.cpp:1696-1700). Wer hier nicht
+    // mitzieht, adressiert dauerhaft den falschen Slot.
     if(mainPlayer.playerId == playerId1)
-    {
         mainPlayer.playerId = playerId2;
 
-        if(!IsReplayModeOn())
-        {
-            // Our currently accumulated gamecommands are invalid after the change, as they would modify the old player
-            gameCommands_.clear();
-        }
-    }
+    // Die Einstellungen selbst wandern NICHT mit (oben werden nur ps und aiInfo getauscht) -
+    // sie gehoeren zum Slot. Also die Anzeigewerte beider Slots aus dem Spielzustand neu
+    // ableiten: wer den Slot jetzt bedient, muss dessen wirkliche Einstellungen sehen.
+    // Rein clientlokal und damit desync-frei.
+    GetPlayer(playerId1).FillVisualSettings(visualSettings_[playerId1]);
+    GetPlayer(playerId2).FillVisualSettings(visualSettings_[playerId2]);
+
+    // Rein clientlokale Buchhaltung - erst NACH der Weltaenderung und ohne eigenen return,
+    // damit sie den Ablauf oben nicht beeinflussen kann.
+    OnPlayerSlotsSwappedIngame(playerId1, playerId2);
 
     if(ci)
         ci->CI_PlayersSwapped(playerId1, playerId2);

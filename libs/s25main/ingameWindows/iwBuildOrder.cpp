@@ -33,7 +33,7 @@ iwBuildOrder::iwBuildOrder(const GameWorldViewer& gwv)
 {
     ctrlList* list = AddList(0, DrawPoint(15, 60), Extent(150, 220), TextureColor::Grey, NormalFont);
 
-    fillBuildOrder(GAMECLIENT.visual_settings.build_order);
+    fillBuildOrder(GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).build_order);
 
     for(const auto buildOrder : pendingBuildOrder)
         list->AddItem(_(BUILDING_NAMES[buildOrder])); //-V807
@@ -56,7 +56,7 @@ iwBuildOrder::iwBuildOrder(const GameWorldViewer& gwv)
     combo->AddItem(_("After the following order")); // "Nach folgender Reihenfolge"
 
     // Eintrag in Combobox auswählen
-    useCustomBuildOrder = GAMECLIENT.visual_settings.useCustomBuildOrder;
+    useCustomBuildOrder = GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).useCustomBuildOrder;
     combo->SetSelection(useCustomBuildOrder ? 1 : 0);
 
     // Standard
@@ -71,7 +71,7 @@ void iwBuildOrder::TransmitSettings()
     if(GAMECLIENT.IsReplayModeOn())
         return;
     // Wurden Einstellungen geändert?
-    if(settings_changed)
+    if(HasPendingSettings())
     {
         // Einstellungen speichern
         useCustomBuildOrder = GetCtrl<ctrlComboBox>(6)->GetSelection() != 0u;
@@ -102,9 +102,9 @@ void iwBuildOrder::TransmitSettings()
 
         if(GAMECLIENT.ChangeBuildOrder(useCustomBuildOrder, transmitPendingBuildOrder))
         {
-            GAMECLIENT.visual_settings.build_order = transmitPendingBuildOrder;
-            GAMECLIENT.visual_settings.useCustomBuildOrder = useCustomBuildOrder;
-            settings_changed = false;
+            GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).build_order = transmitPendingBuildOrder;
+            GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).useCustomBuildOrder = useCustomBuildOrder;
+            OnSettingsTransmitted();
         }
     }
 }
@@ -131,7 +131,7 @@ void iwBuildOrder::Msg_ComboSelectItem(unsigned ctrl_id, unsigned selection)
     if(ctrl_id == 6)
     {
         useCustomBuildOrder = selection != 0u;
-        settings_changed = true;
+        MarkSettingsChanged();
     }
 }
 
@@ -161,7 +161,7 @@ void iwBuildOrder::Msg_ButtonClick(const unsigned ctrl_id)
                 list->Swap(selection - 1, selection);
                 --selection;
             }
-            settings_changed = true;
+            MarkSettingsChanged();
         }
         break;
         case 2: // Hoch
@@ -171,7 +171,7 @@ void iwBuildOrder::Msg_ButtonClick(const unsigned ctrl_id)
                 std::swap(pendingBuildOrder[selection - 1], pendingBuildOrder[selection]);
                 list->Swap(selection - 1, selection);
             }
-            settings_changed = true;
+            MarkSettingsChanged();
         }
         break;
         case 3: // Runter
@@ -181,7 +181,7 @@ void iwBuildOrder::Msg_ButtonClick(const unsigned ctrl_id)
                 std::swap(pendingBuildOrder[selection + 1], pendingBuildOrder[selection]);
                 list->Swap(selection + 1, selection);
             }
-            settings_changed = true;
+            MarkSettingsChanged();
         }
         break;
         case 4: // Nach ganz unten
@@ -192,13 +192,13 @@ void iwBuildOrder::Msg_ButtonClick(const unsigned ctrl_id)
                 list->Swap(selection + 1, selection);
                 ++selection;
             }
-            settings_changed = true;
+            MarkSettingsChanged();
         }
         break;
         case 10: // Standardwerte
         {
             // Baureihenfolge vom Spieler kopieren
-            fillBuildOrder(GAMECLIENT.default_settings.build_order);
+            fillBuildOrder(GAMECLIENT.GetDefaultSettings(gwv.GetPlayerId()).build_order);
 
             auto* list = GetCtrl<ctrlList>(0);
             list->DeleteAllItems();
@@ -210,7 +210,7 @@ void iwBuildOrder::Msg_ButtonClick(const unsigned ctrl_id)
 
             GetCtrl<ctrlImage>(5)->SetImage(LOADER.GetBuildingTex(gwv.GetPlayer().nation, pendingBuildOrder[0]));
 
-            settings_changed = true;
+            MarkSettingsChanged();
         }
         break;
     }
@@ -220,9 +220,9 @@ void iwBuildOrder::UpdateSettings()
 {
     if(GAMECLIENT.IsReplayModeOn())
     {
-        gwv.GetPlayer().FillVisualSettings(GAMECLIENT.visual_settings);
-        fillBuildOrder(GAMECLIENT.visual_settings.build_order);
-        useCustomBuildOrder = GAMECLIENT.visual_settings.useCustomBuildOrder;
+        gwv.GetPlayer().FillVisualSettings(GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()));
+        fillBuildOrder(GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).build_order);
+        useCustomBuildOrder = GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).useCustomBuildOrder;
     }
     GetCtrl<ctrlComboBox>(6)->SetSelection(useCustomBuildOrder ? 1 : 0);
     for(unsigned char i = 0; i < pendingBuildOrder.size(); ++i)

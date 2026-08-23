@@ -13,6 +13,7 @@
 #include <array>
 #include <vector>
 
+class FocusPath;
 class glArchivItem_Bitmap;
 struct MouseCoords;
 struct PersistentWindowSettings;
@@ -55,6 +56,7 @@ public:
     IngameWindow(unsigned id, const DrawPoint& pos, const Extent& size, std::string title,
                  glArchivItem_Bitmap* background, bool modal = false,
                  CloseBehavior closeBehavior = CloseBehavior::Regular, Window* parent = nullptr);
+    ~IngameWindow() override;
 
     /// Set background image
     void SetBackground(glArchivItem_Bitmap* background) { this->background = background; }
@@ -99,11 +101,44 @@ public:
 
     GUI_ID GetGUIID() const { return static_cast<GUI_ID>(Window::GetID()); }
 
+    /// Nummer der ANSICHT, der dieses Fenster gehoert, oder SHARED_WINDOW_OWNER
+    /// (WindowManager.h) fuer Fenster, die dem Bildschirm gehoeren.
+    ///
+    /// Die Fensterkennung ist ab jetzt das PAAR (GUI_ID, Besitzer). GetGUIID() behaelt seine
+    /// bisherige Bedeutung "Art des Fensters" - Settings, iwHelp und die bestehenden Tests
+    /// lesen sie unveraendert. Der Besitzer wird beim KONSTRUIEREN gestempelt, aus der offenen
+    /// Eingabeklammer (WindowManager::ScopedWindowOwner); deshalb steht er schon fest, bevor
+    /// ToggleWindow/ReplaceWindow nach einem Vorgaenger suchen.
+    unsigned GetOwner() const { return ownerIdx_; }
+    /// Nur fuer die wenigen Stellen, an denen der Besitzer NICHT aus der Klammer stammt.
+    void SetOwner(unsigned ownerIdx) { ownerIdx_ = ownerIdx; }
+
     bool Msg_LeftDown(const MouseCoords&) override;
     bool Msg_LeftUp(const MouseCoords&) override;
     bool Msg_MiddleDown(const MouseCoords&) override;
     bool Msg_MiddleUp(const MouseCoords&) override;
     bool Msg_MouseMove(const MouseCoords&) override;
+
+    /// Fokusrahmen, die dieses Fenster ueber seine Controls zeichnen soll.
+    ///
+    /// Ein Rahmen gehoert dem SPIELER (PlayerView::GetFocus()), nicht dem Fenster - deshalb ist
+    /// es eine LISTE und kein einzelner Platz: solange die Fensterliste des WindowManagers
+    /// gemeinsam ist, koennen mehrere lokale Spieler gleichzeitig in demselben Fenster stehen.
+    /// Mit einem einzigen Platz ueberschriebe der zweite den Rahmen des ersten, und das
+    /// Abmelden des einen risse den des anderen mit weg (Befund B4).
+    /// Abgemeldet wird an derselben Stelle, an der auch PlayerView::actionwindow genullt wird
+    /// (dskGameInterface::Msg_WindowClosed).
+    /// Einzelspieler mit Maus: die Liste bleibt leer, es wird kein einziger Zeichenaufruf
+    /// zusaetzlich abgesetzt.
+    void AddFocusRing(FocusPath& focus, unsigned color);
+    void RemoveFocusRing(const FocusPath& focus);
+    /// Ist der Rahmen DIESES Fokus an diesem Fenster angemeldet?
+    bool HasFocusRing(const FocusPath& focus) const;
+    /// Wie viele lokale Spieler stehen gerade in diesem Fenster? Beobachtbar gemacht, weil an
+    /// dieser Zahl die LEBENSDAUER haengt: bleibt hier ein Eintrag stehen, waehrend der
+    /// zugehoerige FocusPath schon tot ist, greift ~IngameWindow auf freigegebenen Speicher zu.
+    unsigned GetNumFocusRings() const { return static_cast<unsigned>(focusRings_.size()); }
+    void Msg_PaintAfter() override;
 
 protected:
     void Draw_() final;
@@ -142,6 +177,8 @@ private:
     /// Get bounds of given button
     Rect GetButtonBounds(IwButton btn) const;
 
+    /// Siehe GetOwner(). Gesetzt im Konstruktor aus der offenen Eingabeklammer.
+    unsigned ownerIdx_;
     bool isModal_;
     bool closeme;
     bool isPinned_;
@@ -151,4 +188,11 @@ private:
     helpers::EnumArray<ButtonState, IwButton> buttonStates_;
     PersistentWindowSettings* windowSettings_;
     DrawPoint restorePos_;
+    struct FocusRing
+    {
+        FocusPath* focus;
+        unsigned color;
+    };
+    /// Hoechstens so viele Eintraege, wie es lokale Spieler gibt (MAX_VIEWPORTS).
+    std::vector<FocusRing> focusRings_;
 };

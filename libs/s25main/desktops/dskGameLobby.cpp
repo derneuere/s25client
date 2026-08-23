@@ -332,6 +332,31 @@ dskGameLobby::dskGameLobby(ServerType serverType, std::shared_ptr<GameLobby> gam
         }
     }
 
+    // Angeforderte zusaetzliche lokale Spieler (Splitscreen) festnageln. NACH der
+    // Standardbelegung oben, damit die Default-KI ueberschrieben wird - und auch fuer
+    // Savegames, die der Block oben ueberspringt.
+    if(!GAMECLIENT.GetAdditionalLocalPlayers().empty())
+    {
+        const std::vector<uint8_t> localPlayers = GAMECLIENT.GetAdditionalLocalPlayers();
+        std::string err;
+        if(!lobbyController)
+            err = _("Additional local players require hosting the game");
+        else
+            err = GameClient::ValidateAdditionalLocalPlayers(*gameLobby_, localPlayerId_, localPlayers,
+                                                             GAMECLIENT.IsAIBattleModeOn());
+        if(err.empty())
+            GameClient::ApplyAdditionalLocalPlayers(*lobbyController, localPlayers);
+        else
+        {
+            // Harter Abbruch statt stiller Degradierung zum Einzelspieler.
+            // ID_mbError fuehrt in Msg_MsgBoxResult zu GAMECLIENT.Stop() + GoBack().
+            LOG.write("dskGameLobby: local player setup failed: %1%\n") % err;
+            WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwMsgbox>(
+              _("Error"), _("Could not set up local players:\n") + err, this, MsgboxButton::Ok,
+              MsgboxIcon::ExclamationRed, ID_mbError));
+        }
+    }
+
     // Alle Spielercontrols erstellen
     for(unsigned i = 0; i < gameLobby_->getNumPlayers(); i++)
         UpdatePlayerRow(i);
@@ -747,7 +772,9 @@ void dskGameLobby::Msg_ButtonClick(const unsigned ctrl_id)
         break;
         case ID_btSettings: // Addons
         {
-            if(auto* wnd = WINDOWMANAGER.FindNonModalWindow(CGI_ADDONS))
+            // Lobbyfenster gehoeren keiner Ansicht - hier gibt es noch keine Partie und keine
+            // lokalen Spieler.
+            if(auto* wnd = WINDOWMANAGER.FindNonModalWindow(CGI_ADDONS, SHARED_WINDOW_OWNER))
                 wnd->Close();
             else
             {

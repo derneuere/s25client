@@ -19,6 +19,8 @@
 #include "s25util/Log.h"
 #include "s25util/strAlgos.h"
 #include <boost/filesystem.hpp>
+#include <cstdint>
+#include <vector>
 
 class SwitchOnStart : public ClientInterface
 {
@@ -51,7 +53,8 @@ std::vector<AI::Info> ParseAIOptions(const std::vector<std::string>& aiOptions)
     return aiInfos;
 }
 
-bool QuickStartGame(const boost::filesystem::path& mapOrReplayPath, const std::vector<std::string>& ais)
+bool QuickStartGame(const boost::filesystem::path& mapOrReplayPath, const std::vector<std::string>& ais,
+                    const unsigned numLocalPlayers)
 {
     if(!exists(mapOrReplayPath))
     {
@@ -67,8 +70,8 @@ bool QuickStartGame(const boost::filesystem::path& mapOrReplayPath, const std::v
     if(SETTINGS.sound.musicEnabled)
         MUSICPLAYER.Play();
 
-    // An AI-battle is a single-player game.
-    const bool isSinglePlayer = !ais.empty();
+    // An AI-battle and a splitscreen game are single-player (i.e. purely local) games.
+    const bool isSinglePlayer = !ais.empty() || numLocalPlayers > 1;
     std::vector<AI::Info> aiInfos;
     try
     {
@@ -92,6 +95,13 @@ bool QuickStartGame(const boost::filesystem::path& mapOrReplayPath, const std::v
            && GAMECLIENT.HostGame(csi, {mapOrReplayPath, MapType::OldMap})))
     {
         GAMECLIENT.SetAIBattlePlayers(std::move(aiInfos));
+        if(numLocalPlayers > 1)
+        {
+            std::vector<uint8_t> additionalLocalPlayers;
+            for(unsigned i = 1; i < numLocalPlayers; i++)
+                additionalLocalPlayers.push_back(static_cast<uint8_t>(i));
+            GAMECLIENT.SetAdditionalLocalPlayers(std::move(additionalLocalPlayers));
+        }
         WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwConnecting>(csi.type, nullptr));
         return true;
     } else

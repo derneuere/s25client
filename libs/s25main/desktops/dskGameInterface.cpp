@@ -24,6 +24,8 @@
 #include "controls/ctrlText.h"
 #include "driver/MouseCoords.h"
 #include "drivers/VideoDriverWrapper.h"
+#include "factories/GameCommandFactory.h"
+#include "helpers/containerUtils.h"
 #include "helpers/format.hpp"
 #include "helpers/strUtils.h"
 #include "helpers/toString.h"
@@ -85,6 +87,7 @@
 #include "gameData/TerrainDesc.h"
 #include "gameData/const_gui_ids.h"
 #include "liblobby/LobbyClient.h"
+#include "s25util/Log.h"
 #include <algorithm>
 #include <cstdio>
 #include <utility>
@@ -121,19 +124,59 @@ float getPreviousZoomLevel(const float currentZoom)
 }
 } // namespace
 
+std::vector<std::unique_ptr<PlayerView>> dskGameInterface::CreateViews(const unsigned mainPlayerIdx,
+                                                                      GameWorldBase& world)
+{
+    // Der Hauptspieler steht immer vorn; danach die zusaetzlich lokal gesteuerten Slots aus
+    // Phase 1 (network/LocalPlayerCommands, ueber GameClient::GetAdditionalLocalPlayers()).
+    // Im Replay und in einer Netzwerkpartie ist diese Liste leer - dort entsteht also genau eine
+    // Ansicht und alles bleibt exakt wie bisher.
+    std::vector<unsigned> playerIds{mainPlayerIdx};
+    for(const uint8_t id : GAMECLIENT.GetAdditionalLocalPlayers())
+    {
+        if(playerIds.size() >= MAX_VIEWPORTS)
+        {
+            // LETZTE Bremse, nicht die erste: geklemmt wird schon beim Auswerten von
+            // --local-players (s25client.cpp) und in GameClient::ValidateAdditionalLocalPlayers.
+            // Kaeme hier trotzdem noch etwas an, waere der Spieler lokal gesteuert, haette aber
+            // weder Ansicht noch Eingabegeraet noch KI - ein stummer Geisterslot. Frueher brach
+            // die Schleife dafuer wortlos ab.
+            LOG.write(_("Only %1% local views are supported, ignoring the additional local "
+                        "player(s) starting at slot %2%\n"))
+              % MAX_VIEWPORTS % unsigned(id);
+            break;
+        }
+        if(id < world.GetNumPlayers() && !helpers::contains(playerIds, unsigned(id)))
+            playerIds.push_back(id);
+    }
+
+    const std::vector<Viewport> viewports =
+      CalcViewports(VIDEODRIVER.GetRenderSize(), static_cast<unsigned>(playerIds.size()));
+    RTTR_Assert(viewports.size() == playerIds.size());
+
+    std::vector<std::unique_ptr<PlayerView>> result;
+    result.reserve(playerIds.size());
+    for(unsigned i = 0; i < playerIds.size(); ++i)
+        result.push_back(std::make_unique<PlayerView>(i, playerIds[i], world, viewports[i]));
+    return result;
+}
+
 dskGameInterface::dskGameInterface(std::shared_ptr<Game> game, std::shared_ptr<const NWFInfo> nwfInfo,
                                    unsigned playerIdx, bool initOGL)
     : Desktop(nullptr), game_(std::move(game)), nwfInfo_(std::move(nwfInfo)),
-      worldViewer(playerIdx, const_cast<Game&>(*game_).world_),
-      gwv(worldViewer, Position(0, 0), VIDEODRIVER.GetRenderSize()), cbb(*LOADER.GetPaletteN("pal5")),
-      actionwindow(nullptr), roadwindow(nullptr), minimap(worldViewer), isScrolling(false),
+      views_(CreateViews(playerIdx, const_cast<Game&>(*game_).world_)), worldViewer(primary().GetViewer()),
+      gwv(primary().GetView()), minimap(primary().GetMinimap()), road(primary().GetRoad()),
+      actionwindow(primary().actionwindow), roadwindow(primary().roadwindow),
+      touchDuration(primary().touchDuration), isScrolling(primary().isScrolling),
+      startScrollPt(primary().startScrollPt), cbb(*LOADER.GetPaletteN("pal5")),
       cheats_(const_cast<Game&>(*game_).world_, GAMECLIENT), cheatCommandTracker_(cheats_)
 {
-    road.mode = RoadBuildMode::Disabled;
-    road.point = MapPoint(0, 0);
-    road.start = MapPoint(0, 0);
-
     SetScale(false);
+
+    // Der WindowManager kennt nur Ansichtsnummern. Hier - und nur hier - ist bekannt, welcher
+    // Spieler hinter einer Ansicht steht; deshalb haengt die Uebersetzung an diesem Objekt und
+    // nicht am WindowManager. Abgemeldet wird im Destruktor.
+    WINDOWMANAGER.SetWindowOwnerObserver(this);
 
     const glArchivItem_Bitmap& imgButtonBar = *LOADER.GetImageN("resource", 29);
 
@@ -162,11 +205,69 @@ dskGameInterface::dskGameInterface(std::shared_ptr<Game> game, std::shared_ptr<c
     cbb.loadEdges(LOADER.GetArchive("resource"));
     cbb.buildBorder(VIDEODRIVER.GetRenderSize(), borders);
 
+    // Bis zum ersten UpdateInput haelt die Hauptansicht die Maus: ein Pad kann vor dem ersten
+    // Frame gar keinen Slot bekommen haben (PadRouter::SetNumSlots laeuft dort). Ohne diesen
+    // Startwert waere ein Mausklick, der noch vor dem ersten UpdateInput eintrifft,
+    // wirkungslos - eine Regression fuer den Einzelspieler.
+    mouseView_ = views_.front().get();
+
     InitPlayer();
+    // Die zusaetzlichen Ansichten haben keine Buttonleiste, kein Postfach und keine Fenster -
+    // sie zeigen nur die Welt ihres Spielers. Eingaberouting kommt in Phase 3.
+    for(unsigned i = 1; i < views_.size(); ++i)
+        views_[i]->MoveToOwnHQ();
+
     if(initOGL)
-        worldViewer.InitTerrainRenderer();
+    {
+        // Je Ansicht ein eigener TerrainRenderer. Bewusst nichts geteilt: der Speicher ist
+        // gemessen unkritisch (auf der groessten mitgelieferten Karte 15,7 MiB je Renderer).
+        forEachView([](PlayerView& view) { view.GetViewer().InitTerrainRenderer(); });
+    } else
+    {
+        // Ohne OpenGL bleibt die CPU-Geometrie noetig: UpdateInput rechnet ueber
+        // GameWorldView::UpdateSelection -> TerrainRenderer::ConvertCoords, und das rechnet ohne
+        // TerrainRenderer::Init mit size_ == (0,0). InitTerrainGeometry ruft genau dieses Init
+        // und nichts weiter (world/GameWorldViewer.cpp:57-60) - kein einziger GL-Aufruf.
+        forEachView([](PlayerView& view) { view.GetViewer().InitTerrainGeometry(); });
+    }
 
     VIDEODRIVER.setTargetFramerate(SETTINGS.video.framerate); // Use requested setting for ingame
+
+    // ... und zuletzt: alles wegwerfen, was vor dieser Partie am Pad passiert ist.
+    DiscardStalePadEvents();
+}
+
+void dskGameInterface::DiscardStalePadEvents()
+{
+    IVideoDriver* const driver = VIDEODRIVER.GetDriver();
+    if(!driver)
+        return;
+    // Der einzige Abnehmer von FetchPadEvents ist dieser Desktop. Im Hauptmenue, in der Lobby
+    // und im Ladebildschirm gibt es ihn noch nicht, der Treiber sammelt aber weiter. Ohne diese
+    // Stelle kaeme die gesamte Menuenavigation beim ersten UpdateInput als Flankengewitter an:
+    // wer im Menue A gedrueckt hat, setzte beim Spielstart sofort eine Flagge.
+    padEvents_.clear();
+    driver->FetchPadEvents(padEvents_);
+    for(const PadEvent& ev : padEvents_)
+    {
+        // Der GERAETEBESTAND muss ueberleben. Fuer ein schon vor dem Start gestecktes Pad ist
+        // das Connected laengst durch (der SDL2-Treiber meldet es beim Hochfahren); wuerde es
+        // hier mit weggeworfen, bliebe das Pad die ganze Partie ueber unbekannt.
+        if(ev.type == PadEvent::Type::Connected || ev.type == PadEvent::Type::Disconnected)
+            padRouter_.OnEvent(ev);
+    }
+    // Achsen und Knoepfe fallen bewusst weg: ein im Menue gehaltener Stick soll den Zeiger beim
+    // Spielstart nicht sofort wegschleudern, und ein im Menue gedrueckter Knopf ist keine
+    // Spielhandlung. Beides heilt von selbst, sobald der Spieler das Pad wirklich benutzt.
+    padEvents_.clear();
+}
+
+void dskGameInterface::LayoutViews(const Extent& renderSize)
+{
+    const std::vector<Viewport> viewports = CalcViewports(renderSize, GetNumViews());
+    RTTR_Assert(viewports.size() == views_.size());
+    for(unsigned i = 0; i < views_.size(); ++i)
+        views_[i]->SetViewport(viewports[i]);
 }
 
 void dskGameInterface::InitPlayer()
@@ -175,14 +276,51 @@ void dskGameInterface::InitPlayer()
     if(worldViewer.GetPlayer().GetHQPos().isValid())
         gwv.MoveToMapPt(worldViewer.GetPlayer().GetHQPos());
 
+    // P4: gefiltert auf JEDEN lokal dargestellten Spieler, nicht nur den Hauptspieler. Der
+    // erste Vergleich ist bewusst der alte und steht bewusst zuerst: damit ist der bisherige
+    // Fall (auch Replay und Zuschauer, wo es keine lokal gesteuerten Spieler gibt) bit-identisch
+    // erhalten und die Erweiterung rein additiv.
     evBld = worldViewer.GetWorld().GetNotifications().subscribe<BuildingNote>([this](const auto& note) {
         if(note.player == worldViewer.GetPlayerId())
+        {
             this->OnBuildingNote(note);
+            return;
+        }
+        for(const auto& view : views_)
+        {
+            if(note.player == view->GetPlayerId())
+            {
+                this->OnBuildingNote(note);
+                return;
+            }
+        }
     });
     PostBox& postBox = GetPostBox();
     postBox.ObserveNewMsg([this](const auto& msg, auto msgCt) { this->NewPostMessage(msg, msgCt); });
     postBox.ObserveDeletedMsg([this](auto msgCt) { this->PostMessageDeleted(msgCt); });
     UpdatePostIcon(postBox.GetNumMsgs(), true);
+}
+
+void dskGameInterface::OnWindowOwnerChanged(const unsigned ownerIdx)
+{
+    // Der Besitzer eines Fensters bestimmt, fuer WEN seine Knoepfe Kommandos erzeugen.
+    // SHARED_WINDOW_OWNER (kein Besitzer, also Nachrichtenbox, Chat, Systemfenster) und jede
+    // Nummer ohne Ansicht bedeuten ausdruecklich "Hauptspieler" - genau das bisherige
+    // Verhalten und damit der Einzelspielerfall.
+    if(ownerIdx < views_.size())
+        GAMECLIENT.SetWindowOwnerPlayer(static_cast<uint8_t>(views_[ownerIdx]->GetPlayerId()));
+    else
+        GAMECLIENT.SetWindowOwnerPlayer(std::nullopt);
+}
+
+GameCommandFactory& dskGameInterface::gcFactoryFor(const PlayerView& view)
+{
+    // Der Kommandopfad DIESES Spielers (network/LocalPlayerGCFactory). Gibt es ihn nicht -
+    // Replay, und dort kann ohnehin kein Kommando entstehen -, ist GAMECLIENT selbst die
+    // Fabrik, also exakt wie bisher.
+    if(GameCommandFactory* factory = GAMECLIENT.GetGCFactory(static_cast<uint8_t>(view.GetPlayerId())))
+        return *factory;
+    return GAMECLIENT;
 }
 
 PostBox& dskGameInterface::GetPostBox()
@@ -196,6 +334,19 @@ PostBox& dskGameInterface::GetPostBox()
 
 dskGameInterface::~dskGameInterface()
 {
+    // Nur den EIGENEN Eintrag entfernen: legt ein Nachfolger sich schon angemeldet, darf der
+    // sterbende Vorgaenger ihn nicht wieder abraeumen.
+    if(WINDOWMANAGER.GetWindowOwnerObserver() == this)
+        WINDOWMANAGER.SetWindowOwnerObserver(nullptr);
+    // Ein offener handelnder Spieler wuerde sonst ueber das Ende dieser Partie hinaus stehen
+    // bleiben.
+    GAMECLIENT.SetWindowOwnerPlayer(std::nullopt);
+    // LEBENSDAUER: die Fokusrahmen zeigen VOM Fenster AUF den FocusPath dieser Ansicht
+    // (IngameWindow::focusRings_). Die Ansichten sterben gleich mit diesem Objekt, die Fenster
+    // gehoeren aber dem WindowManager und leben weiter - bis zum naechsten Desktopwechsel.
+    // ~IngameWindow dereferenziert dort jeden noch angemeldeten Rahmen als Backstop und griffe
+    // dann auf freigegebenen Speicher zu. Also hier abmelden, solange beide Seiten noch da sind.
+    forEachView([this](PlayerView& view) { ReleaseFocus(view); });
     for(auto& border : borders)
         deletePtr(border);
     GAMECLIENT.RemoveInterface(this);
@@ -233,7 +384,10 @@ void dskGameInterface::SetActive(bool activate)
 void dskGameInterface::StopScrolling()
 {
     isScrolling = false;
-    WINDOWMANAGER.SetCursor(road.mode == RoadBuildMode::Disabled ? Cursor::Hand : Cursor::Remove);
+    // Der Zug ist vorbei - die Ansicht, die er verschoben hat, gehoert ihm nicht mehr.
+    scrollView_ = nullptr;
+    // Dieselbe Entscheidung wie ueberall sonst, an genau einer Stelle formuliert.
+    UpdateRoadCursor(primary());
 }
 
 void dskGameInterface::StartScrolling(const Position& mousePos)
@@ -251,50 +405,58 @@ void dskGameInterface::ToggleFoW()
 void dskGameInterface::DisableFoW(const bool hideFOW)
 {
     GAMECLIENT.SetReplayFOW(hideFOW);
-    // Notify viewer and minimap to recalculate the visibility
-    worldViewer.RecalcAllColors();
-    minimap.UpdateAll();
+    // Notify viewer and minimap to recalculate the visibility - fuer JEDE Ansicht, jede hat
+    // ihren eigenen Fog of War.
+    forEachView([](PlayerView& view) { view.RecalcAllColors(); });
 }
 
 void dskGameInterface::ShowPersistentWindowsAfterSwitch()
 {
+    // Wiederhergestellt wird nur fuer die HAUPTansicht. SETTINGS.windows.persistentSettings ist
+    // allein nach GUI_ID geschluesselt (Settings.cpp) - es gibt also genau EINEN gemerkten Satz
+    // "welche Fenster waren offen". Ihn auf alle Ansichten anzuwenden hiesse, jedem Spieler die
+    // Fenster des Hauptspielers aufzudraengen und sie beim Schliessen durcheinander
+    // zurueckzuschreiben. Getrennte Erinnerung je Ansicht ist ein eigener Schritt; bis dahin ist
+    // "nur Ansicht 0" die ehrliche Form.
+    PlayerView& view = primary();
+    const ViewScope ownerScope(view.GetIndex());
     auto& windows = SETTINGS.windows.persistentSettings;
 
     if(windows[CGI_CHAT].isOpen)
         WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwChat>(this));
     if(windows[CGI_POSTOFFICE].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwPostWindow>(gwv, GetPostBox()));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwPostWindow>(view.GetView(), GetPostBox()));
     if(windows[CGI_DISTRIBUTION].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwDistribution>(gwv.GetViewer(), GAMECLIENT));
-    if(windows[CGI_BUILDORDER].isOpen && gwv.GetWorld().GetGGS().isEnabled(AddonId::CUSTOM_BUILD_SEQUENCE))
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwBuildOrder>(gwv.GetViewer()));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwDistribution>(view.GetViewer(), gcFactoryFor(view)));
+    if(windows[CGI_BUILDORDER].isOpen && view.GetViewer().GetWorld().GetGGS().isEnabled(AddonId::CUSTOM_BUILD_SEQUENCE))
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwBuildOrder>(view.GetViewer()));
     if(windows[CGI_TRANSPORT].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwTransport>(gwv.GetViewer(), GAMECLIENT));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwTransport>(view.GetViewer(), gcFactoryFor(view)));
     if(windows[CGI_MILITARY].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwMilitary>(gwv.GetViewer(), GAMECLIENT));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwMilitary>(view.GetViewer(), gcFactoryFor(view)));
     if(windows[CGI_TOOLS].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwTools>(gwv.GetViewer(), GAMECLIENT));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwTools>(view.GetViewer(), gcFactoryFor(view)));
     if(windows[CGI_INVENTORY].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwInventory>(gwv.GetViewer().GetPlayer()));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwInventory>(view.GetViewer().GetPlayer()));
     if(windows[CGI_MINIMAP].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwMinimap>(minimap, gwv));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwMinimap>(view.GetMinimap(), view.GetView()));
     if(windows[CGI_BUILDINGS].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwBuildings>(gwv, GAMECLIENT));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwBuildings>(view.GetView(), gcFactoryFor(view)));
     if(windows[CGI_BUILDINGSPRODUCTIVITY].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwBuildingProductivities>(gwv.GetViewer().GetPlayer()));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwBuildingProductivities>(view.GetViewer().GetPlayer()));
     if(windows[CGI_MUSICPLAYER].isOpen)
         WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwMusicPlayer>());
     if(windows[CGI_STATISTICS].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwStatistics>(gwv.GetViewer()));
-    if(windows[CGI_ECONOMICPROGRESS].isOpen && gwv.GetWorld().getEconHandler())
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwEconomicProgress>(gwv.GetViewer()));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwStatistics>(view.GetViewer()));
+    if(windows[CGI_ECONOMICPROGRESS].isOpen && view.GetViewer().GetWorld().getEconHandler())
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwEconomicProgress>(view.GetViewer()));
     if(windows[CGI_DIPLOMACY].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwDiplomacy>(gwv.GetViewer(), GAMECLIENT));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwDiplomacy>(view.GetViewer(), gcFactoryFor(view)));
     if(windows[CGI_SHIP].isOpen)
         WINDOWMANAGER.ShowAfterSwitch(
-          std::make_unique<iwShip>(gwv, GAMECLIENT, gwv.GetViewer().GetPlayer().GetShipByID(0)));
+          std::make_unique<iwShip>(view.GetView(), gcFactoryFor(view), view.GetViewer().GetPlayer().GetShipByID(0)));
     if(windows[CGI_MERCHANDISE_STATISTICS].isOpen)
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwMerchandiseStatistics>(gwv.GetViewer().GetPlayer()));
+        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwMerchandiseStatistics>(view.GetViewer().GetPlayer()));
 }
 
 void dskGameInterface::Resize(const Extent& newSize)
@@ -332,21 +494,35 @@ void dskGameInterface::Resize(const Extent& newSize)
     auto* text = GetCtrl<ctrlText>(ID_txtNumMsg);
     text->SetPos(barPos);
 
-    gwv.Resize(newSize);
+    // Einziger Ort, an dem das Viewport-Layout neu berechnet wird. Er deckt auch eine geaenderte
+    // GuiScale ab: VideoDriver::setGuiScalePercent ruft direkt WindowResized
+    // (libs/driver/src/VideoDriver.cpp:110-112) -> WindowManager::WindowResized ->
+    // Desktop::Msg_ScreenResize -> Resize. Bei genau einer Ansicht liefert CalcViewports exakt
+    // Position(0,0) + newSize, das ist bit-identisch zum frueheren gwv.Resize(newSize).
+    LayoutViews(newSize);
 }
 
 void dskGameInterface::Msg_ButtonClick(const unsigned ctrl_id)
 {
+    // Es gibt genau EINE Knopfleiste, ueber die volle Bildschirmbreite. Sie gehoert deshalb der
+    // Hauptansicht - ausdruecklich und nicht aus Versehen. Eine Leiste je Ansicht ist ein
+    // eigener Schritt; bis dahin waere jede andere Wahl geraten.
+    PlayerView& view = primary();
+    const ViewScope ownerScope(view.GetIndex());
     switch(ctrl_id)
     {
-        case ID_btMap: WINDOWMANAGER.ToggleWindow(std::make_unique<iwMinimap>(minimap, gwv)); break;
-        case ID_btOptions: WINDOWMANAGER.ToggleWindow(std::make_unique<iwMainMenu>(gwv, GAMECLIENT)); break;
+        case ID_btMap:
+            WINDOWMANAGER.ToggleWindow(std::make_unique<iwMinimap>(view.GetMinimap(), view.GetView()));
+            break;
+        case ID_btOptions:
+            WINDOWMANAGER.ToggleWindow(std::make_unique<iwMainMenu>(view.GetView(), gcFactoryFor(view)));
+            break;
         case ID_btConstructionAid:
             if(WINDOWMANAGER.IsDesktopActive())
-                gwv.ToggleShowBQ();
+                view.GetView().ToggleShowBQ();
             break;
         case ID_btPost:
-            WINDOWMANAGER.ToggleWindow(std::make_unique<iwPostWindow>(gwv, GetPostBox()));
+            WINDOWMANAGER.ToggleWindow(std::make_unique<iwPostWindow>(view.GetView(), GetPostBox()));
             UpdatePostIcon(GetPostBox().GetNumMsgs(), false);
             break;
     }
@@ -489,66 +665,193 @@ void dskGameInterface::Msg_PaintAfter()
     }
 }
 
+bool dskGameInterface::OpenObjectWindow(PlayerView& view, const MapPoint cSel)
+{
+    // Der Kern von ContextClick, herausgezogen und auf EINE Ansicht bezogen: alles hier liest
+    // den Viewer DIESER Ansicht, oeffnet mit IHRER GameWorldView und IHRER Kommandofabrik und
+    // sucht Vorgaenger unter IHRER Besitznummer. Damit ist der Mauspfad des Hauptspielers
+    // unveraendert (er ruft mit primary() herein) und der Padpfad braucht keine zweite,
+    // parallel zu pflegende Fassung derselben Entscheidung.
+    //
+    // Die Besitzklammer wird hier NICHT gesetzt - beide Aufrufer haben sie bereits offen
+    // (ContextClick und OnPadButton). Zwei Klammern uebereinander waeren wirkungsgleich, aber
+    // sie verschleierten, wo der Besitzer wirklich herkommt.
+    GameWorldViewer& viewer = view.GetViewer();
+    const unsigned wndId = CGI_BUILDING + MapBase::CreateGUIID(cSel);
+
+    // Vielleicht steht hier auch ein Schiff?
+    if(const noShip* ship = viewer.GetShip(cSel))
+    {
+        WINDOWMANAGER.Show(std::make_unique<iwShip>(view.GetView(), gcFactoryFor(view), ship));
+        return true;
+    }
+
+    // Evtl ists nen Haus? (unser Haus)
+    const noBase& selObj = *viewer.GetWorld().GetNO(cSel);
+    if(selObj.GetType() == NodalObjectType::Building && viewer.IsOwner(cSel))
+    {
+        if(auto* wnd = WINDOWMANAGER.FindNonModalWindow(wndId, view.GetIndex()))
+        {
+            WINDOWMANAGER.SetActiveWindow(*wnd);
+            return true;
+        }
+        BuildingType bt = static_cast<const noBuilding&>(selObj).GetBuildingType();
+        // HQ
+        if(bt == BuildingType::Headquarters)
+            WINDOWMANAGER.Show(std::make_unique<iwHQ>(view.GetView(), gcFactoryFor(view),
+                                                      viewer.GetWorldNonConst().GetSpecObj<nobHQ>(cSel)));
+        // Lagerhäuser
+        else if(bt == BuildingType::Storehouse)
+            WINDOWMANAGER.Show(std::make_unique<iwBaseWarehouse>(
+              view.GetView(), gcFactoryFor(view), viewer.GetWorldNonConst().GetSpecObj<nobStorehouse>(cSel)));
+        // Hafengebäude
+        else if(bt == BuildingType::HarborBuilding)
+            WINDOWMANAGER.Show(std::make_unique<iwHarborBuilding>(
+              view.GetView(), gcFactoryFor(view), viewer.GetWorldNonConst().GetSpecObj<nobHarborBuilding>(cSel)));
+        // Militärgebäude
+        else if(BuildingProperties::IsMilitary(bt))
+            WINDOWMANAGER.Show(std::make_unique<iwMilitaryBuilding>(
+              view.GetView(), gcFactoryFor(view), viewer.GetWorldNonConst().GetSpecObj<nobMilitary>(cSel)));
+        else if(bt == BuildingType::Temple)
+            WINDOWMANAGER.Show(std::make_unique<iwTempleBuilding>(
+              view.GetView(), gcFactoryFor(view), viewer.GetWorldNonConst().GetSpecObj<nobTemple>(cSel)));
+        else
+            WINDOWMANAGER.Show(std::make_unique<iwBuilding>(view.GetView(), gcFactoryFor(view),
+                                                            viewer.GetWorldNonConst().GetSpecObj<nobUsual>(cSel)));
+        return true;
+    }
+    // oder vielleicht eine Baustelle?
+    if(selObj.GetType() == NodalObjectType::Buildingsite && viewer.IsOwner(cSel))
+    {
+        if(!WINDOWMANAGER.FindNonModalWindow(wndId, view.GetIndex()))
+            WINDOWMANAGER.Show(std::make_unique<iwBuildingSite>(
+              view.GetView(), viewer.GetWorld().GetSpecObj<noBuildingSite>(cSel)));
+        return true;
+    }
+    return false;
+}
+
+bool dskGameInterface::PadOpenWindow(PlayerView& view)
+{
+    // Der A-Knopf. Die Besitzklammer ist hier bereits offen (OnPadButton) - das entstehende
+    // Fenster gehoert damit DIESEM Sitzplatz, arbeitet mit SEINEM Viewer und liegt in SEINEM
+    // Viewport.
+    const MapPoint pt = view.GetView().GetSelectedPt();
+    if(!pt.isValid())
+        return false;
+    return OpenObjectWindow(view, pt);
+}
+
 bool dskGameInterface::ContextClick(const MouseCoords& mc)
 {
+    // BEFUND 2: der Klick gehoert der Ansicht, die den MAUSZEIGER haelt - nicht mehr
+    // unbedingt der Hauptansicht.
+    //
+    // Frueher stand hier primary(), und der ganze Pfad las danach gwv (= primary().GetView()).
+    // UpdateInput gibt einer Ansicht mit zugeordnetem Pad aber IMMER den Padzeiger; hatte der
+    // Hauptspieler ein Pad in der Hand, zeigte gwv.GetSelectedPt() auf den PADpunkt, und der
+    // Mausklick wirkte dort. Solange davon nur ein Fenster aufging, war das laestig; mit dem
+    // Strassenbau am Pad legte der Klick ein Wegstueck und der naechste schrieb die Strasse
+    // ueber CommitRoad fest - ein echtes GameCommand auf einen Punkt, den niemand angeklickt
+    // hatte. Die alte Begruendung ("ein bloss angestecktes Pad aendert am Mauspfad nichts")
+    // deckte genau diesen Fall nicht ab: sie sprach vom ANGESTECKTEN Pad, der Fehler entsteht
+    // beim BENUTZTEN.
+    //
+    // Warum GetMouseView() und nicht "letztes benutztes Geraet gewinnt" - siehe die
+    // Begruendung an GetMouseView() im Kopf.
+    PlayerView* const clicked = GetMouseView();
+    if(!clicked)
+        return false; // alle Ansichten haben ein Pad: es gibt keinen Mauspunkt auf der Karte
+    PlayerView& view = *clicked;
+    // Der Besitzer eines hier geoeffneten Fensters ist der Spieler, aus dessen Sicht der Punkt
+    // ausgewaehlt wurde - und das ist jetzt zwingend derselbe, dessen Zeiger die Maus ist.
+    const ViewScope ownerScope(view.GetIndex());
+    GameWorldView& clickedView = view.GetView();
+    // Ohne gueltigen selektierten Punkt gibt es nichts anzuklicken; unten wuerde
+    // GetNO(selPt)/GetNode(selPt) sonst ausserhalb der Karte zugreifen.
+    if(!clickedView.GetSelectedPt().isValid())
+        return false;
+
     // Handle road building mode if active
-    if(road.mode != RoadBuildMode::Disabled)
+    //
+    // Ab hier durchgehend `view` statt der Uebergangsreferenzen road/worldViewer. Wertgleich zu
+    // vorher, weil `view` hier primary() IST (siehe oben) - aber jetzt steht es da, statt aus
+    // einer Uebergangsreferenz zu folgen. Der Strassenbau haengt damit an keiner Stelle mehr
+    // still an der Hauptansicht; wo er es bewusst tut, steht primary() ausgeschrieben.
+    RoadBuildState& rb = view.GetRoad();
+    GameWorldViewer& viewer = view.GetViewer();
+    if(rb.mode != RoadBuildMode::Disabled)
     {
         // in "richtige" Map-Koordinaten Konvertieren, den aktuellen selektierten Punkt
-        const MapPoint selPt = gwv.GetSelectedPt();
+        const MapPoint selPt = clickedView.GetSelectedPt();
 
-        if(selPt == road.point)
+        if(selPt == rb.point)
         {
             // Selektierter Punkt ist der gleiche wie der Straßenpunkt --> Fenster mit Wegbau abbrechen
-            ShowRoadWindow(mc.pos);
+            ShowRoadWindow(view, mc.pos);
         } else
         {
             // altes Roadwindow schließen
-            WINDOWMANAGER.Close((unsigned)CGI_ROADWINDOW);
+            WINDOWMANAGER.Close((unsigned)CGI_ROADWINDOW, view.GetIndex());
+
+            // BEFUND 4: AtLengthLimit fuehrt in ALLEN drei Zweigen darunter zu genau gar
+            // nichts - kein Fenster, kein Kommando, kein Mauswarp. Das ist woertlich das
+            // Verhalten von vor dem Umbau: BuildRoadPart meldete am Wasserweg-Anschlag Erfolg
+            // und setzte cSel auf das unveraenderte Wegende, worauf jeder dieser Zweige
+            // durchfiel. Nur wird es jetzt ausgesprochen statt aus zwei Zufaellen zu folgen.
+            //
+            // Warum nicht das Fenster? Weil der Anschlag KEIN Fehlgriff des Spielers ist,
+            // sondern eine Regel, die schon in der Vorschau sichtbar ist
+            // (GameWorldView::DrawGUI faerbt die Strecke ab maxWaterWayLen um). Ein Fenster,
+            // das dafuer aufgeht UND dem Spieler den Mauszeiger auf seinen Vorgabeknopf zieht
+            // (iwRoadWindow-Konstruktor: VIDEODRIVER.SetMousePos), waere fuer eine blosse
+            // Weigerung eine unverhaeltnismaessig grosse Stoerung - und ein Bruch der harten
+            // Randbedingung "der Mausspieler baut exakt wie vorher".
 
             // Ist das ein gültiger neuer Wegpunkt?
-            if(worldViewer.IsRoadAvailable(road.mode == RoadBuildMode::Boat, selPt)
-               && worldViewer.IsPlayerTerritory(selPt))
+            if(viewer.IsRoadAvailable(rb.mode == RoadBuildMode::Boat, selPt) && viewer.IsPlayerTerritory(selPt))
             {
                 MapPoint targetPt = selPt;
-                if(!BuildRoadPart(targetPt))
-                    ShowRoadWindow(mc.pos);
-            } else if(worldViewer.GetBQ(selPt) != BuildingQuality::Nothing)
+                if(BuildRoadPart(view, targetPt) == RoadPartResult::Rejected)
+                    ShowRoadWindow(view, mc.pos);
+            } else if(viewer.GetBQ(selPt) != BuildingQuality::Nothing)
             {
                 // Wurde bereits auf das gebaute Stück geklickt?
-                unsigned idOnRoad = GetIdInCurBuildRoad(selPt);
+                unsigned idOnRoad = GetIdInCurBuildRoad(view, selPt);
                 if(idOnRoad)
-                    DemolishRoad(idOnRoad);
+                    DemolishRoad(view, idOnRoad);
                 else
                 {
                     MapPoint targetPt = selPt;
-                    if(BuildRoadPart(targetPt))
+                    const RoadPartResult res = BuildRoadPart(view, targetPt);
+                    if(res == RoadPartResult::Built)
                     {
                         // Ist der Zielpunkt der gleiche geblieben?
                         if(selPt == targetPt)
-                            GI_BuildRoad();
-                    } else if(selPt == targetPt)
-                        ShowRoadWindow(mc.pos);
+                            CommitRoad(view);
+                    } else if(res == RoadPartResult::Rejected && selPt == targetPt)
+                        ShowRoadWindow(view, mc.pos);
                 }
             }
             // Wurde auf eine Flagge geklickt und ist diese Flagge nicht der Weganfangspunkt?
-            else if(worldViewer.GetWorld().GetNO(selPt)->GetType() == NodalObjectType::Flag && selPt != road.start)
+            else if(viewer.GetWorld().GetNO(selPt)->GetType() == NodalObjectType::Flag && selPt != rb.start)
             {
                 MapPoint targetPt = selPt;
-                if(BuildRoadPart(targetPt))
+                const RoadPartResult res = BuildRoadPart(view, targetPt);
+                if(res == RoadPartResult::Built)
                 {
                     if(selPt == targetPt)
-                        GI_BuildRoad();
-                } else if(selPt == targetPt)
-                    ShowRoadWindow(mc.pos);
+                        CommitRoad(view);
+                } else if(res == RoadPartResult::Rejected && selPt == targetPt)
+                    ShowRoadWindow(view, mc.pos);
             } else
             {
-                unsigned tbr = GetIdInCurBuildRoad(selPt);
+                unsigned tbr = GetIdInCurBuildRoad(view, selPt);
                 // Wurde bereits auf das gebaute Stück geklickt?
                 if(tbr)
-                    DemolishRoad(tbr);
+                    DemolishRoad(view, tbr);
                 else
-                    ShowRoadWindow(mc.pos);
+                    ShowRoadWindow(view, mc.pos);
             }
         }
     } else // Not in road building mode
@@ -557,63 +860,20 @@ bool dskGameInterface::ContextClick(const MouseCoords& mc)
 
         iwAction::Tabs action_tabs;
 
-        const MapPoint cSel = gwv.GetSelectedPt();
+        const MapPoint cSel = clickedView.GetSelectedPt();
 
-        // Vielleicht steht hier auch ein Schiff?
-        if(const noShip* ship = worldViewer.GetShip(cSel))
-        {
-            WINDOWMANAGER.Show(std::make_unique<iwShip>(gwv, GAMECLIENT, ship));
+        // Das Fenster des Objekts auf diesem Knoten - dieselbe Entscheidung, die auch der
+        // Padspieler bekommt (OpenObjectWindow). Entsteht dabei nichts, gibt es hier ein
+        // Aktionsfenster.
+        if(OpenObjectWindow(view, cSel))
             return true;
-        }
 
-        // Evtl ists nen Haus? (unser Haus)
-        const noBase& selObj = *worldViewer.GetWorld().GetNO(cSel);
-        if(selObj.GetType() == NodalObjectType::Building && worldViewer.IsOwner(cSel))
-        {
-            if(auto* wnd = WINDOWMANAGER.FindNonModalWindow(CGI_BUILDING + MapBase::CreateGUIID(cSel)))
-            {
-                WINDOWMANAGER.SetActiveWindow(*wnd);
-                return true;
-            }
-            BuildingType bt = static_cast<const noBuilding&>(selObj).GetBuildingType();
-            // HQ
-            if(bt == BuildingType::Headquarters)
-                WINDOWMANAGER.Show(
-                  std::make_unique<iwHQ>(gwv, GAMECLIENT, worldViewer.GetWorldNonConst().GetSpecObj<nobHQ>(cSel)));
-            // Lagerhäuser
-            else if(bt == BuildingType::Storehouse)
-                WINDOWMANAGER.Show(std::make_unique<iwBaseWarehouse>(
-                  gwv, GAMECLIENT, worldViewer.GetWorldNonConst().GetSpecObj<nobStorehouse>(cSel)));
-            // Hafengebäude
-            else if(bt == BuildingType::HarborBuilding)
-                WINDOWMANAGER.Show(std::make_unique<iwHarborBuilding>(
-                  gwv, GAMECLIENT, worldViewer.GetWorldNonConst().GetSpecObj<nobHarborBuilding>(cSel)));
-            // Militärgebäude
-            else if(BuildingProperties::IsMilitary(bt))
-                WINDOWMANAGER.Show(std::make_unique<iwMilitaryBuilding>(
-                  gwv, GAMECLIENT, worldViewer.GetWorldNonConst().GetSpecObj<nobMilitary>(cSel)));
-            else if(bt == BuildingType::Temple)
-                WINDOWMANAGER.Show(std::make_unique<iwTempleBuilding>(
-                  gwv, GAMECLIENT, worldViewer.GetWorldNonConst().GetSpecObj<nobTemple>(cSel)));
-            else
-                WINDOWMANAGER.Show(std::make_unique<iwBuilding>(
-                  gwv, GAMECLIENT, worldViewer.GetWorldNonConst().GetSpecObj<nobUsual>(cSel)));
-            return true;
-        }
-        // oder vielleicht eine Baustelle?
-        else if(selObj.GetType() == NodalObjectType::Buildingsite && worldViewer.IsOwner(cSel))
-        {
-            if(!WINDOWMANAGER.FindNonModalWindow(CGI_BUILDING + MapBase::CreateGUIID(cSel)))
-                WINDOWMANAGER.Show(
-                  std::make_unique<iwBuildingSite>(gwv, worldViewer.GetWorld().GetSpecObj<noBuildingSite>(cSel)));
-            return true;
-        }
-
+        const noBase& selObj = *viewer.GetWorld().GetNO(cSel);
         action_tabs.watch = true;
         // Unser Land
-        if(worldViewer.IsOwner(cSel))
+        if(viewer.IsOwner(cSel))
         {
-            const BuildingQuality bq = worldViewer.GetBQ(cSel);
+            const BuildingQuality bq = viewer.GetBQ(cSel);
             // Kann hier was gebaut werden?
             if(bq >= BuildingQuality::Mine)
             {
@@ -630,13 +890,13 @@ bool dskGameInterface::ContextClick(const MouseCoords& mc)
                     default: break;
                 }
 
-                if(!worldViewer.GetWorld().IsFlagAround(cSel))
+                if(!viewer.GetWorld().IsFlagAround(cSel))
                     action_tabs.setflag = true;
 
                 // Prüfen, ob sich Militärgebäude in der Nähe befinden, wenn nein, können auch eigene
                 // Militärgebäude gebaut werden
                 enable_military_buildings =
-                  !worldViewer.GetWorld().IsMilitaryBuildingNearNode(cSel, worldViewer.GetPlayerId());
+                  !viewer.GetWorld().IsMilitaryBuildingNearNode(cSel, viewer.GetPlayerId());
             } else if(bq == BuildingQuality::Flag)
                 action_tabs.setflag = true;
             else if(selObj.GetType() == NodalObjectType::Flag)
@@ -647,7 +907,7 @@ bool dskGameInterface::ContextClick(const MouseCoords& mc)
                 // Check if there are roads
                 for(const Direction dir : helpers::EnumRange<Direction>{})
                 {
-                    const PointRoad curRoad = worldViewer.GetVisiblePointRoad(cSel, dir);
+                    const PointRoad curRoad = viewer.GetVisiblePointRoad(cSel, dir);
                     if(curRoad != PointRoad::None)
                     {
                         action_tabs.cutroad = true;
@@ -657,21 +917,21 @@ bool dskGameInterface::ContextClick(const MouseCoords& mc)
             }
         }
         // evtl ists ein feindliches Militärgebäude, welches NICHT im Nebel liegt?
-        else if(worldViewer.GetVisibility(cSel) == Visibility::Visible)
+        else if(viewer.GetVisibility(cSel) == Visibility::Visible)
         {
             if(selObj.GetType() == NodalObjectType::Building)
             {
-                const auto* building = worldViewer.GetWorld().GetSpecObj<noBuilding>(cSel); //-V807
+                const auto* building = viewer.GetWorld().GetSpecObj<noBuilding>(cSel); //-V807
                 BuildingType bt = building->GetBuildingType();
 
                 // Only if trade is enabled
-                if(worldViewer.GetWorld().GetGGS().isEnabled(AddonId::TRADE))
+                if(viewer.GetWorld().GetGGS().isEnabled(AddonId::TRADE))
                 {
                     // Allied warehouse? -> Show trade window
-                    if(BuildingProperties::IsWareHouse(bt) && worldViewer.GetPlayer().IsAlly(building->GetPlayer()))
+                    if(BuildingProperties::IsWareHouse(bt) && viewer.GetPlayer().IsAlly(building->GetPlayer()))
                     {
                         WINDOWMANAGER.Show(std::make_unique<iwTrade>(*static_cast<const nobBaseWarehouse*>(building),
-                                                                     worldViewer, GAMECLIENT));
+                                                                     viewer, GAMECLIENT));
                         return true;
                     }
                 }
@@ -687,17 +947,17 @@ bool dskGameInterface::ContextClick(const MouseCoords& mc)
                 else if(bt == BuildingType::Headquarters || bt == BuildingType::HarborBuilding)
                     action_tabs.attack = true;
                 action_tabs.sea_attack =
-                  action_tabs.attack && worldViewer.GetWorld().GetGGS().isEnabled(AddonId::SEA_ATTACK);
+                  action_tabs.attack && viewer.GetWorld().GetGGS().isEnabled(AddonId::SEA_ATTACK);
             }
         }
 
         // Bisheriges Actionfenster schließen, falls es eins gab
         // aktuelle Mausposition merken, da diese durch das Schließen verändert werden kann
-        if(actionwindow)
-            actionwindow->Close();
+        if(view.actionwindow)
+            view.actionwindow->Close();
         VIDEODRIVER.SetMousePos(mc.pos);
 
-        ShowActionWindow(action_tabs, cSel, mc.pos, enable_military_buildings);
+        ShowActionWindow(view, action_tabs, cSel, mc.pos, enable_military_buildings);
     }
 
     return true;
@@ -758,10 +1018,21 @@ bool dskGameInterface::Msg_MouseMove(const MouseCoords& mc)
             return false;
     }
 
+    // BEFUND 2: verschoben wird die Karte DER ANSICHT, in der der Zug angefangen hat - nicht
+    // mehr die von primary(). Frueher stand hier gwv: stand die Maus ueber Ansicht 1 und der
+    // Spieler zog, wanderte die Karte von Ansicht 0.
+    //
+    // Nicht ViewUnderMouse(mc.pos): siehe die Begruendung an scrollView_. Der Zug gehoert der
+    // Startansicht, und im Modus ScrollOpposite/-Same wird der Zeiger gleich unten ohnehin auf
+    // den Startpunkt zurueckgesetzt.
+    if(!scrollView_)
+        return true; // Zug ohne Empfaenger - Msg_RightDown hat keine Ansicht gefunden
+    GameWorldView& scrolled = scrollView_->GetView();
+
     if(SETTINGS.interface.mapScrollMode == MapScrollMode::GrabAndDrag)
     {
-        const Position mapPos = gwv.ViewPosToMap(mc.pos);
-        gwv.MoveBy(-(mapPos - startScrollPt));
+        const Position mapPos = scrolled.ViewPosToMap(mc.pos);
+        scrolled.MoveBy(-(mapPos - startScrollPt));
         startScrollPt = mapPos;
     } else
     {
@@ -770,7 +1041,7 @@ bool dskGameInterface::Msg_MouseMove(const MouseCoords& mc)
         if(SETTINGS.interface.mapScrollMode == MapScrollMode::ScrollSame)
             acceleration = -acceleration;
 
-        gwv.MoveBy((mc.pos - startScrollPt) * acceleration);
+        scrolled.MoveBy((mc.pos - startScrollPt) * acceleration);
         VIDEODRIVER.SetMousePos(startScrollPt);
 
         if(!SETTINGS.global.smartCursor)
@@ -782,8 +1053,20 @@ bool dskGameInterface::Msg_MouseMove(const MouseCoords& mc)
 
 bool dskGameInterface::Msg_RightDown(const MouseCoords& mc)
 {
+    // BEFUND 2: der Zug faengt in der Ansicht an, ueber der die Maus steht.
+    //
+    // Hier - und nur hier - wird entschieden, wem der Zug gehoert; Msg_MouseMove liest die
+    // Entscheidung danach nur noch (scrollView_).
+    //
+    // CameraViewUnderMouse aus demselben Grund wie beim Rad: der Zug verschiebt nur ein Bild,
+    // er liest keinen Zeiger und waehlt keinen Knoten aus. Ein Spieler mit Pad UND Maus muss
+    // seine Karte weiter ziehen koennen.
+    PlayerView* const target = CameraViewUnderMouse(mc.pos);
+    if(!target)
+        return true;
+    scrollView_ = target;
     if(SETTINGS.interface.mapScrollMode == MapScrollMode::GrabAndDrag)
-        StartScrolling(gwv.ViewPosToMap(mc.pos));
+        StartScrolling(target->GetView().ViewPosToMap(mc.pos));
     else
         StartScrolling(mc.pos);
     return true;
@@ -798,6 +1081,10 @@ bool dskGameInterface::Msg_RightUp(const MouseCoords& /*mc*/) //-V524
 
 bool dskGameInterface::Msg_KeyDown(const KeyEvent& ke)
 {
+    // Es gibt genau EINE Tastatur. Alles, was von hier aus ein Fenster oeffnet, gehoert deshalb
+    // der Hauptansicht - ausdruecklich. Ein zusaetzlicher lokaler Spieler bedient sein Pad.
+    const ViewScope ownerScope(primary().GetIndex());
+
     cheatCommandTracker_.onKeyEvent(ke);
 
     switch(ke.kt)
@@ -917,7 +1204,7 @@ bool dskGameInterface::Msg_KeyDown(const KeyEvent& ke)
             WINDOWMANAGER.ToggleWindow(std::make_unique<iwMinimap>(minimap, gwv));
             return true;
         case 'm': // Show main menu
-            WINDOWMANAGER.ToggleWindow(std::make_unique<iwMainMenu>(gwv, GAMECLIENT));
+            WINDOWMANAGER.ToggleWindow(std::make_unique<iwMainMenu>(gwv, gcFactoryFor(primary())));
             return true;
         case 'n': // Show message window
             WINDOWMANAGER.ToggleWindow(std::make_unique<iwPostWindow>(gwv, GetPostBox()));
@@ -954,25 +1241,45 @@ bool dskGameInterface::Msg_KeyDown(const KeyEvent& ke)
     return false;
 }
 
-bool dskGameInterface::Msg_WheelUp(const MouseCoords&)
+bool dskGameInterface::Msg_WheelUp(const MouseCoords& mc)
 {
-    WheelZoom(ZOOM_WHEEL_INCREMENT);
+    WheelZoom(mc.pos, ZOOM_WHEEL_INCREMENT);
     return true;
 }
-bool dskGameInterface::Msg_WheelDown(const MouseCoords&)
+bool dskGameInterface::Msg_WheelDown(const MouseCoords& mc)
 {
-    WheelZoom(-ZOOM_WHEEL_INCREMENT);
+    WheelZoom(mc.pos, -ZOOM_WHEEL_INCREMENT);
     return true;
 }
 
-void dskGameInterface::WheelZoom(const float step)
+void dskGameInterface::WheelZoom(const Position& mousePos, const float step)
 {
-    auto targetZoomFactor = gwv.GetCurrentTargetZoomFactor() * (1 + step);
+    // BEFUND 2: gezoomt wird die Ansicht unter der Maus. Frueher stand hier gwv, also immer
+    // primary() - das Rad ueber Ansicht 1 zoomte Ansicht 0.
+    //
+    // Die Position kommt aus dem Ereignis selbst und nicht aus mouseView_: das Rad liest keinen
+    // Zustand, den UpdateInput fuer diesen Frame berechnet hat (anders als ContextClick, das
+    // GetSelectedPt() der Ansicht braucht), sondern nur die Geometrie. Die Ereignisposition ist
+    // damit die unmittelbarere und um keinen Frame verzoegerte Antwort.
+    //
+    // CameraViewUnderMouse und nicht ViewUnderMouse: das Rad liest keinen Zeiger, es darf also
+    // auch eine padgesteuerte Ansicht zoomen. Sonst verloere der einzelne Spieler mit Pad UND
+    // Maus sein Rad, sobald er das Pad anfasst. Ausfuehrlich im Kopf an CameraViewUnderMouse.
+    //
+    // Einzelspieler: es gibt genau eine Ansicht, ihr Viewport IST die Renderflaeche.
+    // CameraViewUnderMouse liefert sie ueber Regel (a), ausserhalb des Fensters ueber den
+    // Rueckfall (c) auf primary() - in beiden Faellen dieselbe Ansicht wie das fruehere gwv.
+    PlayerView* const target = CameraViewUnderMouse(mousePos);
+    if(!target)
+        return; // Luecke im Layout: die Maus zeigt sichtbar auf keine Ansicht
+    GameWorldView& zoomed = target->GetView();
+
+    auto targetZoomFactor = zoomed.GetCurrentTargetZoomFactor() * (1 + step);
     targetZoomFactor = std::clamp(targetZoomFactor, ZOOM_FACTORS.front(), ZOOM_FACTORS.back());
     if(targetZoomFactor > 1 - ZOOM_WHEEL_INCREMENT && targetZoomFactor < 1 + ZOOM_WHEEL_INCREMENT)
         targetZoomFactor = 1.f; // Snap to 100%
 
-    gwv.SetZoomFactor(targetZoomFactor);
+    zoomed.SetZoomFactor(targetZoomFactor);
 }
 
 void dskGameInterface::OnBuildingNote(const BuildingNote& note)
@@ -984,10 +1291,623 @@ void dskGameInterface::OnBuildingNote(const BuildingNote& note)
         case BuildingNote::Lost:
             // Close the related window as the building does not exist anymore
             // In "Constructed" this means the buildingsite
-            WINDOWMANAGER.Close(CGI_BUILDING + MapBase::CreateGUIID(note.pos));
+            // CloseAll und nicht Close: das Gebaeude ist fuer JEDEN weg, der es offen hat.
+            WINDOWMANAGER.CloseAll(CGI_BUILDING + MapBase::CreateGUIID(note.pos));
             break;
         default: break;
     }
+}
+
+bool dskGameInterface::IsInsideRenderArea(const Position& viewPos) const
+{
+    // Umschliessendes Rechteck aller Viewports. Es ist die Renderflaeche, solange das Layout sie
+    // vollstaendig ausfuellt - und das tut es (CalcViewports). Bewusst hier gerechnet und nicht
+    // aus VIDEODRIVER gelesen: waehrend eines Groessenwechsels sind Treibergroesse und
+    // Ansichtsgeometrie fuer einen Moment verschieden, und massgeblich ist die Flaeche, auf der
+    // wirklich Ansichten liegen.
+    if(views_.empty())
+        return false;
+    Position topLeft = views_.front()->GetView().GetPos();
+    Position bottomRight = topLeft + Position(views_.front()->GetView().GetSize());
+    for(const auto& view : views_)
+    {
+        const Position pos = view->GetView().GetPos();
+        const Position end = pos + Position(view->GetView().GetSize());
+        topLeft = elMin(topLeft, pos);
+        bottomRight = elMax(bottomRight, end);
+    }
+    return viewPos.x >= topLeft.x && viewPos.y >= topLeft.y && viewPos.x < bottomRight.x
+           && viewPos.y < bottomRight.y;
+}
+
+PlayerView* dskGameInterface::CameraViewUnderMouse(const Position& viewPos)
+{
+    // (a) Ueber einer Ansicht: DIESE. Ohne die Padpruefung aus ViewUnderMouse - siehe die
+    //     Begruendung im Kopf.
+    for(auto& view : views_)
+    {
+        if(view->ContainsViewPos(viewPos))
+            return view.get();
+    }
+    // (b) Auf dem Bildschirm, aber auf keiner Ansicht: eine Luecke im Layout. Keine Ansicht.
+    if(IsInsideRenderArea(viewPos))
+        return nullptr;
+    // (c) Ausserhalb der Renderflaeche: die Hauptansicht - derselbe Sitzplatz, dem auch Tastatur
+    //     und Knopfleiste gehoeren.
+    return &primary();
+}
+
+PlayerView* dskGameInterface::ViewUnderMouse(const Position& viewPos)
+{
+    // (a) Ueber einer Ansicht: nur diese kommt in Frage, und nur padlos.
+    for(auto& view : views_)
+    {
+        if(view->ContainsViewPos(viewPos))
+            return view->HasPadCursor() ? nullptr : view.get();
+    }
+    // (b) Auf dem Bildschirm, aber auf keiner Ansicht: eine Luecke im Layout. Keine Ansicht.
+    if(IsInsideRenderArea(viewPos))
+        return nullptr;
+    // (c) Ausserhalb der Renderflaeche: die erste padlose Ansicht.
+    for(auto& view : views_)
+    {
+        if(!view->HasPadCursor())
+            return view.get();
+    }
+    return nullptr;
+}
+
+void dskGameInterface::UpdateInput(const unsigned elapsedMs, const Position& mousePos)
+{
+    // --- 1. Gamepads: abholen, zuordnen, Zeiger fortschreiben --------------------------------
+    // Die Zahl der Slots ist die Zahl der Ansichten. Zuerst setzen, damit ein in DIESEM Frame
+    // angestecktes Pad sofort einen Slot bekommt.
+    padRouter_.SetNumSlots(GetNumViews());
+    if(IVideoDriver* driver = VIDEODRIVER.GetDriver())
+    {
+        padEvents_.clear();
+        driver->FetchPadEvents(padEvents_);
+        padRouter_.OnEvents(padEvents_);
+    }
+    // Ein Fenster kann seit dem letzten Frame minimiert worden sein - dann gehoert der Fokus
+    // dort nicht mehr hin (Befund B3). Vor jeder Auslieferung von Eingaben, damit derselbe
+    // Frame weder Knopfflanke noch Rahmen mehr durchlaesst.
+    forEachView([this](PlayerView& view) { ValidateFocus(view); });
+    // Ruft OnPadAssigned/OnPadMove zurueck. Ohne angestecktes Pad passiert hier exakt nichts.
+    padStepMs_ = elapsedMs;
+    padRouter_.UpdateMotion(elapsedMs, *this);
+
+    // --- 2. Zeigerbesitz je Ansicht ----------------------------------------------------------
+    // Regel, in dieser Reihenfolge:
+    //  a) Eine Ansicht mit zugeordnetem Pad bekommt IMMER den Zeiger dieses Pads. Die Maus kann
+    //     ihn nicht stehlen, auch nicht wenn sie ueber der Ansicht steht.
+    //  b) Steht die Maus UEBER einer Ansicht, kommt nur DIESE Ansicht in Frage - und sie bekommt
+    //     den Zeiger nur, wenn sie padlos ist. Hat sie ein Pad, bekommt ihn KEINE Ansicht.
+    //  c) Steht die Maus ueber gar keiner Ansicht, faellt sie an die erste padlose Ansicht
+    //     zurueck.
+    //
+    // BEFUND B: (b) hiess frueher "die erste padlose Ansicht, ueber der die Maus steht", und
+    // griff (c) sonst. Stand die Maus MITTEN IN einer padbesetzten Ansicht, fiel sie damit an
+    // den NACHBARN: der bekam einen cursorPos_ auf einem Punkt ausserhalb seines eigenen
+    // Viewports, UpdateSelection machte daraus einen Randknoten, und ein Mausklick oeffnete dort
+    // ein Fenster - auf einem Knoten, ueber dem die Maus sichtbar nicht stand. Die Begruendung
+    // an GetMouseView() ("der Klick trifft die Ansicht, ueber der die Maus steht") galt fuer
+    // genau diesen Fall nicht.
+    //
+    // BEFUND 1 dieser Runde: (c) hiess frueher "keine Ansicht enthaelt den Punkt", mit der
+    // Begruendung, die Viewports deckten die Renderflaeche lueckenlos ab, das heisse also
+    // "ausserhalb der Renderflaeche". Bei DREI Ansichten stimmte das nicht: das Quadrantenlayout
+    // liess die vierte Zelle frei, und die liegt MITTEN AUF DEM BILDSCHIRM. Dort griff der
+    // Rueckfall, und der Klick wirkte auf Ansicht 0, ueber der die Maus nicht stand - genau der
+    // Fehler, den BEFUND B beheben sollte, nur in der leeren Zelle.
+    //
+    // Zwei Dinge sind daran repariert, bewusst getrennt:
+    //  1. Das LAYOUT deckt jetzt bei jeder Ansichtszahl lueckenlos ab (CalcViewports: drei
+    //     Ansichten bekommen zwei oben und eine ueber die volle Breite darunter).
+    //  2. Die REGEL verlaesst sich nicht mehr darauf. (c) fragt ausdruecklich, ob die Maus
+    //     ausserhalb der Renderflaeche steht, statt es aus "keine Ansicht enthaelt sie"
+    //     abzuleiten. Damit bleibt der Rueckfall genau dort erhalten, wo er gebraucht wird
+    //     (Einzelspieler mit Maus ausserhalb des Fensters,
+    //     SingleViewFollowsTheMouseWhetherOrNotAPadIsPlugged), und kann in einer kuenftigen
+    //     Luecke nicht wieder danebengreifen.
+    // Der zweite Punkt allein haette den Befund auch behoben, aber eine unbemalte Zelle mitten
+    // im Bild stehengelassen; der erste allein haette die falsche Begruendung wieder wahr
+    // gemacht, ohne dass der naechste Layoutwechsel es merkt.
+    //
+    // Die Regel selbst steht in ViewUnderMouse() - nur noch dort. Die Eingaenge, die eine eigene
+    // Mausposition mitbringen (Rad, Kartenzug), fragen dieselbe Funktion, statt wie frueher
+    // stillschweigend primary() zu nehmen.
+    //
+    // Einzelspieler mit Maus und ohne Pad: es gibt genau eine Ansicht, sie ist padlos und ihr
+    // Viewport IST die Renderflaeche - (a) bzw. (c) geben ihr den Zeiger immer, bit-identisch zu
+    // vor Phase 3.
+    //
+    // BEFUND 2 (letzte Runde): WELCHE Ansicht die Maus haelt, ist eine gemerkte Tatsache und
+    // nicht mehr eine Annahme des Mauspfads ("es ist primary()"). ContextClick liest genau das
+    // hier - und es MUSS das hier lesen und nicht die Ereignisposition, weil es gleich darauf
+    // GetSelectedPt() dieser Ansicht auswertet, und der Punkt stammt aus dem Zeiger, den die
+    // Schleife unten aus eben diesem mouseView_ setzt.
+    PlayerView* const mouseOwner = ViewUnderMouse(mousePos);
+    mouseView_ = mouseOwner;
+
+    for(auto& view : views_)
+    {
+        std::optional<Position> cursor;
+        if(view->HasPadCursor())
+            cursor = view->GetPadCursor();
+        else if(view.get() == mouseOwner)
+            cursor = mousePos;
+        view->GetView().SetCursorPos(cursor);
+        // Enthaelt keinen GL-Aufruf (world/GameWorldView.cpp:124-159). Draw() ruft es gleich
+        // noch einmal; das ist eine reine Neuberechnung und damit idempotent.
+        view->GetView().UpdateSelection();
+    }
+
+    // --- 3. Knopfflanken --------------------------------------------------------------------
+    // Erst JETZT, denn eine Padaktion wirkt auf GetSelectedPt() - der Punkt muss aus dem
+    // fortgeschriebenen Zeiger dieses Frames stammen und nicht aus dem des vorigen.
+    padRouter_.DispatchButtons(*this);
+}
+
+void dskGameInterface::OnPadAssigned(const unsigned slot, const bool assigned)
+{
+    if(slot >= views_.size())
+        return;
+    PlayerView& view = *views_[slot];
+    // Ein frisch zugeordnetes Pad setzt seinen Zeiger in die Mitte SEINER Ansicht. Damit ist die
+    // Ansicht ab dem ersten Frame sichtbar in Padbesitz, ohne dass der Stick bewegt wurde.
+    view.SetPadCursor(assigned ? std::optional<Position>(view.GetViewCenter()) : std::nullopt);
+    // BEFUND B4: das Geraet nimmt seinen Fokus mit. Sonst bliebe der Fokus im Fenster stehen,
+    // der Rahmen des verschwundenen Spielers bliebe dort angemeldet, und das naechste Geraet,
+    // das diesen Slot bekommt, erbte beides - sein erster A-Druck klickte einen Knopf, statt
+    // eine Fahne zu setzen. Gilt in BEIDE Richtungen: auch ein neu zugeordnetes Pad startet
+    // ausdruecklich ohne Fokus, in der Welt.
+    ReleaseFocus(view);
+    // Dasselbe fuer einen laufenden Strassenbau: verliert die Ansicht ihr Eingabegeraet, kann
+    // niemand den Bau mehr zu Ende fuehren oder abbrechen. Ohne diesen Abbruch bliebe die
+    // visuelle Strasse dieses Spielers fuer immer im Bild stehen und seine BQ dauerhaft falsch -
+    // die Geisterstrasse nach Kabelbruch. Abgebrochen wird nur beim VERLIEREN des Geraets;
+    // ein neu zugeordnetes Pad findet ohnehin keinen laufenden Bau vor.
+    if(!assigned)
+        CancelRoadBuilding(view);
+}
+
+void dskGameInterface::OnPadMove(const unsigned slot, const Position& delta)
+{
+    if(slot >= views_.size())
+        return;
+    PlayerView& view = *views_[slot];
+    // Ab hier handelt DIESER Spieler - siehe die Klammer in OnPadButton.
+    const ViewScope ownerScope(slot);
+    // Steht dieser Spieler in einem Fenster, gehoert der Stick dem Fokus und NICHT dem
+    // Weltzeiger. Ohne gesetzte Wurzel liefert das false und alles laeuft wie in Phase 3.
+    if(view.GetFocus().OnPadMove(delta, padStepMs_))
+        return;
+    if(!view.HasPadCursor())
+        return;
+    const Position cursor = view.ClampToView(view.GetPadCursor() + delta);
+    view.SetPadCursor(cursor);
+    PushCameraAtEdge(view, cursor, delta);
+}
+
+void dskGameInterface::PushCameraAtEdge(PlayerView& view, const Position& cursor, const Position& delta)
+{
+    const Position origin = view.GetView().GetPos();
+    const Extent size = view.GetView().GetSize();
+    // Innenrahmen 60 Prozent: je 20 Prozent Rand auf beiden Seiten.
+    const Position margin(static_cast<int>(size.x) * 20 / 100, static_cast<int>(size.y) * 20 / 100);
+
+    // Je Achse: nur, wenn der Ausschlag NACH AUSSEN zeigt und der Zeiger auf DERSELBEN Seite
+    // ueber dem Innenrahmen steht. Der Anteil waechst von 0 am Rahmen auf 1 am Viewportrand.
+    const auto pushOn = [](const int pos, const int lo, const int hi, const int marg, const int d) {
+        if(marg <= 0 || d == 0)
+            return 0;
+        const int over = (d > 0) ? pos - hi : lo - pos;
+        if(over <= 0)
+            return 0;
+        return d * std::min(over, marg) / marg;
+    };
+    const Position push(pushOn(cursor.x, origin.x + margin.x, origin.x + static_cast<int>(size.x) - 1 - margin.x,
+                               margin.x, delta.x),
+                        pushOn(cursor.y, origin.y + margin.y, origin.y + static_cast<int>(size.y) - 1 - margin.y,
+                               margin.y, delta.y));
+    if(push != Position(0, 0))
+        view.GetView().MoveBy(push);
+}
+
+void dskGameInterface::OnPadCamera(const unsigned slot, const Position& delta)
+{
+    if(slot >= views_.size())
+        return;
+    PlayerView& view = *views_[slot];
+    // BEWUSST OHNE Ruecksicht auf den Fokus: FocusPath verbraucht den LINKEN Stick und die
+    // Knoepfe, den rechten nie. Ein Spieler, der in seinem Lagerfenster steht, darf trotzdem
+    // sehen, was auf der Karte passiert - dafuer muss er das Fenster nicht verlassen.
+    view.GetView().MoveBy(delta);
+    // Der ZEIGER bleibt, wo er ist - am BILDSCHIRMpunkt, nicht am Weltpunkt.
+    //
+    // Warum: der Padzeiger IST ein Bildschirmzeiger. PlayerView::ClampToView haelt ihn im
+    // eigenen Viewport, damit er nicht in das Bild des Nachbarn wandert. Bliebe er am
+    // WELTpunkt haengen, waere er nach einem Sekundenbruchteil Kamerafahrt aus dem Viewport
+    // heraus, die Klemme zoege ihn zurueck - und der Weltpunkt waere dann trotzdem weg, nur
+    // an einer Stelle, die der Spieler nicht vorhersagen kann. Weltverankerung ist bei einem
+    // geklemmten Zeiger also gar nicht durchhaltbar, sondern nur bis zum Rand echt.
+    //
+    // Und sie waere auch das falsche Bedienbild: rechter Stick = Ausschnitt, linker Stick =
+    // Punkt darin. Zwei Sticks fuer zwei Groessen. Waere der Zeiger weltverankert, verschoebe
+    // der rechte Stick beide - der Spieler haette kein Mittel mehr, den Ausschnitt zu bewegen,
+    // ohne sein Ziel zu verlieren. Genau so verhaelt sich auch die Maus heute: die Pfeiltasten
+    // und das Ziehen mit der rechten Taste bewegen die Karte, der Mauszeiger bleibt liegen
+    // (Msg_KeyDown, gwv.MoveBy).
+    //
+    // Der Randschub des LINKEN Sticks ist davon unberuehrt und steht an eigener Stelle
+    // (PushCameraAtEdge): er greift nur, wenn der Ausschlag den Zeiger nach aussen drueckt.
+}
+
+void dskGameInterface::OnPadZoom(const unsigned slot, const float step)
+{
+    if(slot >= views_.size())
+        return;
+    PlayerView& view = *views_[slot];
+    GameWorldView& gameView = view.GetView();
+    float target = gameView.GetCurrentTargetZoomFactor() * (1.f + step);
+    // Dieselben Grenzen wie beim Mausrad (WheelZoom) - der Padspieler bekommt keine Ansicht,
+    // die der Mausspieler nicht auch einstellen kann.
+    target = std::clamp(target, ZOOM_FACTORS.front(), ZOOM_FACTORS.back());
+    if(target == gameView.GetCurrentTargetZoomFactor()) //-V550
+        return; // schon am Anschlag
+    // ZOOMMITTE IST DER ZEIGER, nicht die Viewportmitte. GameWorldView::SetZoomFactor allein
+    // schneidet links und rechts gleich viel weg (CalcFxLx: diff/2 von beiden Seiten, und die
+    // Projektionsmatrix in Draw rechnet genauso) - der Bildmittelpunkt bleibt also stehen.
+    // Fuer die Maus ist das richtig und bleibt unveraendert. Fuer ein Pad am Fernseher waere es
+    // falsch: der Zeiger steht dort dauernd am Rand seines Viertelbildschirms, und ein Zoom auf
+    // die Mitte schoebe genau den Knoten aus dem Bild, den der Spieler gerade anvisiert.
+    // Ohne Zeiger (kein Pad zugeordnet) bleibt es bei der Mitte - dann gibt es keinen besseren
+    // Bezugspunkt.
+    gameView.SetZoomFactorAt(target, view.HasPadCursor() ? view.GetPadCursor() : view.GetViewCenter());
+}
+
+void dskGameInterface::PadReject(PlayerView& view, const PadRejection reason)
+{
+    const bool isNew = view.NoteRejection(reason);
+    // 1. Ton - immer. Siehe die Begruendung am Kopf.
+    if(SoundEffectItem* sound = LOADER.GetSoundN("sound", 113))
+        sound->Play(255, false);
+    if(!isNew)
+        return;
+    // 2. Chatzeile - nur beim Wechsel der Ursache.
+    std::string text;
+    switch(reason)
+    {
+        case PadRejection::RoadTooShort: text = _("The road is too short - extend it first."); break;
+        case PadRejection::RoadAtLengthLimit: text = _("This waterway cannot get any longer."); break;
+        case PadRejection::RoadNoWay: text = _("No road can be built to that point."); break;
+        case PadRejection::RoadOutsideTerritory: text = _("You cannot build outside your own territory."); break;
+        case PadRejection::RoadEndBlocked: text = _("A road has to end where a flag can stand."); break;
+    }
+    messenger.AddMessage(worldViewer.GetWorld().GetPlayer(view.GetPlayerId()).name,
+                         worldViewer.GetWorld().GetPlayer(view.GetPlayerId()).color, ChatDestination::System, text,
+                         COLOR_RED);
+}
+
+void dskGameInterface::OnPadButton(const unsigned slot, const PadButton button, const bool down)
+{
+    if(slot >= views_.size())
+        return;
+    PlayerView& view = *views_[slot];
+    // BEFUND B1: Ab hier und bis zum Ende dieser Verarbeitung handelt DIESER Spieler.
+    //
+    // Ein Fensterknopf nennt beim Ausloesen keinen Spieler (ctrlButton::Activate ruft
+    // Msg_ButtonClick), und die Fenster erzeugen ihre GameCommands ueber die Fabrik, die sie
+    // beim Oeffnen bekommen haben - GAMECLIENT. Ohne diese Klammer buchte GameClient::AddGC
+    // unbedingt auf den Hauptspieler, und jeder lokale Spieler, der mit Y ein Fenster betritt
+    // und A drueckt, stellte die Produktion, die Reserve und das Lager von Spieler 0 um.
+    //
+    // Die Klammer sitzt hier und nicht im Fenster, weil hier - und nur hier - bekannt ist, WER
+    // drueckt: die Slotnummer ist die Nummer der Ansicht, und die Ansicht kennt ihren Spieler.
+    //
+    // Sie setzt zugleich den Fensterbesitzer: oeffnet dieser Spieler von hier aus ein Fenster,
+    // gehoert es ihm. Ein einziger Wert, aus dem beides faellt - der handelnde Spieler kann
+    // gar nicht mehr vom Fensterbesitz abweichen.
+    const ViewScope ownerScope(slot);
+    // Erst der Fokus dieses Spielers. Verbraucht er die Flanke, sieht die Welt sie nie - ein
+    // A-Druck auf einem Knopf legt keine Fahne.
+    Window* const rootBefore = view.GetFocus().GetRoot();
+    if(view.GetFocus().OnPadButton(button, down))
+    {
+        // Der Fokus kann sich durch B/Start aufgeloest haben; dann faellt der Rahmen weg.
+        if(!view.GetFocus().IsActive())
+            ClearFocusRing(view, rootBefore);
+        return;
+    }
+    if(!down)
+        return;
+    // Der Strassenbau ist ein MODUS, und er gehoert dieser einen Ansicht. Solange er laeuft,
+    // haben A, X und B eine zweite Bedeutung - genau wie beim Mausspieler, dessen Linksklick im
+    // Baumodus einen voellig anderen Zweig nimmt (ContextClick).
+    const bool inRoadMode = view.GetRoad().mode != RoadBuildMode::Disabled;
+    switch(button)
+    {
+        // A OEFFNET und erzeugt selbst NIE ein Kommando: es ist das Gegenstueck zum Linksklick
+        // des Mausspielers auf einen Knoten (ContextClick) und laeuft durch dieselbe
+        // Entscheidung (OpenObjectWindow). Im Lockstep gibt es kein Rueckgaengig; der
+        // Hauptknopf darf deshalb nichts festschreiben, was Rohstoffe kostet. Was etwas kostet
+        // - abreissen, Gold sperren, Produktion stoppen -, steht danach als BESCHRIFTETER
+        // Knopf im geoeffneten Fenster.
+        //
+        // Im Baumodus verlaengert A den Weg bis zum Zeiger. Auch das schreibt nichts fest: es
+        // aendert ausschliesslich die VISUELLE Vorschau auf dem Viewer dieses Spielers. Die
+        // Invariante des A-Knopfes bleibt damit woertlich erhalten.
+        //
+        // Ausserhalb des Baumodus faellt A auf den Strassenbau durch, WENN unter dem Zeiger
+        // kein Fenster zu oeffnen war. Auf einer Flagge tat A bisher nichts - OpenObjectWindow
+        // kennt nur Schiff, Gebaeude und Baustelle -, und eine eigene Flagge ist genau der
+        // Punkt, an dem auch der Mausspieler seinen Strassenbau beginnt. Der Knopf bekommt hier
+        // also keine zweite Bedeutung, sondern eine erste.
+        case PadButton::A:
+            if(inRoadMode)
+                PadExtendRoad(view);
+            else if(!PadOpenWindow(view))
+                PadStartRoad(view, /*waterRoad*/ false);
+            break;
+        // X setzt eine Flagge, bewusst als Ausnahme von der Regel darueber und bewusst NICHT
+        // auf A: die Flagge ist das einzige Primitiv ohne Kosten - sie laesst sich im eigenen
+        // Fenster sofort wieder abreissen -, und ohne sie ist Strassenbau am Pad unbedienbar.
+        // Sie auf einem Nebenknopf zu fuehren haelt "der Hauptknopf schreibt nichts fest"
+        // trotzdem ein.
+        //
+        // Im Baumodus schreibt X den Weg fest. Das ist die konsequente Fortsetzung derselben
+        // Regel: X ist der Knopf, der etwas in die Welt schickt, und er ist es an genau einer
+        // Stelle je Modus.
+        case PadButton::X:
+            if(inRoadMode)
+                PadCommitRoad(view);
+            else
+                PadPlaceFlag(view);
+            break;
+        // B nimmt im Baumodus ein Wegstueck zurueck und bricht auf leerer Strecke ab. B ist der
+        // Zurueck-Knopf, den FocusPath schon INNERHALB eines Fensters so benutzt
+        // (FocusPath::OnPadButton, case B -> Clear) - in der Welt war er bisher frei. Damit
+        // braucht der Padspieler das mausgebundene iwRoadWindow gar nicht erst: dessen beide
+        // Knoepfe sind X und B.
+        case PadButton::B:
+            if(inRoadMode)
+                PadStepBackRoad(view);
+            break;
+        // Der Wasserweg bekommt einen eigenen Knopf statt einer zweiten Bedeutung von A.
+        // Grund: an einer Wasserflagge bietet iwAction BEIDE Wege an (iwAction.cpp, Knopf 1 und
+        // Knopf 2); waere die Flaggenart die Entscheidung, koennte der Padspieler von dort aus
+        // keine Landstrasse mehr bauen. Die Schulter ist frei - innerhalb eines Fensters
+        // verbraucht FocusPath sie zuerst (Move(Dir::Prev)), in der Welt tat sie bisher nichts.
+        case PadButton::LeftShoulder:
+            if(!inRoadMode)
+                PadStartRoad(view, /*waterRoad*/ true);
+            break;
+        // Y betritt das oberste Fenster. Bewusst NICHT Start: Start ist seit Phase 3 der
+        // Knopf, mit dem ein Spieler sein Pad in die Hand nimmt (PadRouter, Uebernahme durch
+        // Benutzung), und muss dafuer wirkungslos bleiben.
+        case PadButton::Y: EnterTopMostWindow(view); break;
+        // Radialmenue und HUD sind ausdruecklich nicht Ziel dieser Phase. Alle uebrigen
+        // Knoepfe bleiben deshalb bewusst wirkungslos.
+        default: break;
+    }
+}
+
+void dskGameInterface::ClearFocusRing(PlayerView& view, Window* root)
+{
+    // Der Rahmen muss am ehemaligen Wurzelfenster abgemeldet werden - und das kennt der Fokus
+    // nach einem Clear() nicht mehr. Deshalb wird die Wurzel vom Aufrufer uebergeben.
+    // Abgemeldet wird GENAU der Rahmen dieses Spielers; die Rahmen der anderen bleiben stehen.
+    if(auto* wnd = dynamic_cast<IngameWindow*>(root))
+        wnd->RemoveFocusRing(view.GetFocus());
+    view.GetFocus().Clear();
+}
+
+void dskGameInterface::ReleaseFocus(PlayerView& view)
+{
+    ClearFocusRing(view, view.GetFocus().GetRoot());
+}
+
+void dskGameInterface::ValidateFocus(PlayerView& view)
+{
+    // BEFUND B3: EnterTopMostWindow prueft IsMinimized() nur beim Betreten. Minimiert der
+    // Mausspieler danach - was er jederzeit kann und der Padspieler nicht verhindern -, bediente
+    // dieser sonst weiter ein Fenster, das nicht gezeichnet wird, und traefe Knoepfe, die er
+    // nicht sieht. Der Mauspfad ist an derselben Stelle gesperrt
+    // (IngameWindow::IsMessageRelayAllowed), der Padpfad muss es auch sein.
+    const auto* wnd = dynamic_cast<const IngameWindow*>(view.GetFocus().GetRoot());
+    if(wnd && wnd->IsMinimized())
+        ReleaseFocus(view);
+}
+
+bool dskGameInterface::EnterTopMostWindow(PlayerView& view)
+{
+    // Das oberste Fenster, das DIESER Spieler bedienen darf: seine eigenen und die, die
+    // keiner Ansicht gehoeren (Nachrichtenboxen, Systemfenster - die sieht jeder). Ohne den
+    // Besitzerbezug betraete Spieler 2 mit Y das Fenster von Spieler 1 und verstellte es
+    // anschliessend in seinem eigenen Namen.
+    IngameWindow* wnd = WINDOWMANAGER.GetTopMostWindow(view.GetIndex());
+    if(!wnd || wnd->IsMinimized())
+        return false;
+    // Erst den alten Rahmen abmelden: SetRoot() vergisst die bisherige Wurzel, und ein dort
+    // stehen gebliebener Eintrag zeichnete danach einen Rahmen um ein Control, das gar nicht
+    // mehr in diesem Fenster liegt.
+    ReleaseFocus(view);
+    if(!view.GetFocus().SetRoot(wnd))
+        return false; // in diesem Fenster gibt es nichts zu bedienen
+    wnd->AddFocusRing(view.GetFocus(), view.GetViewer().GetPlayer().color);
+    return true;
+}
+
+bool dskGameInterface::PadPlaceFlag(PlayerView& view)
+{
+    const MapPoint pt = view.GetView().GetSelectedPt();
+    if(!pt.isValid())
+        return false;
+    // Der Kommandopfad DIESES Spielers - nicht GAMECLIENT direkt. Genau hier entscheidet sich,
+    // fuer wen der GameCommand erzeugt wird (network/LocalPlayerGCFactory.cpp).
+    GameCommandFactory* const factory = GAMECLIENT.GetGCFactory(static_cast<uint8_t>(view.GetPlayerId()));
+    if(!factory)
+        return false;
+    return factory->SetFlag(pt);
+}
+
+bool dskGameInterface::PadStartRoad(PlayerView& view, const bool waterRoad)
+{
+    // Zwei Baumodi uebereinander gibt es nicht: der laufende muesste sonst still verworfen
+    // werden und liesse seine visuelle Vorschau stehen.
+    if(view.GetRoad().mode != RoadBuildMode::Disabled)
+        return false;
+    const MapPoint pt = view.GetView().GetSelectedPt();
+    if(!pt.isValid())
+        return false;
+
+    // SCHUTZ: der Startpunkt MUSS eine Flagge DIESES Spielers sein.
+    //
+    // Im Mauspfad stellt das ausschliesslich die Bedienoberflaeche sicher: der Knopf "Strasse
+    // bauen" existiert nur im Flaggenreiter von iwAction, und den setzt ContextClick nur bei
+    // IsOwner(cSel) und NodalObjectType::Flag. GI_StartRoadBuilding selbst prueft nichts.
+    // Ohne diese Zeilen koennte ein Padspieler den Baumodus auf jedem beliebigen Knoten
+    // starten; die Simulation faenge das erst nach einem Netzwerkumlauf ab
+    // (world/GameWorld.cpp:196-201) - mit einer stillen ConstructionFailed-Notiz und ohne
+    // jede Rueckmeldung an den Spieler.
+    const noFlag* const flag = view.GetViewer().GetWorld().GetSpecObj<noFlag>(pt);
+    if(!flag || flag->GetPlayer() != static_cast<unsigned char>(view.GetPlayerId()))
+        return false;
+    // Wasserwege gibt es nur an einer Wasserflagge - dieselbe Bedingung, unter der iwAction den
+    // zweiten Knopf ueberhaupt anbietet (iwAction.cpp: FlagType::WaterFlag, gesetzt aus
+    // noFlag::GetFlagType() == FlagType::Water).
+    if(waterRoad && flag->GetFlagType() != FlagType::Water)
+        return false;
+
+    view.ClearRejection();
+    StartRoadBuilding(view, pt, waterRoad);
+    return true;
+}
+
+bool dskGameInterface::PadExtendRoad(PlayerView& view)
+{
+    RoadBuildState& rb = view.GetRoad();
+    if(rb.mode == RoadBuildMode::Disabled)
+        return false;
+    const MapPoint pt = view.GetView().GetSelectedPt();
+    // Der Zeiger steht auf dem Wegende - der HAEUFIGSTE Zustand, weil GameWorldView::DrawGUI
+    // genau diesen Punkt hervorhebt. Hier ist nichts zu verlaengern; BuildRoadPart faengt es
+    // zwar auch ab, aber dieser Zweig sagt es aus, statt sich darauf zu verlassen.
+    if(!pt.isValid() || pt == rb.point)
+        return false;
+
+    // Zeigt der Spieler auf ein Stueck, das er selbst schon gelegt hat, ist das ein Rueckbau
+    // bis dorthin - dieselbe Entscheidung, die auch der Mausklick trifft (ContextClick,
+    // GetIdInCurBuildRoad -> DemolishRoad). Beides ist rein visuell.
+    if(const unsigned idOnRoad = GetIdInCurBuildRoad(view, pt))
+    {
+        DemolishRoad(view, idOnRoad);
+        return true;
+    }
+
+    // SCHUTZ (BEFUND A): der Zielknoten muss auf EIGENEM Gebiet liegen.
+    //
+    // Der Mauspfad prueft das ausdruecklich (ContextClick: IsRoadAvailable(...) &&
+    // IsPlayerTerritory(selPt), und die uebrigen Zweige haengen an GetBQ != Nothing bzw. an
+    // einer Flagge) - er kann in diesen Zustand gar nicht geraten. Der Padpfad konnte es, weil
+    // FindPathForRoad seine Wegbedingung fuer jeden Knoten AUSSER Start und Ziel auswertet: der
+    // Zielknoten darf jenseits der Grenze liegen, der Weg wird gefunden, die Vorschau entsteht -
+    // und GameWorld::BuildRoad verwirft die fertige Strasse anschliessend still, weil dort keine
+    // Flagge stehen kann (world/GameWorld.cpp:222-241).
+    //
+    // Die Pruefung sitzt HIER und nicht erst beim Festschreiben, weil der Spieler es beim ersten
+    // A erfahren soll und nicht erst nach acht Kanten Vorschau.
+    if(!IsRoadTargetAllowed(view, pt))
+    {
+        PadReject(view, PadRejection::RoadOutsideTerritory);
+        return false;
+    }
+
+    // Ab hier: verlaengern. BuildRoadPart aendert AUSSCHLIESSLICH den Viewer und den
+    // RoadBuildState dieser Ansicht - es entsteht kein GameCommand. Das ist die Invariante des
+    // A-Knopfes, und sie gilt im Baumodus genauso wie ausserhalb.
+    MapPoint target = pt;
+    switch(BuildRoadPart(view, target))
+    {
+        case RoadPartResult::Built: return true;
+        // BEFUND 3/4: hier - und nicht erst beim Festschreiben - merkt der Spieler zum ersten
+        // Mal, dass sein Weg nicht weitergeht. Ohne Rueckmeldung drueckt er A und sieht nichts.
+        case RoadPartResult::AtLengthLimit: PadReject(view, PadRejection::RoadAtLengthLimit); return false;
+        case RoadPartResult::Rejected: PadReject(view, PadRejection::RoadNoWay); return false;
+    }
+    return false;
+}
+
+bool dskGameInterface::IsRoadTargetAllowed(const PlayerView& view, const MapPoint pt) const
+{
+    const GameWorldViewer& viewer = view.GetViewer();
+    if(viewer.IsPlayerTerritory(pt))
+        return true;
+    // Eine EIGENE Flagge bleibt auch dann ein zulaessiges Ziel, wenn sie nach einer
+    // Gebietsverschiebung nicht mehr im Inneren liegt: GameWorld::BuildRoad laesst eine Strasse
+    // an einer Flagge des eigenen Spielers ausdruecklich enden, ohne die Bauqualitaet zu fragen.
+    const noFlag* const flag = viewer.GetWorld().GetSpecObj<noFlag>(pt);
+    return flag && flag->GetPlayer() == static_cast<unsigned char>(view.GetPlayerId());
+}
+
+bool dskGameInterface::CanRoadEndAt(const PlayerView& view, const MapPoint pt) const
+{
+    const GameWorldViewer& viewer = view.GetViewer();
+    // WOERTLICH die Endpunktregel von GameWorld::BuildRoad (world/GameWorld.cpp:222-241),
+    // gelesen auf dem Viewer DIESES Spielers - also auf dem Bild, das er vor sich hat.
+    if(const noFlag* const flag = viewer.GetWorld().GetSpecObj<noFlag>(pt))
+        return flag->GetPlayer() == static_cast<unsigned char>(view.GetPlayerId());
+    return viewer.GetBQ(pt) != BuildingQuality::Nothing && !viewer.GetWorld().IsFlagAround(pt);
+}
+
+bool dskGameInterface::PadCommitRoad(PlayerView& view)
+{
+    RoadBuildState& rb = view.GetRoad();
+    // SCHUTZ (BEFUND A, zweite Haelfte): eine Strecke, deren Ende keine Flagge tragen kann,
+    // geht gar nicht erst ins Netz.
+    //
+    // CommitRoad selbst darf das nicht pruefen: es ist auch der Weg des MAUSSPIELERS
+    // (GI_BuildRoad), und dort haengt der Knopf schon an derselben Bedingung - iwRoadWindow
+    // bekommt sein `enable_flag` aus GetBQ(road.point) != Nothing. Eine zweite Pruefung dort
+    // waere wirkungslos, hier ist sie es nicht.
+    if(rb.mode != RoadBuildMode::Disabled && rb.route.size() >= 2 && !CanRoadEndAt(view, rb.point))
+    {
+        PadReject(view, PadRejection::RoadEndBlocked);
+        return false;
+    }
+    // Die uebrige Absicherung sitzt in CommitRoad, weil sie fuer JEDEN Aufrufer gilt - auch
+    // fuer den Knopf im Strassenfenster des Mausspielers.
+    if(CommitRoad(view))
+        return true;
+    // BEFUND 3, die Sackgasse: A einmal von der eigenen Flagge aus -> route.size() == 1, X ->
+    // CommitRoad -> route.size() < 2 -> false, Modus bleibt Normal. Noch einmal X: dasselbe,
+    // beliebig oft, und nichts sagte es dem Spieler. Der einzige Ausweg war B.
+    //
+    // Der Modus bleibt bewusst weiter stehen (ein X darf einen laufenden Bau nicht abbrechen -
+    // das ist B), aber der Spieler erfaehrt jetzt, warum nichts geschieht.
+    if(rb.mode != RoadBuildMode::Disabled && rb.route.size() < 2)
+        PadReject(view, PadRejection::RoadTooShort);
+    return false;
+}
+
+bool dskGameInterface::PadStepBackRoad(PlayerView& view)
+{
+    RoadBuildState& rb = view.GetRoad();
+    if(rb.mode == RoadBuildMode::Disabled)
+        return false;
+    // SCHUTZ: auf leerer Strecke gibt es kein Stueck mehr zurueckzunehmen. DemolishRoad laeuft
+    // rueckwaerts mit unsigned; mit start_id == 0 liefe die Schleife in den Unterlauf. Statt
+    // dessen ist der Schritt zurueck an dieser Stelle der Abbruch - der Spieler kann sich also
+    // mit demselben Knopf vollstaendig aus dem Baumodus herausdruecken und braucht dafuer kein
+    // Fenster.
+    if(rb.route.empty())
+    {
+        CancelRoadBuilding(view);
+        return true;
+    }
+    DemolishRoad(view, static_cast<unsigned>(rb.route.size()));
+    return true;
 }
 
 void dskGameInterface::Run()
@@ -995,11 +1915,28 @@ void dskGameInterface::Run()
     // Reset draw counter of the trees before drawing
     noTree::ResetDrawCounter();
 
-    unsigned water_percent;
+    unsigned water_percent = 0;
+    const Position mousePos = VIDEODRIVER.GetMousePos();
     // Draw mouse only if not on window
-    bool drawMouse = WINDOWMANAGER.FindWindowAtPos(VIDEODRIVER.GetMousePos()) == nullptr;
-    gwv.Draw(road, actionwindow != nullptr ? actionwindow->GetSelectedPt() : MapPoint::Invalid(), drawMouse,
-             &water_percent);
+    const bool drawMouse = WINDOWMANAGER.FindWindowAtPos(mousePos) == nullptr;
+
+    // Vergangene Zeit seit dem letzten Frame. Der erste Frame zaehlt als 0 ms.
+    const unsigned now = static_cast<unsigned>(VIDEODRIVER.GetTickCount());
+    const unsigned elapsedMs = (lastInputTick_ == 0 || now < lastInputTick_) ? 0u : now - lastInputTick_;
+    lastInputTick_ = now;
+
+    // Die EINZIGE Stelle, an der Zeigerbesitz entschieden wird. Danach wird er hier nur noch
+    // gelesen - die Regel steht nicht ein zweites Mal in der Zeichenschleife.
+    UpdateInput(elapsedMs, mousePos);
+
+    for(auto& view : views_)
+    {
+        const bool hasCursor = view->GetView().GetCursorPos().has_value();
+        view->GetView().Draw(view->GetRoad(),
+                             view->actionwindow != nullptr ? view->actionwindow->GetSelectedPt() :
+                                                             MapPoint::Invalid(),
+                             drawMouse && hasCursor, view.get() == &primary() ? &water_percent : nullptr);
+    }
 
     // Indicate that the game is paused by darkening the screen (dark semi-transparent overlay)
     if(GAMECLIENT.IsPaused())
@@ -1014,97 +1951,205 @@ void dskGameInterface::Run()
     messenger.Draw();
 }
 
-void dskGameInterface::GI_StartRoadBuilding(const MapPoint startPt, bool waterRoad)
+void dskGameInterface::UpdateRoadCursor(const PlayerView& view)
+{
+    // Es gibt genau EINEN Mauszeiger (WindowManager::SetCursor). Er gehoert dem Mausspieler,
+    // und der sitzt in der Hauptansicht - Aktionsfenster, Postfach und Knopfleiste haengen
+    // ebenfalls an ihr. Baut ein Padspieler in Ansicht 1 eine Strasse, darf das dem
+    // Mausspieler nicht das Zeigerbild auf "Abreissen" stellen.
+    //
+    // Fuer den Einzelspieler ist primary() die EINZIGE Ansicht: dort laeuft dieser Zweig
+    // immer, und das Verhalten ist Bit fuer Bit das von vorher.
+    if(&view != &primary())
+        return;
+    if(view.GetRoad().mode != RoadBuildMode::Disabled)
+        WINDOWMANAGER.SetCursor(Cursor::Remove);
+    else
+        WINDOWMANAGER.SetCursor(view.isScrolling ? Cursor::Scroll : Cursor::Hand);
+}
+
+void dskGameInterface::StartRoadBuilding(PlayerView& view, const MapPoint startPt, const bool waterRoad)
 {
     // Im Replay keine Straßen bauen
     if(GAMECLIENT.IsReplayModeOn())
         return;
 
-    road.mode = waterRoad ? RoadBuildMode::Boat : RoadBuildMode::Normal;
-    road.route.clear();
-    road.start = road.point = startPt;
-    WINDOWMANAGER.SetCursor(Cursor::Remove);
+    RoadBuildState& rb = view.GetRoad();
+    rb.mode = waterRoad ? RoadBuildMode::Boat : RoadBuildMode::Normal;
+    rb.route.clear();
+    rb.start = rb.point = startPt;
+    UpdateRoadCursor(view);
+}
+
+void dskGameInterface::GI_StartRoadBuilding(const MapPoint startPt, bool waterRoad)
+{
+    StartRoadBuilding(primary(), startPt, waterRoad);
+}
+
+void dskGameInterface::CancelRoadBuilding(PlayerView& view)
+{
+    RoadBuildState& rb = view.GetRoad();
+    if(rb.mode == RoadBuildMode::Disabled)
+        return;
+    rb.mode = RoadBuildMode::Disabled;
+    view.GetViewer().RemoveVisualRoad(rb.start, rb.route);
+    // Die Route gehoert zu einem Bau, den es nicht mehr gibt. Frueher blieb sie stehen; gelesen
+    // wurde sie ausserhalb des Baumodus von niemandem (GameWorldView::DrawGUI kehrt bei
+    // Disabled sofort zurueck, GI_BuildRoad war nur aus iwRoadWindow erreichbar). Am Padpfad
+    // ist ein zweites RemoveVisualRoad auf derselben Route dagegen erreichbar - deshalb wird
+    // sie hier geleert, statt sich auf den naechsten StartRoadBuilding zu verlassen.
+    rb.route.clear();
+    UpdateRoadCursor(view);
+}
+
+/// Die Ansicht, deren Strassenfenster gerade offen ist - sonst die Hauptansicht.
+///
+/// iwRoadWindow ruft GI_BuildRoad/GI_CancelRoadBuilding ohne Spielerbezug (GameInterface.h
+/// kennt keine Ansichten). Seit ContextClick das Fenster fuer die Ansicht unter der MAUS
+/// oeffnen kann, waere primary() dort die falsche Antwort: die beiden Knoepfe wirkten auf den
+/// Strassenbau eines anderen Spielers. Der Besitz steht schon da - view.roadwindow -, er wird
+/// hier nur gelesen. Im Einzelspieler und ueberall sonst ist das Ergebnis primary().
+PlayerView& dskGameInterface::RoadWindowOwner()
+{
+    for(auto& view : views_)
+    {
+        if(view->roadwindow)
+            return *view;
+    }
+    return primary();
 }
 
 void dskGameInterface::GI_CancelRoadBuilding()
 {
-    if(road.mode == RoadBuildMode::Disabled)
-        return;
-    road.mode = RoadBuildMode::Disabled;
-    worldViewer.RemoveVisualRoad(road.start, road.route);
-    WINDOWMANAGER.SetCursor(isScrolling ? Cursor::Scroll : Cursor::Hand);
+    CancelRoadBuilding(RoadWindowOwner());
 }
 
-bool dskGameInterface::BuildRoadPart(MapPoint& cSel)
+dskGameInterface::RoadPartResult dskGameInterface::BuildRoadPart(PlayerView& view, MapPoint& cSel)
 {
-    std::vector<Direction> new_route =
-      FindPathForRoad(worldViewer, road.point, cSel, road.mode == RoadBuildMode::Boat, 100);
+    RoadBuildState& rb = view.GetRoad();
+    GameWorldViewer& viewer = view.GetViewer();
+    // SCHUTZ: FindPathForRoad haelt im Debugbau an, wenn Start und Ziel derselbe Punkt sind
+    // (pathfinding/FindPathForRoad.cpp:36 RTTR_Assert(startPt != endPt)). Der Mauspfad faengt
+    // das genau eine Ebene hoeher ab (ContextClick: selPt == road.point), der Padpfad koennte
+    // es nicht - der Zeiger steht nach jedem Wegstueck genau auf rb.point, das ist dort der
+    // HAEUFIGSTE Zustand. Die Pruefung gehoert deshalb hierher, wo sie fuer jeden Aufrufer
+    // gilt. Fuer den Mauspfad ist sie unerreichbar und damit wirkungslos.
+    if(!cSel.isValid() || cSel == rb.point)
+        return RoadPartResult::Rejected;
+
+    std::vector<Direction> new_route = FindPathForRoad(viewer, rb.point, cSel, rb.mode == RoadBuildMode::Boat, 100);
     // Weg gefunden?
     if(new_route.empty())
-        return false;
+        return RoadPartResult::Rejected;
 
     // Test on water way length
-    if(road.mode == RoadBuildMode::Boat)
+    if(rb.mode == RoadBuildMode::Boat)
     {
-        unsigned char index = worldViewer.GetWorld().GetGGS().getSelection(AddonId::MAX_WATERWAY_LENGTH);
+        unsigned char index = viewer.GetWorld().GetGGS().getSelection(AddonId::MAX_WATERWAY_LENGTH);
 
         RTTR_Assert(index < waterwayLengths.size());
         const unsigned max_length = waterwayLengths[index];
 
-        unsigned length = road.route.size() + new_route.size();
+        unsigned length = rb.route.size() + new_route.size();
 
         // max_length == 0 heißt beliebig lang, ansonsten
         // Weg zurechtstutzen.
         if(max_length > 0)
         {
-            while(length > max_length)
+            // SCHUTZ: !new_route.empty() in der Bedingung. Ohne sie liefe pop_back() auf einen
+            // leeren Vektor, sobald rb.route.size() allein schon groesser als max_length ist -
+            // undefiniertes Verhalten, kein Assert. Ueber den Mauspfad ist das nicht erreichbar
+            // (rb.route waechst nur durch genau diese Funktion), ueber einen Padpfad, der
+            // Routen anders zusammensetzt, sehr wohl.
+            while(length > max_length && !new_route.empty())
             {
                 new_route.pop_back();
                 --length;
             }
         }
+        // Vollstaendig weggekuerzt heisst: es passt kein Stueck mehr hinein. Frueher lief die
+        // Schleife darunter dann null Mal, cSel wurde auf das UNVERAENDERTE Wegende gesetzt und
+        // die Funktion meldete trotzdem Erfolg - ein stiller Fehlschlag, den der Aufrufer nur
+        // ueber den Vergleich selPt == targetPt bemerken konnte.
+        //
+        // Jetzt sagt sie es aus - aber als EIGENES Ergebnis und nicht als Rejected: der
+        // Mauspfad tut daraufhin nichts (wie frueher), der Padpfad sagt es dem Spieler.
+        if(new_route.empty())
+            return RoadPartResult::AtLengthLimit;
     }
 
     // Weg (visuell) bauen
     for(const auto dir : new_route)
     {
-        worldViewer.SetVisiblePointRoad(road.point, dir,
-                                        (road.mode == RoadBuildMode::Boat) ? PointRoad::Boat : PointRoad::Normal);
-        worldViewer.RecalcBQForRoad(road.point);
-        road.point = worldViewer.GetWorld().GetNeighbour(road.point, dir);
+        viewer.SetVisiblePointRoad(rb.point, dir,
+                                   (rb.mode == RoadBuildMode::Boat) ? PointRoad::Boat : PointRoad::Normal);
+        viewer.RecalcBQForRoad(rb.point);
+        rb.point = viewer.GetWorld().GetNeighbour(rb.point, dir);
     }
-    worldViewer.RecalcBQForRoad(road.point);
+    viewer.RecalcBQForRoad(rb.point);
 
     // Zielpunkt updaten (für Wasserweg)
-    cSel = road.point;
+    cSel = rb.point;
 
-    road.route.insert(road.route.end(), new_route.begin(), new_route.end());
+    rb.route.insert(rb.route.end(), new_route.begin(), new_route.end());
 
-    return true;
+    // Etwas ist gelungen: eine stehende Fehlermeldung dieser Ansicht gilt nicht mehr.
+    view.ClearRejection();
+    return RoadPartResult::Built;
 }
 
-unsigned dskGameInterface::GetIdInCurBuildRoad(const MapPoint pt)
+bool dskGameInterface::BuildRoadPart(MapPoint& cSel)
 {
-    MapPoint curPt = road.start;
-    for(unsigned i = 0; i < road.route.size(); ++i)
+    return BuildRoadPart(primary(), cSel) == RoadPartResult::Built;
+}
+
+unsigned dskGameInterface::GetIdInCurBuildRoad(const PlayerView& view, const MapPoint pt) const
+{
+    const RoadBuildState& rb = view.GetRoad();
+    MapPoint curPt = rb.start;
+    for(unsigned i = 0; i < rb.route.size(); ++i)
     {
         if(curPt == pt)
             return i + 1;
 
-        curPt = worldViewer.GetNeighbour(curPt, road.route[i]);
+        curPt = view.GetViewer().GetNeighbour(curPt, rb.route[i]);
     }
     return 0;
 }
 
+unsigned dskGameInterface::GetIdInCurBuildRoad(const MapPoint pt)
+{
+    return GetIdInCurBuildRoad(primary(), pt);
+}
+
+void dskGameInterface::ShowRoadWindow(PlayerView& view, const Position& mousePos)
+{
+    // iwRoadWindow ist der mausgebundenste Teil des ganzen Pfads: es setzt im Konstruktor
+    // VIDEODRIVER.SetMousePos auf seinen Vorgabeknopf und beim Klick ein zweites Mal zurueck -
+    // es gibt aber nur EINE Maus. Genau deshalb oeffnet es AUSSCHLIESSLICH der Mauspfad, und
+    // zwar fuer die Ansicht, die den Mauszeiger haelt (ContextClick). Der Padpfad benutzt es
+    // gar nicht: seine beiden Knoepfe sind X (festschreiben) und B (zurueck bzw. abbrechen).
+    view.roadwindow = &WINDOWMANAGER.Show(
+      std::make_unique<iwRoadWindow>(*this, view.GetViewer().GetBQ(view.GetRoad().point) != BuildingQuality::Nothing,
+                                     mousePos),
+      true);
+}
+
 void dskGameInterface::ShowRoadWindow(const Position& mousePos)
 {
-    roadwindow = &WINDOWMANAGER.Show(
-      std::make_unique<iwRoadWindow>(*this, worldViewer.GetBQ(road.point) != BuildingQuality::Nothing, mousePos), true);
+    ShowRoadWindow(primary(), mousePos);
 }
 
 void dskGameInterface::ShowActionWindow(const iwAction::Tabs& action_tabs, MapPoint cSel, const DrawPoint& mousePos,
                                         const bool enable_military_buildings)
 {
+    ShowActionWindow(primary(), action_tabs, cSel, mousePos, enable_military_buildings);
+}
+
+void dskGameInterface::ShowActionWindow(PlayerView& view, const iwAction::Tabs& action_tabs, MapPoint cSel,
+                                        const DrawPoint& mousePos, const bool enable_military_buildings)
+{
+    GameWorldViewer& worldViewer = view.GetViewer();
     const GameWorldBase& world = worldViewer.GetWorld();
 
     iwAction::Params params;
@@ -1135,8 +2180,13 @@ void dskGameInterface::ShowActionWindow(const iwAction::Tabs& action_tabs, MapPo
         params = worldViewer.GetNumSoldiersForAttack(cSel);
     }
 
-    actionwindow = &WINDOWMANAGER.Show(
-      std::make_unique<iwAction>(*this, gwv, action_tabs, cSel, mousePos, params, enable_military_buildings), true);
+    // Fenster und Ansicht muessen zusammenpassen: iwAction rechnet mit der Ansicht, aus der es
+    // geoeffnet wurde (Beobachtungsfenster, Angriffsziel). Mit der Uebergangsreferenz gwv waere
+    // das im Splitscreen die Ansicht eines fremden Spielers gewesen.
+    view.actionwindow = &WINDOWMANAGER.Show(
+      std::make_unique<iwAction>(*this, view.GetView(), action_tabs, cSel, mousePos, params,
+                                 enable_military_buildings),
+      true);
 }
 
 void dskGameInterface::OnChatCommand(const std::string& cmd)
@@ -1158,42 +2208,80 @@ void dskGameInterface::OnChatCommand(const std::string& cmd)
         if(gdLoader.Load())
         {
             const_cast<GameWorld&>(game_->world_).GetDescriptionWriteable() = newDesc;
-            worldViewer.InitTerrainRenderer();
+            forEachView([](PlayerView& view) { view.GetViewer().InitTerrainRenderer(); });
         }
     }
 }
 
+bool dskGameInterface::CommitRoad(PlayerView& view)
+{
+    RoadBuildState& rb = view.GetRoad();
+    if(rb.mode == RoadBuildMode::Disabled)
+        return false;
+    // SCHUTZ: GameWorld::BuildRoad haelt im Debugbau an, wenn die Route weniger als zwei
+    // Richtungen hat (world/GameWorld.cpp:189-195 RTTR_Assert(false)) - und im Releasebau
+    // kehrt es dort wortlos zurueck, OHNE eine RoadNote zu veroeffentlichen. Genau die Note
+    // raeumt aber die visuelle Vorschau ab (GameWorldViewer::RoadConstructionEnded). Eine zu
+    // kurze Route waere also im Debugbau ein Abbruch und im Releasebau eine Geisterstrasse,
+    // die fuer immer im Bild dieses Spielers stehen bliebe.
+    //
+    // Ueber den Mauspfad ist das unerreichbar (die Spielregel "keine zwei Flaggen nebeneinander"
+    // macht eine Ein-Kanten-Strasse von einer Flagge weg unmoeglich), abgesichert war es aber
+    // nirgends - weder hier noch in GameCommandFactory::BuildRoad noch im Konstruktor von
+    // gc::BuildRoad. Am Padpfad ist es mit zwei Knopfdruecken erreichbar.
+    if(rb.route.size() < 2)
+        return false;
+    // Die Kommandofabrik DIESER Ansicht, nicht GAMECLIENT: hier - und nur hier - entscheidet
+    // sich, auf WEN die Strasse gebucht wird. Ohne das schickte ein Padspieler, der mit Y/A den
+    // Knopf im Strassenfenster drueckt, die Route des HAUPTSPIELERS in seinem eigenen Namen ab.
+    if(!gcFactoryFor(view).BuildRoad(rb.start, rb.mode == RoadBuildMode::Boat, rb.route))
+        return false;
+    rb.mode = RoadBuildMode::Disabled;
+    // Die Route bleibt hier bewusst STEHEN: die visuelle Vorschau liegt noch auf dem Viewer und
+    // wird erst abgeraeumt, wenn die Simulation die Strasse gebaut oder abgelehnt hat
+    // (RoadNote -> GameWorldViewer::RoadConstructionEnded). Sie ist der Schluessel dafuer.
+    UpdateRoadCursor(view);
+    return true;
+}
+
 void dskGameInterface::GI_BuildRoad()
 {
-    if(GAMECLIENT.BuildRoad(road.start, road.mode == RoadBuildMode::Boat, road.route))
-    {
-        road.mode = RoadBuildMode::Disabled;
-        WINDOWMANAGER.SetCursor(Cursor::Hand);
-    }
+    CommitRoad(RoadWindowOwner());
 }
 
 void dskGameInterface::Msg_WindowClosed(IngameWindow& wnd)
 {
-    if(actionwindow == &wnd)
-        actionwindow = nullptr;
-    else if(roadwindow == &wnd)
-        roadwindow = nullptr;
+    forEachView([&](PlayerView& view) {
+        if(view.actionwindow == &wnd)
+            view.actionwindow = nullptr;
+        else if(view.roadwindow == &wnd)
+            view.roadwindow = nullptr;
+        // Lebensdauer des Fokus: hier ist das Fenster noch am Leben, der Rahmen kann also
+        // sauber abgemeldet werden. Der Destruktor von IngameWindow ist nur der Backstop.
+        if(view.GetFocus().GetRoot() == &wnd)
+            ClearFocusRing(view, &wnd);
+    });
 }
 
 void dskGameInterface::GI_FlagDestroyed(const MapPoint pt)
 {
-    // Im Wegbaumodus und haben wir von hier eine Flagge gebaut?
-    if(road.mode != RoadBuildMode::Disabled && road.start == pt)
-    {
-        GI_CancelRoadBuilding();
-    }
+    // Die Welt nennt hier keinen Spieler (world/GameWorld.cpp:117 ruft ohne Spielerbezug auf),
+    // also muss jede Ansicht ihren EIGENEN Strassenbauzustand und ihr eigenes Aktionsfenster
+    // pruefen.
+    forEachView([&](PlayerView& view) {
+        // Im Wegbaumodus und haben wir von hier eine Flagge gebaut?
+        //
+        // Frueher wurde nur bei primary() vollstaendig abgeraeumt; bei jeder anderen Ansicht
+        // wurde blos der Modus abgeschaltet - RemoveVisualRoad blieb aus. Deren visuelle
+        // Strasse waere fuer immer stehen geblieben und ihre BQ dauerhaft falsch. Jetzt nimmt
+        // jede Ansicht denselben Weg.
+        if(view.GetRoad().start == pt)
+            CancelRoadBuilding(view);
 
-    // Evtl Actionfenster schließen, da sich das ja auch auf diese Flagge bezieht
-    if(actionwindow)
-    {
-        if(actionwindow->GetSelectedPt() == pt)
-            actionwindow->Close();
-    }
+        // Evtl Actionfenster schliessen, da sich das ja auch auf diese Flagge bezieht
+        if(view.actionwindow && view.actionwindow->GetSelectedPt() == pt)
+            view.actionwindow->Close();
+    });
 }
 
 void dskGameInterface::CI_PlayerLeft(const unsigned playerId)
@@ -1277,16 +2365,23 @@ void dskGameInterface::CI_PlayersSwapped(const unsigned player1, const unsigned 
                        + worldViewer.GetWorld().GetPlayer(player2).name + "'";
     messenger.AddMessage("", 0, ChatDestination::System, text, COLOR_YELLOW);
 
-    // Sichtbarkeiten und Minimap neu berechnen, wenn wir ein von den beiden Spielern sind
-    const unsigned localPlayerId = worldViewer.GetPlayerId();
-    if(player1 == localPlayerId || player2 == localPlayerId)
-    {
-        worldViewer.ChangePlayer(player1 == localPlayerId ? player2 : player1);
-        // Set visual settings back to the actual ones
-        GAMECLIENT.ResetVisualSettings();
-        minimap.UpdateAll();
-        InitPlayer();
-    }
+    // Sichtbarkeiten und Minimap neu berechnen, wenn wir einer von den beiden Spielern sind.
+    // Jede Ansicht prueft ihre EIGENE Id; die visuellen Einstellungen und InitPlayer (Postfach,
+    // Buttonleiste) haengen am Hauptspieler und laufen deshalb nur dort.
+    forEachView([&](PlayerView& view) {
+        const unsigned viewPlayerId = view.GetPlayerId();
+        if(player1 != viewPlayerId && player2 != viewPlayerId)
+            return;
+        view.GetViewer().ChangePlayer(player1 == viewPlayerId ? player2 : player1);
+        view.GetMinimap().UpdateAll();
+        if(&view == &primary())
+        {
+            // Set visual settings back to the actual ones
+            GAMECLIENT.ResetVisualSettings();
+            InitPlayer();
+        } else
+            view.MoveToOwnHQ();
+    });
 }
 
 /**
@@ -1298,28 +2393,24 @@ void dskGameInterface::GI_PlayerDefeated(const unsigned playerId)
       helpers::format(_("Player '%s' was defeated!"), worldViewer.GetWorld().GetPlayer(playerId).name);
     messenger.AddMessage("", 0, ChatDestination::System, text, COLOR_ORANGE);
 
-    /// Lokaler Spieler?
-    if(playerId == worldViewer.GetPlayerId())
-    {
-        /// Sichtbarkeiten neu berechnen
-        worldViewer.RecalcAllColors();
-        // Minimap updaten
-        minimap.UpdateAll();
-    }
+    // Das Argument benennt den BESIEGTEN Spieler, nicht den empfangenden. Die Meldung oben gibt
+    // es genau einmal, die Neuberechnung nur bei der Ansicht, die es selbst betrifft.
+    forEachView([&](PlayerView& view) {
+        if(playerId == view.GetPlayerId())
+            view.RecalcAllColors();
+    });
 }
 
 void dskGameInterface::GI_UpdateMinimap(const MapPoint pt)
 {
-    // Minimap Bescheid sagen
-    minimap.UpdateNode(pt);
+    // Kein Spielerargument (Aufrufer: noBaseBuilding.cpp:90, nofForester.cpp:105,
+    // nofStonemason.cpp:57, noTree.cpp:217) -> jede Minimap bekommt es.
+    forEachView([&](PlayerView& view) { view.GetMinimap().UpdateNode(pt); });
 }
 
 void dskGameInterface::GI_UpdateMapVisibility()
 {
-    // recalculate visibility
-    worldViewer.RecalcAllColors();
-    // update minimap
-    minimap.UpdateAll();
+    forEachView([](PlayerView& view) { view.RecalcAllColors(); });
 }
 
 /**
@@ -1327,31 +2418,43 @@ void dskGameInterface::GI_UpdateMapVisibility()
  */
 void dskGameInterface::GI_TreatyOfAllianceChanged(unsigned playerId)
 {
-    // Nur wenn Team-Sicht aktiviert ist, können sihc die Sichtbarkeiten auch ändern
-    if(playerId == worldViewer.GetPlayerId() && worldViewer.GetWorld().GetGGS().teamView)
-    {
-        /// Sichtbarkeiten neu berechnen
-        worldViewer.RecalcAllColors();
-        // Minimap updaten
-        minimap.UpdateAll();
-    }
+    // Nur wenn Team-Sicht aktiviert ist, koennen sich die Sichtbarkeiten auch aendern
+    if(!worldViewer.GetWorld().GetGGS().teamView)
+        return;
+    forEachView([&](PlayerView& view) {
+        if(playerId == view.GetPlayerId())
+            view.RecalcAllColors();
+    });
 }
 
 /**
  *  Baut Weg zurück von Ende bis zu start_id
  */
-void dskGameInterface::DemolishRoad(const unsigned start_id)
+void dskGameInterface::DemolishRoad(PlayerView& view, const unsigned start_id)
 {
     RTTR_Assert(start_id > 0);
-    for(unsigned i = road.route.size(); i >= start_id; --i)
+    // SCHUTZ: die Schleife laeuft rueckwaerts mit unsigned. start_id == 0 liesse sie bis zum
+    // Unterlauf laufen und griffe mit route[i - 1] ueber den Anfang des Vektors hinaus. Im
+    // Releasebau faellt der Assert darueber weg; deshalb steht hier zusaetzlich ein echter
+    // Ausstieg statt nur einer Behauptung.
+    if(start_id == 0)
+        return;
+    RoadBuildState& rb = view.GetRoad();
+    GameWorldViewer& viewer = view.GetViewer();
+    for(unsigned i = rb.route.size(); i >= start_id; --i)
     {
-        MapPoint t = road.point;
-        road.point = worldViewer.GetWorld().GetNeighbour(road.point, road.route[i - 1] + 3u);
-        worldViewer.SetVisiblePointRoad(road.point, road.route[i - 1], PointRoad::None);
-        worldViewer.RecalcBQForRoad(t);
+        MapPoint t = rb.point;
+        rb.point = viewer.GetWorld().GetNeighbour(rb.point, rb.route[i - 1] + 3u);
+        viewer.SetVisiblePointRoad(rb.point, rb.route[i - 1], PointRoad::None);
+        viewer.RecalcBQForRoad(t);
     }
 
-    road.route.resize(start_id - 1);
+    rb.route.resize(start_id - 1);
+}
+
+void dskGameInterface::DemolishRoad(const unsigned start_id)
+{
+    DemolishRoad(primary(), start_id);
 }
 
 /**

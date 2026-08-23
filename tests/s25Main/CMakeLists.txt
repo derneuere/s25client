@@ -49,6 +49,13 @@ add_subdirectory(network)
 add_subdirectory(notificationSystem)
 add_subdirectory(resources)
 add_subdirectory(simple)
+add_subdirectory(splitscreen)
+# Messwerkzeug, kein Regressionstest: nutzt psapi.h und baut nur unter Windows.
+# Standardmaessig aus, damit die Testsuite auf Linux/macOS uebersetzbar bleibt.
+option(RTTR_ENABLE_TRMEM_TOOL "Build the TerrainRenderer memory/timing measurement tool (Windows only)" OFF)
+if(RTTR_ENABLE_TRMEM_TOOL AND WIN32)
+    add_subdirectory(trmem)
+endif()
 add_subdirectory(UI)
 
 option(RTTR_ENABLE_BENCHMARKS "Build the benchmarks" OFF)

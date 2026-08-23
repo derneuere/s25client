@@ -6,6 +6,7 @@
 
 #include "Window.h"
 #include "ctrlList.h"
+#include <optional>
 struct MouseCoords;
 class glFont;
 
@@ -38,6 +39,11 @@ public:
     bool Msg_WheelDown(const MouseCoords& mc) override;
 
     void Msg_ListSelectItem(unsigned ctrl_id, int selection) override;
+
+    bool CanFocus() const override { return !readonly && IsVisible(); }
+    bool Activate() override;
+    bool StepValue(const Position& dir) override;
+    std::optional<ValueRange> GetValueRange() const override;
 
 protected:
     void Draw_() override;

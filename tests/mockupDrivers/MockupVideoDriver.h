@@ -30,6 +30,17 @@ public:
     using VideoDriver::SetNewSize;
     bool IsTouchEvent() const override;
 
+    /// Genau die Naht, an der der echte Treiber seine SDL-Ereignisse herausreicht
+    /// (IVideoDriver::FetchPadEvents). Ein Test fuellt padEvents_ und der Produktivcode holt sie
+    /// mit demselben Aufruf ab wie vom SDL2-Treiber - ohne SDL, ohne DLL, ohne Hardware.
+    void FetchPadEvents(std::vector<PadEvent>& out) override
+    {
+        out = padEvents_;
+        padEvents_.clear();
+    }
+    /// Was der echte Treiber aus SDL geholt haette
+    std::vector<PadEvent> padEvents_;
+
     KeyEvent modKeyState_;
     unsigned long tickCount_;
     unsigned numTfinger_;

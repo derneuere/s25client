@@ -97,10 +97,29 @@ float GameWorldView::SetZoomFactor(float zoomFactor, bool smoothTransition /* = 
     if(!smoothTransition)
     {
         zoomFactor_ = targetZoomFactor_;
+        // Eine noch laufende weiche Zoomfahrt anhalten. Ohne das schoebe SetNextZoomFactor im
+        // naechsten Draw() mit der alten Geschwindigkeit weiter, obwohl das Ziel schon erreicht
+        // ist - beim Padzoom (jeden Frame ein Sprung auf ein neues Ziel) waere das ein Zittern.
+        zoomSpeed_ = 0.f;
         updateEffectiveZoomFactor();
         CalcFxLx();
     }
     return targetZoomFactor_;
+}
+
+float GameWorldView::SetZoomFactorAt(const float zoomFactor, const Position& anchorViewPos)
+{
+    // Erst messen, wo der Anker JETZT in der Welt liegt ...
+    const Position before = ViewPosToMap(anchorViewPos);
+    // ... dann sofort umschalten (kein smoothTransition: der Padtrigger liefert ohnehin jeden
+    // Frame einen kleinen Schritt, DAS ist hier die Weichzeichnung - und nur so ist der Anker
+    // ueberhaupt festzuhalten, weil eine laufende Animation ihn jeden Frame neu verschoebe) ...
+    const float result = SetZoomFactor(zoomFactor, false);
+    // ... und den Unterschied in den Scrollstand schieben.
+    const Position after = ViewPosToMap(anchorViewPos);
+    if(before != after)
+        MoveBy(before - after);
+    return result;
 }
 
 float GameWorldView::GetCurrentTargetZoomFactor() const
@@ -121,6 +140,65 @@ Position GameWorldView::ViewPosToMap(Position pos) const
     return pos;
 }
 
+Position GameWorldView::MapPosToView(Position pos) const
+{
+    if(effectiveZoomFactor_ != 1.f) //-V550
+    {
+        PointF diff(size_.x - size_.x / effectiveZoomFactor_, size_.y - size_.y / effectiveZoomFactor_);
+        diff /= 2.f;
+        pos = Position((PointF(pos) - diff) * effectiveZoomFactor_);
+    }
+    return pos + origin_;
+}
+
+void GameWorldView::UpdateSelection()
+{
+    if(!cursorPos_)
+    {
+        selPt = MapPoint::Invalid();
+        selPtOffset = Position(0, 0);
+        return;
+    }
+
+    // Genau die Umrechnung, die frueher in Draw() stand (origin_ abziehen, dann die
+    // Zoomkorrektur) - ViewPosToMap macht beides.
+    const Position cursor = ViewPosToMap(*cursorPos_);
+
+    const TerrainRenderer& terrainRenderer = gwv.GetTerrainRenderer();
+    const auto& world = GetWorld();
+    int shortestDistToCursor = 100000;
+    // Reihenfolge und Metrik bewusst identisch zur alten Schleife in Draw(): erste Fundstelle
+    // des Minimums gewinnt, damit sich der selektierte Punkt nicht veraendert.
+    for(const int y : helpers::range(firstPt.y, lastPt.y + 1))
+    {
+        for(const int x : helpers::range(firstPt.x, lastPt.x + 1))
+        {
+            Position curOffset;
+            const MapPoint curPt = terrainRenderer.ConvertCoords(Position(x, y), &curOffset);
+            const DrawPoint curPos = world.GetNodePos(curPt) - offset + curOffset;
+
+            Position dist = cursor - curPos;
+            dist *= dist;
+            if(std::abs(dist.x) + std::abs(dist.y) < shortestDistToCursor)
+            {
+                selPt = curPt;
+                selPtOffset = curOffset;
+                shortestDistToCursor = std::abs(dist.x) + std::abs(dist.y);
+            }
+        }
+    }
+}
+
+Rect GameWorldView::GetScissorRect() const
+{
+    const auto windowSize = VIDEODRIVER.GetWindowSize();
+    const auto& guiScale = VIDEODRIVER.getGuiScale();
+    const auto screenOrigin = guiScale.viewToScreen(origin_);
+    const auto screenSize = guiScale.viewToScreen(size_);
+    return Rect(screenOrigin.x, static_cast<int>(windowSize.height) - (screenOrigin.y + screenSize.y),
+                static_cast<unsigned>(screenSize.x), static_cast<unsigned>(screenSize.y));
+}
+
 struct ObjectBetweenLines
 {
     noBase& obj;
@@ -132,15 +210,14 @@ void GameWorldView::Draw(const RoadBuildState& rb, const MapPoint selected, bool
 {
     SetNextZoomFactor();
 
-    const auto windowSize = VIDEODRIVER.GetWindowSize();
-    const auto& guiScale = VIDEODRIVER.getGuiScale();
-    const auto screenOrigin = guiScale.viewToScreen(origin_);
-    const auto screenSize = guiScale.viewToScreen(size_);
-    glScissor(screenOrigin.x, windowSize.height - (screenOrigin.y + screenSize.y), screenSize.x, screenSize.y);
+    // Der selektierte Punkt kommt aus dem Zeiger DIESER Ansicht und wird ohne jeden GL-Aufruf
+    // berechnet. Frueher stand hier VIDEODRIVER.GetMousePos() - eine globale Abfrage, die bei
+    // mehreren Ansichten allen dieselbe Auswahl gegeben haette.
+    UpdateSelection();
 
-    int shortestDistToMouse = 100000;
-    Position mousePos = VIDEODRIVER.GetMousePos();
-    mousePos -= Position(origin_);
+    const auto scissor = GetScissorRect();
+    glScissor(scissor.left, scissor.top, scissor.getSize().x, scissor.getSize().y);
+
     if(effectiveZoomFactor_ != 1.f) //-V550
     {
         glMatrixMode(GL_PROJECTION);
@@ -150,8 +227,6 @@ void GameWorldView::Draw(const RoadBuildState& rb, const MapPoint selected, bool
         PointF diff(size_.x - size_.x / effectiveZoomFactor_, size_.y - size_.y / effectiveZoomFactor_);
         diff = diff / 2.f;
         glTranslatef(-diff.x, -diff.y, 0.f);
-        // Also adjust mouse
-        mousePos = Position(PointF(mousePos) / effectiveZoomFactor_ + diff);
         glMatrixMode(GL_MODELVIEW);
     }
 
@@ -177,15 +252,6 @@ void GameWorldView::Draw(const RoadBuildState& rb, const MapPoint selected, bool
             Position curOffset;
             const MapPoint curPt = terrainRenderer.ConvertCoords(Position(x, y), &curOffset);
             const DrawPoint curPos = world.GetNodePos(curPt) - offset + curOffset;
-
-            Position mouseDist = mousePos - curPos;
-            mouseDist *= mouseDist;
-            if(std::abs(mouseDist.x) + std::abs(mouseDist.y) < shortestDistToMouse)
-            {
-                selPt = curPt;
-                selPtOffset = curOffset;
-                shortestDistToMouse = std::abs(mouseDist.x) + std::abs(mouseDist.y);
-            }
 
             const Visibility visibility = gwv.GetVisibility(curPt);
 
@@ -238,6 +304,7 @@ void GameWorldView::Draw(const RoadBuildState& rb, const MapPoint selected, bool
     }
     glPopMatrix();
 
+    const auto windowSize = VIDEODRIVER.GetWindowSize();
     glScissor(0, 0, windowSize.width, windowSize.height);
 }
 
@@ -742,6 +809,12 @@ void GameWorldView::CalcFxLx()
 void GameWorldView::Resize(const Extent& newSize)
 {
     size_ = newSize;
+    // effectiveZoomFactor_ haengt an VIDEODRIVER.getGuiScale() (updateEffectiveZoomFactor unten).
+    // Resize ist der einzige Weg, auf dem eine geaenderte GuiScale bei der Ansicht ankommt
+    // (VideoDriver::setGuiScalePercent -> WindowResized -> Desktop::Msg_ScreenResize -> Resize),
+    // sonst rechnete CalcFxLx danach mit einem veralteten Faktor weiter, bis der Zoom das naechste
+    // Mal verstellt wird - SetNextZoomFactor kehrt bei unveraendertem Ziel sofort zurueck.
+    updateEffectiveZoomFactor();
     CalcFxLx();
 }
 

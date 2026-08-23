@@ -7,6 +7,7 @@
 #include "ctrlScrollBar.h"
 #include "driver/MouseCoords.h"
 #include "ogl/glFont.h"
+#include <algorithm>
 
 ctrlList::ctrlList(Window* parent, unsigned id, const DrawPoint& pos, const Extent& size, TextureColor tc,
                    const glFont* font)
@@ -30,6 +31,47 @@ void ctrlList::SetSelection(const std::optional<unsigned>& selection)
         if(selection && GetParent())
             GetParent()->Msg_ListSelectItem(GetID(), *selection);
     }
+}
+
+bool ctrlList::Activate()
+{
+    if(lines.empty() || !IsVisible() || !GetParent() || !selection_)
+        return false;
+    // Entspricht dem Doppelklick im Mauspfad (Msg_LeftUp).
+    GetParent()->Msg_ListChooseItem(GetID(), *selection_);
+    return true;
+}
+
+std::optional<Window::ValueRange> ctrlList::GetValueRange() const
+{
+    if(lines.empty())
+        return std::nullopt;
+    return ValueRange{selection_.value_or(0u), static_cast<unsigned>(lines.size() - 1u), ValueAxis::Vertical};
+}
+
+bool ctrlList::StepValue(const Position& dir)
+{
+    if(dir.y == 0 || lines.empty())
+        return false; // waagerecht: der Fokus wandert weiter
+    const int last = static_cast<int>(lines.size()) - 1;
+    int next = (selection_ ? static_cast<int>(*selection_) : (dir.y > 0 ? -1 : last + 1)) + dir.y;
+    next = std::max(0, std::min(last, next));
+    if(!selection_ || static_cast<int>(*selection_) != next)
+    {
+        SetSelection(static_cast<unsigned>(next));
+        // Die Auswahl kann aus dem Sichtbereich laufen - die Scrollleiste muss mit. Bewusst
+        // SetScrollPos und nicht Scroll: die Liste liest die Position selbst beim Zeichnen,
+        // eine Meldung nach oben gibt es beim Mauspfad an dieser Stelle auch nicht.
+        if(auto* scrollbar = GetCtrl<ctrlScrollBar>(0))
+        {
+            const int pos = scrollbar->GetScrollPos();
+            if(next < pos)
+                scrollbar->SetScrollPos(static_cast<unsigned short>(next));
+            else if(pagesize > 0 && next >= pos + static_cast<int>(pagesize))
+                scrollbar->SetScrollPos(static_cast<unsigned short>(next - static_cast<int>(pagesize) + 1));
+        }
+    }
+    return true; // verbraucht, auch am Rand: der Fokus soll nicht aus der Liste springen
 }
 
 bool ctrlList::Msg_MouseMove(const MouseCoords& mc)

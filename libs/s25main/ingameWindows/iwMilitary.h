@@ -13,6 +13,9 @@ class GameWorldViewer;
 /// Window for changing military settings, e.g. occupation distribution
 class iwMilitary final : public TransmitSettingsIgwAdapter
 {
+    /// Die Ansicht, zu der dieses Fenster gehoert. Ihre Spieler-Id sagt, WESSEN
+    /// Einstellungen hier angezeigt und gesendet werden.
+    const GameWorldViewer& gwv;
     GameCommandFactory& gcFactory;
 
 public:

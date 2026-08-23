@@ -483,15 +483,56 @@ void ctrlTable::ResetButtonWidths()
     }
 }
 
+void ctrlTable::MoveSelection(const int delta)
+{
+    if(delta < 0)
+    {
+        if(selection_.value_or(0u) > 0u)
+            SetSelection(*selection_ - 1);
+    } else if(delta > 0)
+        SetSelection(selection_.value_or(0u) + 1u);
+}
+
 bool ctrlTable::Msg_KeyDown(const KeyEvent& ke)
 {
     switch(ke.kt)
     {
         default: return false;
-        case KeyType::Up:
-            if(selection_.value_or(0u) > 0u)
-                SetSelection(*selection_ - 1);
-            return true;
-        case KeyType::Down: SetSelection(selection_.value_or(0u) + 1u); return true;
+        case KeyType::Up: MoveSelection(-1); return true;
+        case KeyType::Down: MoveSelection(+1); return true;
     }
+}
+
+/// ACHTUNG: selection_ wird im Konstruktor mit -1 belegt (siehe Initialisierungsliste). Das ist
+/// ein std::optional<unsigned>, also ist es DA und enthaelt 4294967295. GetSelection().has_value()
+/// ist damit von Anfang an true. Bestehender Fehler im Baum, hier bewusst NICHT geaendert (das
+/// wuerde das Verhalten fuer den Maus-und-Tastatur-Spieler verschieben); der Fokuspfad muss ihn
+/// deshalb selbst abfangen.
+bool ctrlTable::HasValidSelection() const
+{
+    return selection_ && *selection_ < rows_.size();
+}
+
+bool ctrlTable::Activate()
+{
+    if(!IsVisible() || !GetParent() || !HasValidSelection())
+        return false;
+    GetParent()->Msg_TableChooseItem(GetID(), *selection_);
+    return true;
+}
+
+std::optional<Window::ValueRange> ctrlTable::GetValueRange() const
+{
+    if(rows_.empty())
+        return std::nullopt;
+    return ValueRange{HasValidSelection() ? *selection_ : 0u, static_cast<unsigned>(rows_.size() - 1u),
+                      ValueAxis::Vertical};
+}
+
+bool ctrlTable::StepValue(const Position& dir)
+{
+    if(dir.y == 0 || rows_.empty())
+        return false;
+    MoveSelection(dir.y);
+    return true;
 }

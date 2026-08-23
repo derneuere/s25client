@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "ctrlComboBox.h"
+#include <algorithm>
 #include "CollisionDetection.h"
 #include "Loader.h"
 #include "ctrlButton.h"
@@ -185,6 +186,42 @@ void ctrlComboBox::Msg_ListSelectItem(unsigned, const int selection)
         // Nachricht an übergeordnetes Fenster verschicken
         GetParent()->Msg_ComboSelectItem(GetID(), selection);
     }
+}
+
+bool ctrlComboBox::Activate()
+{
+    if(readonly || !IsVisible() || !GetParent())
+        return false;
+    auto* list = GetCtrl<ctrlList>(0);
+    // Exakt der Rumpf von Msg_LeftDown beim Klick auf das Feld.
+    ShowList(!list->IsVisible());
+    return true;
+}
+
+std::optional<Window::ValueRange> ctrlComboBox::GetValueRange() const
+{
+    const auto* list = GetCtrl<ctrlList>(0);
+    if(list->GetNumLines() == 0)
+        return std::nullopt;
+    return ValueRange{list->GetSelection().value_or(0u), list->GetNumLines() - 1u, ValueAxis::Vertical};
+}
+
+bool ctrlComboBox::StepValue(const Position& dir)
+{
+    if(dir.y == 0 || readonly)
+        return false;
+    auto* list = GetCtrl<ctrlList>(0);
+    const int numLines = static_cast<int>(list->GetNumLines());
+    if(numLines == 0)
+        return false;
+    const int last = numLines - 1;
+    const auto& sel = list->GetSelection();
+    int next = (sel ? static_cast<int>(*sel) : (dir.y > 0 ? -1 : last + 1)) + dir.y;
+    next = std::max(0, std::min(last, next));
+    // Bewusst ueber die Liste: das loest Msg_ListSelectItem auf DIESEM Control aus und damit
+    // genau den Weg, den auch ein Mausklick auf einen Listeneintrag nimmt.
+    list->SetSelection(static_cast<unsigned>(next));
+    return true;
 }
 
 void ctrlComboBox::AddItem(const std::string& text)

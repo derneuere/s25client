@@ -30,6 +30,11 @@ public:
 
     /// Init the terrain renderer. Must be done before first call to GetTerrainRenderer!
     void InitTerrainRenderer();
+    /// Legt NUR die CPU-Geometrie des TerrainRenderers an, ohne einen einzigen OpenGL-Aufruf und
+    /// ohne Texturen. Damit sind ConvertCoords und alles, was darauf aufbaut (GameWorldView::
+    /// UpdateSelection, CalcFxLx), ohne Grafikkarte und ohne echte S2-Daten benutzbar.
+    /// InitTerrainRenderer ruft Init ohnehin selbst auf (TerrainRenderer::GenerateOpenGL).
+    void InitTerrainGeometry();
 
     /// Return the world itself
     const GameWorldBase& GetWorld() const { return gwb; }

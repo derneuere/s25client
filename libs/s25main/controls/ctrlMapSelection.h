@@ -34,6 +34,9 @@ public:
 
     bool Msg_LeftUp(const MouseCoords& mc) override;
 
+    bool CanFocus() const override { return IsVisible() && getSelection().has_value(); }
+    bool Activate() override;
+
 protected:
     void Draw_() override;
 

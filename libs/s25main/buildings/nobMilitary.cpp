@@ -1280,7 +1280,13 @@ void nobMilitary::SetCoinsAllowed(const bool enabled)
     // Umstellen
     coinsDisabled = !enabled;
     // Wenn das von einem fremden Spieler umgestellt wurde (oder vom Replay), muss auch das visuelle umgestellt werden
-    if(GAMECLIENT.GetPlayerId() != player || GAMECLIENT.IsReplayModeOn())
+    // Der Vergleich mit GetPlayerId() war der Test "gehoert das Gebaeude MIR?" - er kannte nur
+    // den Hauptspieler. Ein zusaetzlicher lokaler Spieler galt damit als fremd, und sein
+    // Anzeigewert wurde beim Ausfuehren des eigenen Kommandos ueberschrieben (sichtbar als
+    // Zurueckspringen des Schalters, solange noch ein Kommando unterwegs ist). Nur
+    // Anzeigezustand - die Felder werden nicht serialisiert, sondern beim Laden aus dem
+    // echten Wert abgeleitet. Ohne zusaetzliche lokale Spieler ist die Bedingung wortgleich.
+    if(!GAMECLIENT.IsLocalHumanPlayer(player) || GAMECLIENT.IsReplayModeOn())
         coinsDisabledVirtual = coinsDisabled;
 
     if(!coinsDisabled)
@@ -1307,7 +1313,13 @@ void nobMilitary::SetArmorAllowed(const bool enabled)
         return;
 
     armorAllowed = enabled;
-    if(GAMECLIENT.GetPlayerId() != player || GAMECLIENT.IsReplayModeOn())
+    // Der Vergleich mit GetPlayerId() war der Test "gehoert das Gebaeude MIR?" - er kannte nur
+    // den Hauptspieler. Ein zusaetzlicher lokaler Spieler galt damit als fremd, und sein
+    // Anzeigewert wurde beim Ausfuehren des eigenen Kommandos ueberschrieben (sichtbar als
+    // Zurueckspringen des Schalters, solange noch ein Kommando unterwegs ist). Nur
+    // Anzeigezustand - die Felder werden nicht serialisiert, sondern beim Laden aus dem
+    // echten Wert abgeleitet. Ohne zusaetzliche lokale Spieler ist die Bedingung wortgleich.
+    if(!GAMECLIENT.IsLocalHumanPlayer(player) || GAMECLIENT.IsReplayModeOn())
         armorAllowedVirtual = armorAllowed;
 
     if(armorAllowed)

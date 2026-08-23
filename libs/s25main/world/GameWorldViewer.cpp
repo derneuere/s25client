@@ -54,6 +54,11 @@ void GameWorldViewer::InitVisualData()
     });
 }
 
+void GameWorldViewer::InitTerrainGeometry()
+{
+    tr.Init(gwb.GetSize());
+}
+
 void GameWorldViewer::InitTerrainRenderer()
 {
     tr.GenerateOpenGL(*this);

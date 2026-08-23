@@ -5,6 +5,7 @@
 #pragma once
 
 #include "Window.h"
+#include <optional>
 struct MouseCoords;
 
 class ctrlScrollBar final : public Window
@@ -26,6 +27,28 @@ public:
     bool Msg_LeftDown(const MouseCoords& mc) override;
     bool Msg_MouseMove(const MouseCoords& mc) override;
     void Msg_ButtonClick(unsigned ctrl_id) override;
+
+    /// Fokusnavigation: senkrechte Werteachse, waagerecht wandert der Fokus weiter.
+    bool CanFocus() const override { return IsVisible() && scroll_range > pagesize; }
+    std::optional<ValueRange> GetValueRange() const override
+    {
+        return ValueRange{scroll_pos, static_cast<unsigned>(scroll_range > pagesize ? scroll_range - pagesize : 0),
+                          ValueAxis::Vertical};
+    }
+    /// Bewusst Scroll() und nicht SetScrollPos(): letzteres meldet NICHT nach oben, die
+    /// angehaengte Liste wuerde nicht mitkommen.
+    bool SetValue(unsigned value) override
+    {
+        Scroll(static_cast<int>(value) - static_cast<int>(scroll_pos));
+        return true;
+    }
+    bool StepValue(const Position& dir) override
+    {
+        if(dir.y == 0)
+            return false;
+        Scroll(dir.y);
+        return true;
+    }
 
 protected:
     void Draw_() override;

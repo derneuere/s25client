@@ -12,17 +12,41 @@
 TransmitSettingsIgwAdapter::TransmitSettingsIgwAdapter(unsigned id, const DrawPoint& pos, const Extent& size,
                                                        const std::string& title, glArchivItem_Bitmap* background,
                                                        bool modal)
-    : IngameWindow(id, pos, size, title, background, modal), settings_changed(false)
+    : IngameWindow(id, pos, size, title, background, modal), settingsChanged_(false)
 {
     // Timer for transmitting changes every 2 seconds
     using namespace std::chrono_literals;
     AddTimer(firstCtrlID + 1u, 2s);
 }
 
+void TransmitSettingsIgwAdapter::MarkSettingsChanged()
+{
+    settingsChanged_ = true;
+    // Der handelnde Spieler wird JETZT festgehalten, im Moment der Aenderung. Beim Senden -
+    // zwei Sekunden spaeter oder beim Schliessen - weiss niemand mehr, wer den Regler bewegt
+    // hat: der Eingabepfad ist dann laengst zurueckgekehrt.
+    pendingPlayer_ = GAMECLIENT.GetActingPlayer();
+}
+
+void TransmitSettingsIgwAdapter::OnSettingsTransmitted()
+{
+    settingsChanged_ = false;
+    pendingPlayer_.reset();
+}
+
+void TransmitSettingsIgwAdapter::TransmitSettingsForPendingPlayer()
+{
+    // Auch dann klammern, wenn nichts gemerkt ist: nullopt heisst dann ausdruecklich
+    // "Hauptspieler". Ohne das schluege eine zufaellig offene fremde Klammer durch - etwa
+    // wenn ein Padspieler ueber einen Knopf das Fenster eines anderen schliesst.
+    const GameClient::ScopedActingPlayer acting(GAMECLIENT, pendingPlayer_);
+    TransmitSettings();
+}
+
 void TransmitSettingsIgwAdapter::Close()
 {
-    TransmitSettings();
-    if(!settings_changed)
+    TransmitSettingsForPendingPlayer();
+    if(!HasPendingSettings())
     {
         IngameWindow::Close();
     } else
@@ -46,5 +70,5 @@ void TransmitSettingsIgwAdapter::Msg_Timer(const unsigned /*ctrl_id*/)
     if(GAMECLIENT.IsReplayModeOn())
         UpdateSettings();
     else
-        TransmitSettings();
+        TransmitSettingsForPendingPlayer();
 }

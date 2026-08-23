@@ -28,7 +28,7 @@ enum
 iwMilitary::iwMilitary(const GameWorldViewer& gwv, GameCommandFactory& gcFactory)
     : TransmitSettingsIgwAdapter(CGI_MILITARY, IngameWindow::posLastOrCenter, Extent(168, 330), _("Military"),
                                  LOADER.GetImageN("io", 5)),
-      gcFactory(gcFactory)
+      gwv(gwv), gcFactory(gcFactory)
 {
     // Setting bars
     constexpr Extent progSize(132, 26);
@@ -82,24 +82,24 @@ void iwMilitary::TransmitSettings()
     if(GAMECLIENT.IsReplayModeOn())
         return;
 
-    if(settings_changed)
+    if(HasPendingSettings())
     {
         // Save settings
-        MilitarySettings milSettings = GAMECLIENT.visual_settings.military_settings;
+        MilitarySettings milSettings = GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).military_settings;
         for(unsigned char i = 0; i < milSettings.size(); ++i)
             milSettings[i] = (unsigned char)GetCtrl<ctrlProgress>(ID_Offset + i)->GetPosition();
 
         if(gcFactory.ChangeMilitary(milSettings))
         {
-            GAMECLIENT.visual_settings.military_settings = milSettings;
-            settings_changed = false;
+            GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).military_settings = milSettings;
+            OnSettingsTransmitted();
         }
     }
 }
 
 void iwMilitary::Msg_ProgressChange(const unsigned /*ctrl_id*/, const unsigned short /*position*/)
 {
-    settings_changed = true;
+    MarkSettingsChanged();
 }
 
 void iwMilitary::UpdateSettings(const MilitarySettings& military_settings)
@@ -112,7 +112,7 @@ void iwMilitary::UpdateSettings(const MilitarySettings& military_settings)
 
 void iwMilitary::UpdateSettings()
 {
-    UpdateSettings(GAMECLIENT.visual_settings.military_settings);
+    UpdateSettings(GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).military_settings);
 }
 
 void iwMilitary::Msg_ButtonClick(const unsigned ctrl_id)
@@ -137,8 +137,8 @@ void iwMilitary::Msg_ButtonClick(const unsigned ctrl_id)
         break;
         case ID_btDefault:
         {
-            UpdateSettings(GAMECLIENT.default_settings.military_settings);
-            settings_changed = true;
+            UpdateSettings(GAMECLIENT.GetDefaultSettings(gwv.GetPlayerId()).military_settings);
+            MarkSettingsChanged();
         }
         break;
     }

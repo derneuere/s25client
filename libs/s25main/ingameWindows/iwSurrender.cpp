@@ -4,6 +4,7 @@
 
 #include "iwSurrender.h"
 #include "Loader.h"
+#include "WindowManager.h"
 #include "network/GameClient.h"
 #include "gameData/const_gui_ids.h"
 
@@ -20,6 +21,11 @@ iwSurrender::iwSurrender()
     // Abbrechen
     AddImageButton(1, DrawPoint(158, 24), Extent(68, 57), TextureColor::Red1, LOADER.GetImageN("io", 40),
                    _("Don't surrender"));
+
+    // Teilt sich die GUI_ID mit iwEndgame (beides CGI_ENDGAME) und muss deshalb dieselbe
+    // Besitzregel haben - sonst waeren die beiden Dialoge gegeneinander nicht mehr
+    // deduplizierbar. Siehe die Begruendung in iwEndgame.cpp.
+    SetOwner(SHARED_WINDOW_OWNER);
 }
 
 void iwSurrender::Msg_ButtonClick(const unsigned ctrl_id)

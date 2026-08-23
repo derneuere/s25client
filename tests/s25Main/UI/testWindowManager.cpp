@@ -290,7 +290,7 @@ BOOST_FIXTURE_TEST_CASE(ShowIngameWnd, uiHelper::Fixture)
     BOOST_TEST(!WINDOWMANAGER.GetCurrentDesktop()->IsActive());
 
     // Close by ID
-    WINDOWMANAGER.Close(wnd2->GetID());
+    WINDOWMANAGER.Close(wnd2->GetID(), wnd2->GetOwner());
     WINDOWMANAGER.Draw();
     REQUIRE_WINDOW_DESTROYED(wnd2);
     BOOST_TEST(WINDOWMANAGER.GetCurrentDesktop()->IsActive());
@@ -678,7 +678,7 @@ BOOST_FIXTURE_TEST_CASE(TestTransmitSettingsAdapter, uiHelper::Fixture)
         // Save settings on close via ID
         wnd = &WINDOWMANAGER.Show(std::make_unique<MockSettingsWnd>(CGI_TOOLS));
         MOCK_EXPECT(wnd->TransmitSettings).once();
-        WINDOWMANAGER.Close(CGI_TOOLS);
+        WINDOWMANAGER.Close(CGI_TOOLS, wnd->GetOwner());
         WINDOWMANAGER.Draw();
         BOOST_TEST(MockSettingsWnd::activeWnds == 0);
     }

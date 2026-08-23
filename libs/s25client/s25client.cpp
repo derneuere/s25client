@@ -5,6 +5,7 @@
 #include "Debug.h"
 #include "GameManager.h"
 #include "QuickStartGame.h"
+#include "world/ViewportLayout.h"
 #include "RTTR_AssertError.h"
 #include "RTTR_Version.h"
 #include "RttrConfig.h"
@@ -442,6 +443,38 @@ int RunProgram(po::variables_map& options)
         }
     }
 
+    // Die Kommandozeile wird geprueft, BEVOR Fenster, OpenGL und Audio hochfahren: eine falsche
+    // Angabe soll nicht erst den halben Spielstart kosten, und der Fehler ist so auch auf einem
+    // Rechner ohne Grafikausgabe nachweisbar (tests/s25client/CMakeLists.txt).
+    std::vector<std::string> aiPlayers;
+    if(options.count("ai"))
+        aiPlayers = options["ai"].as<std::vector<std::string>>();
+    const unsigned numLocalPlayers = options["local-players"].as<unsigned>();
+
+    if(numLocalPlayers == 0)
+    {
+        bnw::cerr << "Error: --local-players must be at least 1\n";
+        return 1;
+    }
+    // Befund 3: frueh klemmen statt spaet abschneiden. Ohne diese Schranke nahm
+    // GameClient::SetupLocalPlayers ALLE angeforderten Slots unter lokale Kontrolle, waehrend
+    // dskGameInterface::CreateViews bei MAX_VIEWPORTS wortlos abbrach: die ueberzaehligen
+    // Spieler waeren lokal gesteuert gewesen, haetten aber weder Ansicht noch Eingabegeraet
+    // noch KI bekommen - stumme Geisterslots.
+    if(numLocalPlayers > MAX_VIEWPORTS)
+    {
+        bnw::cerr << "Error: --local-players must not exceed " << MAX_VIEWPORTS
+                  << ", there is one split-screen view per local player\n";
+        return 1;
+    }
+    // F3: --local-players und --ai schliessen sich aus. Frueher hat --ai stillschweigend
+    // gewonnen und die Partie startete als reine KI-Partie.
+    if(numLocalPlayers > 1 && !aiPlayers.empty())
+    {
+        bnw::cerr << "Error: --local-players cannot be combined with --ai\n";
+        return 1;
+    }
+
     SetGlobalInstanceWrapper<GameManager> gameManager(setGlobalGameManager, LOG, SETTINGS, VIDEODRIVER, AUDIODRIVER,
                                                       WINDOWMANAGER);
     try
@@ -451,11 +484,7 @@ int RunProgram(po::variables_map& options)
 
         if(options.count("map"))
         {
-            std::vector<std::string> aiPlayers;
-            if(options.count("ai"))
-                aiPlayers = options["ai"].as<std::vector<std::string>>();
-
-            if(!QuickStartGame(options["map"].as<std::string>(), aiPlayers))
+            if(!QuickStartGame(options["map"].as<std::string>(), aiPlayers, numLocalPlayers))
                 return 1;
         }
 
@@ -506,6 +535,7 @@ int main(int argc, char** argv)
         ("help,h", "Show help")
         ("map,m", po::value<std::string>(),"Map to load")
         ("ai", po::value<std::vector<std::string>>(),"AI player(s) to add")
+        ("local-players", po::value<unsigned>()->default_value(1),"Number of local human players (splitscreen, debug)")
         ("version", "Show version information and exit")
         ("convert-sounds", "Convert sounds and exit")
         ;

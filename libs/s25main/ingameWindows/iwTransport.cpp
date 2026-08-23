@@ -95,7 +95,7 @@ iwTransport::iwTransport(const GameWorldViewer& gwv, GameCommandFactory& gcFacto
                                                            {84, 263}}};
 
     // Get current transport order
-    fillTransportOrder(GAMECLIENT.visual_settings.transport_order);
+    fillTransportOrder(GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).transport_order);
 
     // Einstellungen festlegen
     for(unsigned char i = 0; i < pendingOrder.size(); ++i)
@@ -110,7 +110,7 @@ void iwTransport::TransmitSettings()
 {
     if(GAMECLIENT.IsReplayModeOn())
         return;
-    if(settings_changed)
+    if(HasPendingSettings())
     {
         TransportOrders transmitPendingTransportOrder;
         unsigned i = 0;
@@ -128,8 +128,8 @@ void iwTransport::TransmitSettings()
         // Daten übertragen
         if(gcFactory.ChangeTransport(transmitPendingTransportOrder))
         {
-            GAMECLIENT.visual_settings.transport_order = transmitPendingTransportOrder;
-            settings_changed = false;
+            GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).transport_order = transmitPendingTransportOrder;
+            OnSettingsTransmitted();
         }
     }
 }
@@ -152,7 +152,7 @@ void iwTransport::Msg_ButtonClick(const unsigned ctrl_id)
         {
             auto* group = GetCtrl<ctrlOptionGroup>(6);
 
-            fillTransportOrder(GAMECLIENT.default_settings.transport_order);
+            fillTransportOrder(GAMECLIENT.GetDefaultSettings(gwv.GetPlayerId()).transport_order);
             for(unsigned char i = 0; i < pendingOrder.size(); ++i)
             {
                 const auto& data = buttonData[pendingOrder[i]];
@@ -160,7 +160,7 @@ void iwTransport::Msg_ButtonClick(const unsigned ctrl_id)
                 group->GetCtrl<ctrlImageButton>(i)->SetTooltip(_(data.tooltip));
             }
 
-            settings_changed = true;
+            MarkSettingsChanged();
         }
         break;
         case 2: // ganz hoch
@@ -178,7 +178,7 @@ void iwTransport::Msg_ButtonClick(const unsigned ctrl_id)
                 group->SetSelection(group->GetSelection() - 1);
             }
 
-            settings_changed = true;
+            MarkSettingsChanged();
         }
         break;
         case 3: // hoch
@@ -196,7 +196,7 @@ void iwTransport::Msg_ButtonClick(const unsigned ctrl_id)
                 group->SetSelection(group->GetSelection() - 1);
             }
 
-            settings_changed = true;
+            MarkSettingsChanged();
         }
         break;
         case 4: // runter
@@ -214,7 +214,7 @@ void iwTransport::Msg_ButtonClick(const unsigned ctrl_id)
                 group->SetSelection(group->GetSelection() + 1);
             }
 
-            settings_changed = true;
+            MarkSettingsChanged();
         }
         break;
         case 5: // ganz runter
@@ -232,7 +232,7 @@ void iwTransport::Msg_ButtonClick(const unsigned ctrl_id)
                 group->SetSelection(group->GetSelection() + 1);
             }
 
-            settings_changed = true;
+            MarkSettingsChanged();
         }
         break;
     }
@@ -242,8 +242,8 @@ void iwTransport::UpdateSettings()
 {
     if(GAMECLIENT.IsReplayModeOn())
     {
-        gwv.GetPlayer().FillVisualSettings(GAMECLIENT.visual_settings);
-        fillTransportOrder(GAMECLIENT.visual_settings.transport_order);
+        gwv.GetPlayer().FillVisualSettings(GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()));
+        fillTransportOrder(GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).transport_order);
     }
     auto* group = GetCtrl<ctrlOptionGroup>(6);
 

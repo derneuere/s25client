@@ -107,6 +107,43 @@ public:
     /// Check if the given mouse position inside the boundary of this control.
     bool IsMouseOver(const MouseCoords& mousePos) const;
 
+    // --- Fokusnavigation (Phase 4) --------------------------------------------------------
+    // Alle Vorgaben tun nichts. Die grosse Mehrheit der Controlklassen bleibt damit
+    // unveraendert, und ein Programm, das nie Activate() ruft, verhaelt sich bit-identisch zu
+    // vorher. Insbesondere wird KEIN Msg_*-Handler und KEIN Draw_() angefasst: der Mauspfad
+    // kennt den Fokus nicht und darf ihn nie kennen (harte Randbedingung Einzelspieler).
+
+    /// Kann dieses Control den Fokus eines Eingabegeraets annehmen?
+    virtual bool CanFocus() const { return false; }
+
+    /// "Benutzen" - genau die Wirkung, die heute der Mausklick hat, aber OHNE Mausposition.
+    /// Bewusst nicht ueber Msg_LeftUp: das prueft IsMouseOver(mc) (controls/ctrlButton.cpp) und
+    /// liest damit den globalen Maus-Singleton, von dem es nur einen gibt.
+    /// true = es ist etwas passiert.
+    virtual bool Activate() { return false; }
+
+    enum class ValueAxis
+    {
+        Horizontal,
+        Vertical
+    };
+    struct ValueRange
+    {
+        unsigned value;
+        unsigned max;
+        ValueAxis axis;
+    };
+
+    /// Traegt dieses Control einen kontinuierlichen Wert (Analogmodus)? nullopt = nein.
+    virtual std::optional<ValueRange> GetValueRange() const { return std::nullopt; }
+    /// Wert setzen UND wie ein Mausklick nach oben melden. false, wenn es keinen Wert gibt.
+    virtual bool SetValue(unsigned /*value*/) { return false; }
+    /// Einen Rasterschritt. dir ist (-1|0|+1, -1|0|+1). true = verbraucht, der Fokus wandert
+    /// dann NICHT weiter.
+    virtual bool StepValue(const Position& /*dir*/) { return false; }
+    /// Braucht dieses Control Freitext, solange es den Fokus hat?
+    virtual bool WantsTextInput() const { return false; }
+
     /// Set the position for the window
     void SetPos(const DrawPoint& newPos);
 

@@ -36,6 +36,11 @@ public:
     bool Msg_LeftDown(const MouseCoords& mc) override;
     bool Msg_LeftUp(const MouseCoords& mc) override;
 
+    /// Fokusnavigation. Deckt ctrlTextButton, ctrlImageButton, ctrlColorButton und
+    /// ctrlBuildingIcon mit ab - alle vier erben von hier.
+    bool CanFocus() const override;
+    bool Activate() override;
+
 protected:
     /// Zeichnet Grundstruktur des Buttons
     void Draw_() override;

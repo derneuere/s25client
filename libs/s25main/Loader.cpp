@@ -430,6 +430,11 @@ void Loader::LoadDummyMapFiles()
     pushRange(440, 484);
     pushRange(500, 527);
     pushRange(560, 561);
+    // Waren-, Berufs- und Rahmensymbole. Ohne sie stuerzt jedes Gebaeudefenster schon im
+    // Konstruktor ab: iwBuilding/iwMilitaryBuilding/iwWares holen ihre Symbole ueber
+    // GetWareTex/GetJobTex/GetMapTexture aus genau diesem Archiv (WARES_TEX_MAP_OFFSET = 2250,
+    // Berufe ab 2300, Symbolrahmen 2298/2299, HQ-Reserve 2321..2325).
+    pushRange(2250, 2400);
 
     for(const auto j : helpers::range(0, 6))
     {

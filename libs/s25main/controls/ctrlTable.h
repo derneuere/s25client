@@ -73,8 +73,20 @@ public:
     void Msg_ScrollShow(unsigned ctrl_id, bool visible) override;
     bool Msg_KeyDown(const KeyEvent& ke) override;
 
+    /// Fokusnavigation. Msg_KeyDown bleibt bewusst OHNE Fokuspruefung - die Pfeiltasten in
+    /// dskSelectMap/dskLAN/dskLobby muessen fuer den Maus-und-Tastatur-Spieler unveraendert
+    /// funktionieren.
+    bool CanFocus() const override { return GetNumRows() > 0 && IsVisible(); }
+    bool Activate() override;
+    bool StepValue(const Position& dir) override;
+    std::optional<ValueRange> GetValueRange() const override;
+
 protected:
     void Draw_() override;
+    /// Aus Msg_KeyDown herausgezogen, damit Tastatur- und Padpfad denselben Code nehmen.
+    void MoveSelection(int delta);
+    /// selection_ startet als optional MIT Wert (unsigned)-1, siehe ctrlTable.cpp.
+    bool HasValidSelection() const;
 
     /// Setzt die Breite und Position der Buttons ohne Scrolleiste
     void ResetButtonWidths();

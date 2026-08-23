@@ -9,6 +9,7 @@
 #include "helpers/mathFuncs.h"
 #include "ogl/FontStyle.h"
 #include "ogl/glFont.h"
+#include <algorithm>
 
 ctrlProgress::ctrlProgress(Window* parent, const unsigned id, const DrawPoint& pos, const Extent& size,
                            const TextureColor tc, unsigned short button_minus, unsigned short button_plus,
@@ -131,6 +132,29 @@ void ctrlProgress::Msg_ButtonClick(const unsigned ctrl_id)
         }
         break;
     }
+}
+
+bool ctrlProgress::SetValue(const unsigned value)
+{
+    // Bewusst NICHT mit Msg_LeftDown zusammengelegt: der Mauspfad meldet dort auch dann nach
+    // oben, wenn sich der Wert nicht aendert, und klemmt nicht. Diese Randbedingung darf sich
+    // fuer den Einzelspieler nicht verschieben, also bleibt Msg_LeftDown unangetastet.
+    const auto newPos = static_cast<unsigned short>(std::min<unsigned>(value, maximum));
+    if(newPos == position)
+        return true; // verbraucht, aber keine Meldung -> keine Flut von GameCommands
+    position = newPos;
+    if(GetParent())
+        GetParent()->Msg_ProgressChange(GetID(), position);
+    return true;
+}
+
+bool ctrlProgress::StepValue(const Position& dir)
+{
+    if(dir.x == 0)
+        return false; // senkrecht: der Fokus wandert weiter
+    // Exakt der Weg der +/- Knoepfe.
+    Msg_ButtonClick(dir.x < 0 ? 0u : 1u);
+    return true;
 }
 
 bool ctrlProgress::Msg_LeftDown(const MouseCoords& mc)

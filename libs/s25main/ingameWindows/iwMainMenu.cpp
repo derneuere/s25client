@@ -174,7 +174,9 @@ void iwMainMenu::Msg_ButtonClick(const unsigned ctrl_id)
         break;
         case 13: // AI Debug
         {
-            if(auto* wnd = WINDOWMANAGER.FindNonModalWindow(CGI_AI_DEBUG))
+            // Derselbe Besitzer wie dieses Fenster: das Debugfenster gehoert dem Spieler, der es
+            // aus SEINEM Hauptmenue geoeffnet hat.
+            if(auto* wnd = WINDOWMANAGER.FindNonModalWindow(CGI_AI_DEBUG, GetOwner()))
                 wnd->Close();
             else if(gwv.GetViewer().GetPlayer().isHost)
             {

@@ -2329,6 +2329,11 @@ void GamePlayer::Trade(nobBaseWarehouse* goalWh, const boost_variant2<GoodType, 
 
 bool GamePlayer::IsBuildingEnabled(BuildingType type) const
 {
+    // Bewusst isHuman() und NICHT "wird lokal von einem Menschen gesteuert": diese Funktion
+    // haengt in der Simulation (GameWorld::SetBuildingSite <- gc::SetBuildingSite::Execute).
+    // Sie darf nur von repliziertem Weltzustand abhaengen. Fuer einen Splitscreen-Slot
+    // (in der Welt PlayerState::AI) bleibt der "alle Gebaeude"-Cheat damit wirkungslos - ein
+    // bewusst in Kauf genommener Komfortverlust statt eines neuen Divergenzpfads.
     return building_enabled[type] || (isHuman() && world.GetGameInterface()->GI_GetCheats().areAllBuildingsEnabled());
 }
 

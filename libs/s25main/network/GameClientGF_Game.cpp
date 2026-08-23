@@ -35,18 +35,29 @@ void GameClient::ExecuteNWF()
     }
 
     // Send GC message for this NWF
-    // First for all potential AIs as we need to combine the AI cmds of the local player with our own ones
+    // First for all potential AIs as we need to combine the AI cmds of a locally controlled
+    // player with his own ones
     for(AIPlayer& ai : game->aiPlayers_)
     {
         const std::vector<gc::GameCommandPtr> aiGCs = ai.FetchGameCommands();
-        /// Cmds from own AI get added to our gcs
-        if(ai.GetPlayerId() == GetPlayerId())
-            gameCommands_.insert(gameCommands_.end(), aiGCs.begin(), aiGCs.end());
+        /// Cmds from an AI running on a locally controlled slot get added to that player's gcs
+        if(gameCommands_.IsLocalPlayer(static_cast<uint8_t>(ai.GetPlayerId())))
+            gameCommands_.Append(static_cast<uint8_t>(ai.GetPlayerId()), aiGCs);
         else
             mainPlayer.sendMsgAsync(new GameMessage_GameCommand(ai.GetPlayerId(), checksum, aiGCs));
         for(auto& msg : ai.getAIInterface().FetchChatMessages())
             mainPlayer.sendMsgAsync(msg.release());
     }
-    mainPlayer.sendMsgAsync(new GameMessage_GameCommand(0xFF, checksum, gameCommands_));
-    gameCommands_.clear();
+    // Own player: keep the NO_PLAYER_ID placeholder so single player and network multiplayer
+    // produce the exact same message as before
+    mainPlayer.sendMsgAsync(
+      new GameMessage_GameCommand(0xFF, checksum, gameCommands_.Fetch(static_cast<uint8_t>(GetPlayerId()))));
+    // Additional local players: explicit id, exactly like the AI players above.
+    // Exactly one message per registered slot per NWF - empty ones are the required placeholders.
+    for(const uint8_t id : gameCommands_.GetPlayerIds())
+    {
+        if(id == GetPlayerId())
+            continue;
+        mainPlayer.sendMsgAsync(new GameMessage_GameCommand(id, checksum, gameCommands_.Fetch(id)));
+    }
 }

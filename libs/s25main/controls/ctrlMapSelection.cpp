@@ -141,6 +141,14 @@ bool ctrlMapSelection::Msg_LeftUp(const MouseCoords& mc)
     return false;
 }
 
+bool ctrlMapSelection::Activate()
+{
+    if(!IsVisible() || !GetParent() || !getSelection())
+        return false;
+    GetParent()->Msg_ButtonClick(GetID());
+    return true;
+}
+
 float ctrlMapSelection::getScaleFactor()
 {
     const auto ratio = PointF(GetSize()) / mapImages.background->GetSize();

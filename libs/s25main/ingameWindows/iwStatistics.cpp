@@ -41,7 +41,10 @@ std::string getPlayerStatus(const GamePlayer& player)
 {
     if(player.IsDefeated())
         return "---";
-    else if(player.isHuman())
+    // Reine Anzeige, kein Simulationszustand: ein Splitscreen-Slot ist in der Welt
+    // PlayerState::AI (isHuman() == false), wird aber von einem Menschen an diesem Rechner
+    // gesteuert und darf deshalb nicht als "COMP" erscheinen.
+    else if(player.isHuman() || GAMECLIENT.IsLocalHumanPlayer(static_cast<uint8_t>(player.GetPlayerId())))
         return "#" + std::to_string(player.GetPlayerId() + 1);
     else
         return _("COMP");

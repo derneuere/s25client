@@ -6,6 +6,7 @@
 
 #include "Window.h"
 #include "controls/ctrlBaseTooltip.h"
+#include <optional>
 struct MouseCoords;
 
 class ctrlProgress : public Window, public ctrlBaseTooltip
@@ -26,6 +27,16 @@ public:
     bool Msg_WheelUp(const MouseCoords& mc) override;
     bool Msg_WheelDown(const MouseCoords& mc) override;
     bool Msg_MouseMove(const MouseCoords& mc) override;
+
+    /// Fokusnavigation. Die Achse kommt vom Control: ein Fortschrittsbalken ist waagerecht,
+    /// die senkrechte Achse navigiert weiter. Damit gibt es keinen Modusschalter.
+    bool CanFocus() const override { return IsVisible(); }
+    std::optional<ValueRange> GetValueRange() const override
+    {
+        return ValueRange{position, maximum, ValueAxis::Horizontal};
+    }
+    bool SetValue(unsigned value) override;
+    bool StepValue(const Position& dir) override;
 
 protected:
     void Draw_() override;

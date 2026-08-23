@@ -77,7 +77,7 @@ void iwDistribution::TransmitSettings()
 {
     if(GAMECLIENT.IsReplayModeOn())
         return;
-    if(settings_changed)
+    if(HasPendingSettings())
     {
         // Read values from the progress ctrls to the struct
         Distributions newDistribution;
@@ -100,8 +100,8 @@ void iwDistribution::TransmitSettings()
         // und übermitteln
         if(gcFactory.ChangeDistribution(newDistribution))
         {
-            GAMECLIENT.visual_settings.distribution = newDistribution;
-            settings_changed = false;
+            GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).distribution = newDistribution;
+            OnSettingsTransmitted();
         }
     }
 }
@@ -109,13 +109,13 @@ void iwDistribution::TransmitSettings()
 void iwDistribution::Msg_Group_ProgressChange(const unsigned /*group_id*/, const unsigned /*ctrl_id*/,
                                               const unsigned short /*position*/)
 {
-    settings_changed = true;
+    MarkSettingsChanged();
 }
 
 void iwDistribution::UpdateSettings(const Distributions& distribution)
 {
     if(GAMECLIENT.IsReplayModeOn())
-        gwv.GetPlayer().FillVisualSettings(GAMECLIENT.visual_settings);
+        gwv.GetPlayer().FillVisualSettings(GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()));
 
     for(unsigned g = 0; g < groups.size(); ++g)
     {
@@ -130,7 +130,7 @@ void iwDistribution::UpdateSettings(const Distributions& distribution)
 
 void iwDistribution::UpdateSettings()
 {
-    UpdateSettings(GAMECLIENT.visual_settings.distribution);
+    UpdateSettings(GAMECLIENT.GetVisualSettings(gwv.GetPlayerId()).distribution);
 }
 
 void iwDistribution::Msg_ButtonClick(const unsigned ctrl_id)
@@ -152,8 +152,8 @@ void iwDistribution::Msg_ButtonClick(const unsigned ctrl_id)
         // Default button
         case 10:
         {
-            UpdateSettings(GAMECLIENT.default_settings.distribution);
-            settings_changed = true;
+            UpdateSettings(GAMECLIENT.GetDefaultSettings(gwv.GetPlayerId()).distribution);
+            MarkSettingsChanged();
         }
         break;
     }

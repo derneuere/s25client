@@ -10,6 +10,7 @@
 #include "SerializedGameData.h"
 #include "Ware.h"
 #include "addons/const_addons.h"
+#include "factories/GameCommandFactory.h"
 #include "figures/nofBuildingWorker.h"
 #include "figures/nofPigbreeder.h"
 #include "helpers/containerUtils.h"
@@ -497,7 +498,13 @@ void nobUsual::SetProductionEnabled(const bool enabled)
     // Umstellen
     disableProduction = !enabled;
     // Wenn das von einem fremden Spieler umgestellt wurde (oder vom Replay), muss auch das visuelle umgestellt werden
-    if(GAMECLIENT.GetPlayerId() != player || GAMECLIENT.IsReplayModeOn())
+    // Der Vergleich mit GetPlayerId() war der Test "gehoert das Gebaeude MIR?" - er kannte nur
+    // den Hauptspieler. Ein zusaetzlicher lokaler Spieler galt damit als fremd, und sein
+    // Anzeigewert wurde beim Ausfuehren des eigenen Kommandos ueberschrieben (sichtbar als
+    // Zurueckspringen des Schalters, solange noch ein Kommando unterwegs ist). Nur
+    // Anzeigezustand - die Felder werden nicht serialisiert, sondern beim Laden aus dem
+    // echten Wert abgeleitet. Ohne zusaetzliche lokale Spieler ist die Bedingung wortgleich.
+    if(!GAMECLIENT.IsLocalHumanPlayer(player) || GAMECLIENT.IsReplayModeOn())
         disableProductionVirtual = disableProduction;
 
     if(disableProduction)
@@ -544,9 +551,21 @@ void nobUsual::OnOutOfResources()
       player, std::make_unique<PostMsgWithBuilding>(GetEvMgr().GetCurrentGF(), error, PostCategory::Economy, *this));
     world->GetNotifications().publish(BuildingNote(BuildingNote::NoRessources, player, GetPos(), GetBuildingType()));
 
-    if(GAMECLIENT.GetPlayerId() == player && world->GetGGS().isEnabled(AddonId::DEMOLISH_BLD_WO_RES))
+    // Ebenfalls ein zeitversetzt entstehender GameCommand - aber einer aus der SIMULATION, nicht
+    // aus einer Eingabe. Es gibt hier keinen "handelnden Spieler": Auftraggeber ist der
+    // Besitzer des Gebaeudes. Deshalb wird nicht geklammert, sondern gleich die Fabrik dieses
+    // Spielers benutzt; damit kann auch keine zufaellig offene fremde Klammer durchschlagen.
+    //
+    // Vorher stand hier GAMECLIENT.GetPlayerId() == player. Das schloss die zusaetzlichen
+    // lokalen Spieler aus - ihre erschoepften Minen blieben stehen, waehrend die des
+    // Hauptspielers abgerissen wurden. In der Netzwerkpartie und im Einzelspieler ist
+    // GetGCFactory(player) != nullptr exakt gleichbedeutend mit dem alten Vergleich (nur der
+    // eigene Slot ist lokal), dort aendert sich also nichts. Im Replay gibt es keine Fabriken,
+    // und das Kommando wurde auch bisher schon von AddPlayerGC verworfen.
+    if(world->GetGGS().isEnabled(AddonId::DEMOLISH_BLD_WO_RES))
     {
-        GAMECLIENT.DestroyBuilding(GetPos());
+        if(auto* gcFactory = GAMECLIENT.GetGCFactory(player))
+            gcFactory->DestroyBuilding(GetPos());
     }
 }
 

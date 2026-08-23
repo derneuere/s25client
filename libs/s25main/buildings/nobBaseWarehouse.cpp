@@ -1255,7 +1255,13 @@ void nobBaseWarehouse::SetInventorySetting(const boost_variant2<GoodType, Job>& 
 
     // Bei anderen Spielern als dem lokalen, der das in Auftrag gegeben hat, müssen die visuellen ebenfalls
     // geändert werden oder auch bei Replays
-    if(GAMECLIENT.IsReplayModeOn() || GAMECLIENT.GetPlayerId() != player)
+    // Der Vergleich mit GetPlayerId() war der Test "gehoert das Gebaeude MIR?" - er kannte nur
+    // den Hauptspieler. Ein zusaetzlicher lokaler Spieler galt damit als fremd, und sein
+    // Anzeigewert wurde beim Ausfuehren des eigenen Kommandos ueberschrieben (sichtbar als
+    // Zurueckspringen des Schalters, solange noch ein Kommando unterwegs ist). Nur
+    // Anzeigezustand - die Felder werden nicht serialisiert, sondern beim Laden aus dem
+    // echten Wert abgeleitet. Ohne zusaetzliche lokale Spieler ist die Bedingung wortgleich.
+    if(GAMECLIENT.IsReplayModeOn() || !GAMECLIENT.IsLocalHumanPlayer(player))
         SetInventorySettingVisual(what, state);
 
     if(holds_alternative<GoodType>(what) && oldState.IsSet(EInventorySetting::Stop)
@@ -1359,7 +1365,13 @@ void nobBaseWarehouse::SetRealReserve(const unsigned rank, const unsigned count)
     reserve_soldiers_claimed_real[rank] = count;
 
     // Replay oder anderer Spieler? Dann die visuellen auch erhöhen
-    if(GAMECLIENT.IsReplayModeOn() || GAMECLIENT.GetPlayerId() != player)
+    // Der Vergleich mit GetPlayerId() war der Test "gehoert das Gebaeude MIR?" - er kannte nur
+    // den Hauptspieler. Ein zusaetzlicher lokaler Spieler galt damit als fremd, und sein
+    // Anzeigewert wurde beim Ausfuehren des eigenen Kommandos ueberschrieben (sichtbar als
+    // Zurueckspringen des Schalters, solange noch ein Kommando unterwegs ist). Nur
+    // Anzeigezustand - die Felder werden nicht serialisiert, sondern beim Laden aus dem
+    // echten Wert abgeleitet. Ohne zusaetzliche lokale Spieler ist die Bedingung wortgleich.
+    if(GAMECLIENT.IsReplayModeOn() || !GAMECLIENT.IsLocalHumanPlayer(player))
         reserve_soldiers_claimed_visual[rank] = count;
 
     // Geforderte Soldaten ggf. einbeziehen

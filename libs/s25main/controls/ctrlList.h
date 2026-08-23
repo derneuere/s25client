@@ -47,6 +47,14 @@ public:
     bool Msg_WheelUp(const MouseCoords& mc) override;
     bool Msg_WheelDown(const MouseCoords& mc) override;
 
+    /// Fokusnavigation: Zeilenauswahl ist StepValue auf der Y-Achse, Bestaetigen ist Activate.
+    /// Dieselbe Trennung, die es beim Mauspfad zwischen Klick (Msg_ListSelectItem) und
+    /// Doppelklick (Msg_ListChooseItem) schon gibt.
+    bool CanFocus() const override { return !lines.empty() && IsVisible(); }
+    bool Activate() override;
+    bool StepValue(const Position& dir) override;
+    std::optional<ValueRange> GetValueRange() const override;
+
 protected:
     void Draw_() override;
 

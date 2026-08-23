@@ -32,6 +32,9 @@ public:
     bool Msg_LeftDown(const MouseCoords& mc) override;
     bool Msg_MouseMove(const MouseCoords& mc) override;
 
+    bool CanFocus() const override { return !readonly && IsVisible(); }
+    bool Activate() override;
+
 protected:
     void Draw_() override;
 

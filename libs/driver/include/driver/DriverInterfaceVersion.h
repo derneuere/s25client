@@ -4,4 +4,9 @@
 
 #pragma once
 
-#define DRIVERAPIVERSION 8
+// 9: IVideoDriver::FetchPadEvents (Gamepad-Eingabe). Neue virtuelle Methode = neuer
+//    vtable-Eintrag im Plugin -> ABI-Bruch. Geprueft wird auf exakte Gleichheit
+//    (drivers/DriverWrapper.cpp:104); ein veraltetes Plugin wird mit "Invalid API version!"
+//    abgelehnt und taucht nicht in der Treiberliste auf - sauberer Abbruch statt Absturz.
+//    ACHTUNG: dieselbe Konstante gilt fuer Video UND Audio.
+#define DRIVERAPIVERSION 9

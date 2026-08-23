@@ -20,6 +20,7 @@ add_library(videodrv STATIC
     include/driver/Interface.h
     include/driver/KeyEvent.h
     include/driver/MouseCoords.h
+    include/driver/PadEvent.h
     include/driver/VideoDriver.h
     include/driver/VideoDriverLoaderInterface.h
     include/driver/VideoInterface.h

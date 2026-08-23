@@ -246,7 +246,13 @@ unsigned LuaPlayer::GetStatisticsValue(lua::SafeEnum<StatisticType> stat) const
 
 bool LuaPlayer::AIConstructionOrder(unsigned x, unsigned y, lua::SafeEnum<BuildingType> bld)
 {
-    // Only for actual AIs
+    // Only for actual AIs.
+    // Bewusst isHuman() und NICHT "wird lokal von einem Menschen gesteuert": der Rueckgabewert
+    // ist fuer das Lua-Skript sichtbar und muss auf allen Clients gleich sein. Bei einem
+    // Splitscreen-Slot (in der Welt PlayerState::AI) laeuft der Aufruf durch, bleibt aber
+    // folgenlos: die BuildingNote::LuaOrder hat nur AIPlayerJH als Abnehmer
+    // (AIPlayerJH.cpp:72), und fuer einen lokal gesteuerten Slot existiert keine KI-Instanz
+    // (GameClient::GameLoaded ueberspringt sie).
     if(!player.isUsed() || player.isHuman())
         return false;
     GameWorld& world = player.GetGameWorld();

@@ -15,7 +15,8 @@ enum class ClientError
     InvalidServerType,
     MapTransmission,
     WrongVersion,
-    InvalidMap
+    InvalidMap,
+    LocalPlayerSetup
 };
 
 const char* ClientErrorToStr(ClientError error);

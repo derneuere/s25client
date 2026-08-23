@@ -29,6 +29,16 @@ bool ctrlCheck::Msg_LeftDown(const MouseCoords& mc)
     return false;
 }
 
+bool ctrlCheck::Activate()
+{
+    if(readonly || !IsVisible() || !GetParent())
+        return false;
+    // Exakt der Rumpf von Msg_LeftDown, nur ohne die Ortspruefung.
+    check = !check;
+    GetParent()->Msg_CheckboxChange(GetID(), check);
+    return true;
+}
+
 bool ctrlCheck::Msg_MouseMove(const MouseCoords& mc)
 {
     if(IsMouseOver(mc.pos))

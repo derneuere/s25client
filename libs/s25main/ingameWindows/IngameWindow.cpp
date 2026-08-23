@@ -14,6 +14,7 @@
 #include "helpers/EnumRange.h"
 #include "helpers/MultiArray.h"
 #include "helpers/containerUtils.h"
+#include "input/FocusPath.h"
 #include "ogl/FontStyle.h"
 #include "ogl/SoundEffectItem.h"
 #include "ogl/glArchivItem_Bitmap.h"
@@ -39,6 +40,12 @@ IngameWindow::IngameWindow(unsigned id, const DrawPoint& pos, const Extent& size
       closeBehavior_(closeBehavior), isModal_(modal), closeme(false), isPinned_(false), isMinimized_(false),
       isMoving(false)
 {
+    // Der Besitzer wird HIER festgelegt und nicht erst in DoShow: MoveToCenter() und
+    // MoveNextToMouse() laufen noch in diesem Konstruktor, und die brauchen ihn (Bildschirm des
+    // Besitzers statt ganzer Bildschirm - der naechste Schritt). Ausserhalb jeder Klammer ist
+    // das SHARED_WINDOW_OWNER, also genau das bisherige Verhalten.
+    ownerIdx_ = WINDOWMANAGER.GetCurrentWindowOwner();
+
     std::fill(buttonStates_.begin(), buttonStates_.end(), ButtonState::Up);
     contentOffset.x = LOADER.GetImageN("resource", 38)->getWidth();     // left border
     contentOffset.y = LOADER.GetImageN("resource", 42)->getHeight();    // title bar
@@ -463,6 +470,43 @@ void IngameWindow::DrawBackground()
 {
     if(background)
         background->DrawPart(Rect(GetPos() + DrawPoint(contentOffset), GetIwSize()));
+}
+
+IngameWindow::~IngameWindow()
+{
+    // Backstop fuer die Lebensdauer des Fokus. Der Besitzer loest ihn normalerweise in
+    // dskGameInterface::Msg_WindowClosed auf; beim Desktopwechsel raeumt WindowManager die
+    // Fensterliste aber OHNE diesen Rueckruf (WindowManager::DoDesktopSwitch).
+    for(const FocusRing& ring : focusRings_)
+        ring.focus->OnRootDestroyed(this);
+}
+
+void IngameWindow::AddFocusRing(FocusPath& focus, const unsigned color)
+{
+    RemoveFocusRing(focus); // ein Spieler hat hier hoechstens einen Rahmen
+    focusRings_.push_back(FocusRing{&focus, color});
+}
+
+void IngameWindow::RemoveFocusRing(const FocusPath& focus)
+{
+    helpers::erase_if(focusRings_, [&focus](const FocusRing& ring) { return ring.focus == &focus; });
+}
+
+bool IngameWindow::HasFocusRing(const FocusPath& focus) const
+{
+    return helpers::contains_if(focusRings_, [&focus](const FocusRing& ring) { return ring.focus == &focus; });
+}
+
+void IngameWindow::Msg_PaintAfter()
+{
+    // Rekursiv an die Controls, wie bisher.
+    Window::Msg_PaintAfter();
+    // Der Rahmen liegt UEBER den Controls dieses Fensters und wird von darueberliegenden
+    // Fenstern korrekt verdeckt: WindowManager::Draw ruft je Fenster PaintBefore/Draw/PaintAfter.
+    if(IsMinimized())
+        return; // was nicht gezeichnet wird, bekommt auch keinen Rahmen (Befund B3)
+    for(const FocusRing& ring : focusRings_)
+        ring.focus->DrawRing(ring.color);
 }
 
 void IngameWindow::MoveToCenter()

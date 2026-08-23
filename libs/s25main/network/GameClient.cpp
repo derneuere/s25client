@@ -32,6 +32,8 @@
 #include "network/ClientInterface.h"
 #include "network/GameMessages.h"
 #include "network/GameServer.h"
+#include "network/IGameLobbyController.h"
+#include "network/LocalPlayerGCFactory.h"
 #include "ogl/FontStyle.h"
 #include "ogl/glArchivItem_Bitmap.h"
 #include "ogl/glFont.h"
@@ -39,6 +41,7 @@
 #include "random/randomIO.h"
 #include "world/GameWorld.h"
 #include "world/GameWorldView.h"
+#include "world/ViewportLayout.h"
 #include "world/MapLoader.h"
 #include "gameTypes/RoadBuildState.h"
 #include "gameData/GameConsts.h"
@@ -108,9 +111,12 @@ GameClient::~GameClient()
 bool GameClient::Connect(const std::string& server, const std::string& password, ServerType servertyp,
                          unsigned short port, bool host, bool use_ipv6)
 {
+    // Raeumt u.a. aiBattlePlayers_ und additionalLocalPlayers_ (siehe Ende von Stop()).
     Stop();
 
     RTTR_Assert(aiBattlePlayers_.empty());
+    // F5: Ein RTTR_Assert(additionalLocalPlayers_.empty()) stuende hier per Konstruktion immer
+    // wahr da, weil Stop() den Vektor gerade geleert hat - also wirkungslos. Deshalb keins.
 
     // Name und Password kopieren
     clientconfig.server = server;
@@ -249,6 +255,7 @@ void GameClient::Stop()
     LOG.write("client state changed to stop\n");
 
     aiBattlePlayers_.clear();
+    additionalLocalPlayers_.clear();
 }
 
 std::shared_ptr<GameLobby> GameClient::GetGameLobby()
@@ -314,11 +321,26 @@ void GameClient::StartGame(const unsigned random_init)
 
     state = ClientState::Loading;
 
+    // Lokal gesteuerte Spieler festlegen. Ab hier unveraenderlich bis ExitGame().
+    // MUSS vor ci->CI_GameLoading stehen: ein ClientInterface darf daraus reentrant
+    // GameLoaded() aufrufen, und GameLoaded braucht die Menge bereits (KI-Skip + Priming).
+    if(!SetupLocalPlayers())
+    {
+        // Sichtbarer Abbruch statt stiller Degradierung zum Einzelspieler: OnError meldet ueber
+        // ClientInterface::CI_Error und ruft Stop(). Der Spielstart bricht hier ab, bevor
+        // irgendein Interface das halbfertige Spiel zu sehen bekommt.
+        OnError(ClientError::LocalPlayerSetup);
+        return;
+    }
+
     if(ci)
         ci->CI_GameLoading(game);
 
-    // Get standard settings before they get overwritten
-    GetPlayer(GetPlayerId()).FillVisualSettings(default_settings);
+    // Get standard settings before they get overwritten.
+    // Je Slot aus SEINEM Spielzustand: der "Standard"-Knopf im Fenster eines zusaetzlichen
+    // lokalen Spielers muss dessen Werkseinstellungen einsetzen, nicht die des Hauptspielers.
+    for(unsigned id = 0; id < GetNumPlayers(); ++id)
+        GetPlayer(id).FillVisualSettings(defaultSettings_[id]);
 
     GameWorld& gameWorld = game->world_;
     if(mapinfo.savegame)
@@ -371,14 +393,24 @@ void GameClient::GameLoaded()
         {
             for(unsigned id = 0; id < GetNumPlayers(); id++)
             {
-                if(GetPlayer(id).ps == PlayerState::AI)
-                {
-                    game->AddAIPlayer(CreateAIPlayer(id, GetPlayer(id).aiInfo));
-                    SendNothingNC(id);
-                }
+                if(GetPlayer(id).ps != PlayerState::AI)
+                    continue;
+                // Lokal von einem Menschen gesteuerte Slots bekommen keine KI
+                if(gameCommands_.IsLocalPlayer(static_cast<uint8_t>(id)))
+                    continue;
+                game->AddAIPlayer(CreateAIPlayer(id, GetPlayer(id).aiInfo));
+                SendNothingNC(id);
             }
             if(IsAIBattleModeOn())
                 ToggleHumanAIPlayer(aiBattlePlayers_[GetPlayerId()]);
+
+            // Startpaket fuer jeden zusaetzlichen lokalen Spieler. Ohne dieses Paket
+            // wird NWFInfo::isReady() fuer den Slot nie wahr und die Partie steht lautlos.
+            for(const uint8_t id : gameCommands_.GetPlayerIds())
+            {
+                if(id != GetPlayerId())
+                    SendNothingNC(id);
+            }
         }
         SendNothingNC();
     }
@@ -390,7 +422,12 @@ void GameClient::ExitGame()
     game.reset();
     nwfInfo.reset();
     // Clear remaining commands
-    gameCommands_.clear();
+    gameCommands_.Clear();
+    localGCFactories_.clear();
+    explicitActingPlayerId_.reset();
+    hasExplicitActingPlayer_ = false;
+    windowOwnerPlayerId_.reset();
+    additionalLocalPlayers_.clear();
 }
 
 unsigned GameClient::GetGFNumber() const
@@ -679,6 +716,16 @@ bool GameClient::OnGameMessage(const GameMessage_Player_Swap& msg)
             mainPlayer.playerId = msg.player2;
         else if(mainPlayer.playerId == msg.player2)
             mainPlayer.playerId = msg.player;
+
+        // Die vorkonfigurierten zusaetzlichen lokalen Slots wandern mit, sonst zeigt der
+        // beim Start validierte Index nach einem Tausch auf den falschen Slot.
+        for(uint8_t& id : additionalLocalPlayers_)
+        {
+            if(id == msg.player)
+                id = msg.player2;
+            else if(id == msg.player2)
+                id = msg.player;
+        }
 
         if(ci)
             ci->CI_PlayersSwapped(msg.player, msg.player2);
@@ -1571,7 +1618,7 @@ bool GameClient::StartReplay(const boost::filesystem::path& path)
     */
     if(!mapinfo.savegame && replayinfo->replay.GetMinorVersion() < 2)
     {
-        auto newDistributions = default_settings.distribution;
+        auto newDistributions = defaultSettings_[GetPlayerId()].distribution;
         unsigned idx = 0;
         for(const DistributionMapping& mapping : distributionMap)
         {
@@ -1745,7 +1792,29 @@ bool GameClient::SaveToFile(const boost::filesystem::path& filepath)
 
 void GameClient::ResetVisualSettings()
 {
-    GetPlayer(GetPlayerId()).FillVisualSettings(visual_settings);
+    // Jeder Slot bekommt SEINE eigenen Anzeigewerte. Frueher stand hier nur der Hauptspieler;
+    // die Fenster der zusaetzlichen lokalen Spieler lasen dann dessen Werte und schrieben sie
+    // beim naechsten Regler beim Senden in den eigenen Spielzustand zurueck.
+    for(unsigned id = 0; id < GetNumPlayers(); ++id)
+        GetPlayer(id).FillVisualSettings(visualSettings_[id]);
+}
+
+VisualSettings& GameClient::GetVisualSettings(const unsigned playerId)
+{
+    RTTR_Assert(playerId < MAX_PLAYERS);
+    return visualSettings_[playerId];
+}
+
+const VisualSettings& GameClient::GetVisualSettings(const unsigned playerId) const
+{
+    RTTR_Assert(playerId < MAX_PLAYERS);
+    return visualSettings_[playerId];
+}
+
+const VisualSettings& GameClient::GetDefaultSettings(const unsigned playerId) const
+{
+    RTTR_Assert(playerId < MAX_PLAYERS);
+    return defaultSettings_[playerId];
 }
 
 void GameClient::SetPause(bool pause)
@@ -1790,12 +1859,243 @@ unsigned GameClient::GetLastReplayGF() const
 
 bool GameClient::AddGC(gc::GameCommandPtr gc)
 {
-    // Nicht in der Pause oder wenn er besiegt wurde
-    if(framesinfo.isPaused || GetPlayer(GetPlayerId()).IsDefeated() || IsReplayModeOn())
+    // GameClient IST die GameCommandFactory, die alle Ingame-Fenster hereingereicht bekommen.
+    // Ein Fensterknopf nennt beim Ausloesen keinen Spieler, also muss der Eingabepfad sagen,
+    // wer gerade handelt (ScopedActingPlayer). Sagt niemand etwas - Mauspfad, Tastatur,
+    // Einzelspieler, Netzwerkpartie -, ist es wie bisher der Hauptspieler.
+    return AddPlayerGC(static_cast<uint8_t>(GetActingPlayer().value_or(static_cast<uint8_t>(GetPlayerId()))),
+                       std::move(gc));
+}
+
+bool GameClient::AddPlayerGC(const uint8_t playerId, gc::GameCommandPtr gc)
+{
+    // Nicht in der Pause und nicht im Replay
+    if(framesinfo.isPaused || IsReplayModeOn())
+        return false;
+    // Nur fuer Slots, die dieser Client steuert
+    if(!gameCommands_.IsLocalPlayer(playerId))
+        return false;
+    // Nicht, wenn DIESER Spieler besiegt wurde
+    if(GetPlayer(playerId).IsDefeated())
         return false;
 
-    gameCommands_.push_back(gc);
+    gameCommands_.Add(playerId, std::move(gc));
     return true;
+}
+
+GameCommandFactory* GameClient::GetGCFactory(const uint8_t playerId)
+{
+    const auto it = localGCFactories_.find(playerId);
+    return (it == localGCFactories_.end()) ? nullptr : it->second.get();
+}
+
+void GameClient::SetAdditionalLocalPlayers(std::vector<uint8_t> playerIds)
+{
+    additionalLocalPlayers_ = std::move(playerIds);
+}
+
+std::string GameClient::ValidateAdditionalLocalPlayers(const GameLobby& lobby, const unsigned mainPlayerId,
+                                                       const std::vector<uint8_t>& playerIds, const bool isAIBattle)
+{
+    if(playerIds.empty())
+        return "";
+    // F3: --local-players und --ai schliessen sich aus. Bisher gewann --ai stillschweigend.
+    if(isAIBattle)
+        return _("Additional local players cannot be combined with an AI battle");
+    if(!lobby.isHost())
+        return _("Additional local players require hosting the game");
+    // Befund 3: je lokalem Spieler eine Ansicht - mehr als MAX_VIEWPORTS kann der Bildschirm
+    // nicht aufteilen. Ohne diese Schranke haette SetupLocalPlayers alle Slots registriert,
+    // waehrend CreateViews die ueberzaehligen verworfen haette: lokal gesteuert, aber ohne
+    // Ansicht, ohne Eingabegeraet und ohne KI. Der Hauptspieler zaehlt mit, deshalb "+ 1".
+    if(playerIds.size() + 1 > MAX_VIEWPORTS)
+        return helpers::format(_("At most %1% local players are supported, %2% were requested"),
+                               unsigned(MAX_VIEWPORTS), unsigned(playerIds.size() + 1));
+
+    const unsigned numPlayers = lobby.getNumPlayers();
+    std::vector<uint8_t> seen;
+    for(const uint8_t id : playerIds)
+    {
+        if(id >= numPlayers)
+            return helpers::format(_("Slot %1% does not exist, the map has %2% slots"), unsigned(id), numPlayers);
+        if(id == mainPlayerId)
+            return helpers::format(_("Slot %1% is already the main local player"), unsigned(id));
+        if(helpers::contains(seen, id))
+            return helpers::format(_("Slot %1% was requested twice"), unsigned(id));
+        // Occupied heisst: eine echte Netzwerkverbindung sitzt dort (GameServer.cpp:1234)
+        if(lobby.getPlayer(id).ps == PlayerState::Occupied)
+            return helpers::format(_("Slot %1% is occupied by a remote player"), unsigned(id));
+        // PlayerState::Locked heisst: der Slot ist geschlossen. Bei einem Savegame kann ihn auch
+        // der Host nicht mehr oeffnen, weil der Spieler auf der Karte gar nicht existiert:
+        // GameServer::OnGameMessage(GameMessage_Player_State) laesst Locked-Slots eines Savegames
+        // unveraendert (GameServer.cpp:979-987). ApplyAdditionalLocalPlayers bliebe dort also
+        // wirkungslos und SetupLocalPlayers wuerde den Slot beim Spielstart verwerfen. Deshalb
+        // hier ein sichtbarer Fehler statt einer stillen Degradierung.
+        if(lobby.getPlayer(id).ps == PlayerState::Locked && lobby.isSavegame())
+            return helpers::format(_("Slot %1% is closed and cannot be opened in a savegame"), unsigned(id));
+        seen.push_back(id);
+    }
+    return "";
+}
+
+void GameClient::ApplyAdditionalLocalPlayers(IGameLobbyController& lobbyController,
+                                             const std::vector<uint8_t>& playerIds)
+{
+    for(const uint8_t id : playerIds)
+    {
+        // Dummy statt Default: sollte die Registrierung beim Spielstart doch scheitern, idlet der
+        // Slot, statt dass eine echte KI den Platz des Menschen uebernimmt.
+        // Reihenfolge zaehlt: dieser Aufruf muss NACH der Standardbelegung in
+        // dskGameLobby.cpp laufen, damit er die dortige Default-KI ueberschreibt.
+        lobbyController.SetPlayerState(id, PlayerState::AI, AI::Info(AI::Type::Dummy));
+        // Name NACH dem State setzen - der Server ueberschreibt ihn sonst per SetAIName
+        // (GameServer.cpp:1002-1006).
+        lobbyController.SetName(id, helpers::format(_("Local player %1%"), unsigned(id) + 1));
+    }
+}
+
+void GameClient::RefreshAdditionalLocalPlayers()
+{
+    // Einzige Wahrheit ist gameCommands_; der Getter ist nur eine Sicht darauf (F2).
+    additionalLocalPlayers_ = gameCommands_.GetPlayerIds();
+    helpers::erase_if(additionalLocalPlayers_,
+                      [mainId = static_cast<uint8_t>(GetPlayerId())](const uint8_t id) { return id == mainId; });
+}
+
+bool GameClient::SetupLocalPlayers()
+{
+    gameCommands_.Clear();
+    localGCFactories_.clear();
+    explicitActingPlayerId_.reset();
+    hasExplicitActingPlayer_ = false;
+    windowOwnerPlayerId_.reset();
+
+    // Im Replay steuert niemand einen Spieler: es koennen keine Kommandos entstehen
+    // (AddPlayerGC lehnt im Replaymodus ab) und ExecuteNWF laeuft nicht. Ohne diesen
+    // Sonderfall wuerde IsLocalHumanPlayer(GetPlayerId()) beim Zuschauen wahr - der
+    // beobachtete Slot ist im Replay aber oft eine KI.
+    if(IsReplayModeOn())
+    {
+        if(!additionalLocalPlayers_.empty())
+            LOG.write("Ignoring additional local players: replay mode\n");
+        additionalLocalPlayers_.clear();
+        return true;
+    }
+
+    gameCommands_.AddPlayer(static_cast<uint8_t>(GetPlayerId()));
+
+    // Zusatzspieler nur in einer rein lokalen Partie: dort gibt es per Definition genau eine
+    // Verbindung, also keine fremde Kommandoquelle und keinen fremdinitiierten Spielerwechsel.
+    // (IsHost() allein reicht nicht - eine selbst gehostete Netzwerkpartie ist auch Host.)
+    if(!additionalLocalPlayers_.empty()
+       && (!IsHost() || clientconfig.servertyp != ServerType::Local || IsAIBattleModeOn()))
+    {
+        LOG.write("Rejecting additional local players: not a purely local hosted game\n");
+        additionalLocalPlayers_.clear();
+        return false;
+    }
+
+    // F6: Filtern und Registrieren als getrennte Schritte - keine Seiteneffekte im Praedikat.
+    // Restposten Phase 1: ein angeforderter, aber nicht registrierbarer Slot war bisher nur eine
+    // Logzeile - die Partie startete dann still als Einzelspieler. Haeufigste Ursache war ein
+    // Locked-Slot in einem Savegame, den der Server nicht oeffnet (GameServer.cpp:979-987);
+    // ValidateAdditionalLocalPlayers faengt das inzwischen schon in der Lobby ab. Bleibt hier
+    // trotzdem etwas uebrig, ist das ein Fehler und kein Grund, klammheimlich weiterzuspielen.
+    bool allRegistered = true;
+    for(const uint8_t id : additionalLocalPlayers_)
+    {
+        const bool ok = id < GetNumPlayers() && id != GetPlayerId() && !gameCommands_.IsLocalPlayer(id)
+                        && GetPlayer(id).ps == PlayerState::AI;
+        if(ok)
+            gameCommands_.AddPlayer(id);
+        else
+        {
+            LOG.write("Dropping invalid additional local player %1%\n") % unsigned(id);
+            allRegistered = false;
+        }
+    }
+
+    for(const uint8_t id : gameCommands_.GetPlayerIds())
+        localGCFactories_[id] = std::make_unique<LocalPlayerGCFactory>(*this, id);
+
+    // F4: Ergebnis der Registrierung melden und den Getter darauf nachfuehren (F2).
+    RefreshAdditionalLocalPlayers();
+    LOG.write("Local players: main slot %1%, %2% additional local slot(s)\n") % unsigned(GetPlayerId())
+      % additionalLocalPlayers_.size();
+    return allRegistered;
+}
+
+void GameClient::OnPlayerSlotsSwappedIngame(const uint8_t playerId1, const uint8_t playerId2)
+{
+    if(IsReplayModeOn())
+        return;
+
+    const bool wasLocal1 = gameCommands_.IsLocalPlayer(playerId1);
+    const bool wasLocal2 = gameCommands_.IsLocalPlayer(playerId2);
+
+    // Beide Slots werden von diesem Client gesteuert. Bisher stand hier nur
+    //   RTTR_Assert_Msg(!(wasLocal1 && wasLocal2), ...)
+    // und darunter lief der wasLocal1-Zweig. Mit NDEBUG ist das Assert wirkungslos
+    // (RTTR_Assert.h:11-15), und der wasLocal1-Zweig ist fuer diesen Fall falsch: sein
+    // gameCommands_.AddPlayer(playerId2) ist idempotent (LocalPlayerCommands.cpp:9-13) und
+    // LAESST DEN ALTEN PUFFER VON playerId2 STEHEN. Die dort gesammelten Kommandos stammen aber
+    // von einem anderen Menschen und wuerden nach dem Tausch dem umgezogenen Hauptspieler
+    // zugerechnet. Das ist im Releasebuild eine stille Fehlzuordnung von Kommandos.
+    //
+    // Wirksame Absicherung, in jedem Build: playerId1 wird bewusst und protokolliert aufgegeben,
+    // playerId2 bekommt einen LEEREN Puffer. Aufgeben ist hier die einzige richtige Wahl - die
+    // Weltaenderung darueber hat playerId1 auf PlayerState::AI gesetzt und beim Host bereits
+    // einen Dummy-KI-Spieler dafuer angelegt (GameClientCommands.cpp:107-111). Wuerden wir
+    // playerId1 zusaetzlich lokal steuern, haette dieser Slot zwei Kommandoquellen.
+    if(wasLocal1 && wasLocal2)
+    {
+        LOG.write("Swap between two locally controlled slots %1% and %2%: giving up local control "
+                  "of %1% and dropping the pending commands of both\n")
+          % unsigned(playerId1) % unsigned(playerId2);
+        gameCommands_.RemovePlayer(playerId1);
+        localGCFactories_.erase(playerId1);
+        gameCommands_.RemovePlayer(playerId2); // verwirft den Puffer des anderen Menschen
+        gameCommands_.AddPlayer(playerId2);    // und legt ihn leer neu an
+        localGCFactories_[playerId2] = std::make_unique<LocalPlayerGCFactory>(*this, playerId2);
+        RefreshAdditionalLocalPlayers();
+        return;
+    }
+
+    if(wasLocal1)
+    {
+        // Der lokale Slot zieht um. Die bis hier gesammelten Kommandos des alten Slots sind
+        // ungueltig - sie wuerden den alten, jetzt KI-gesteuerten Spieler veraendern.
+        // Die Puffer der uebrigen lokalen Spieler bleiben unangetastet.
+        gameCommands_.RemovePlayer(playerId1);
+        localGCFactories_.erase(playerId1);
+        gameCommands_.AddPlayer(playerId2);
+        localGCFactories_[playerId2] = std::make_unique<LocalPlayerGCFactory>(*this, playerId2);
+    } else if(wasLocal2)
+    {
+        // P3: Ein Mensch, den wir NICHT steuern, ist auf einen von uns gesteuerten Slot gezogen.
+        //
+        // Das ist ueber das Netz ausloesbar und keineswegs unmoeglich: ChangePlayerIngame
+        // verlangt playerId1 == Occupied und playerId2 == AI (GameClientCommands.cpp:87-92), und
+        // unsere zusaetzlichen lokalen Slots SIND in der Welt AI (nur der Kommandopfad ist
+        // lokal). Ein fremder Client, der per GameMessage_Player_Swap auf so einen Slot zieht,
+        // landet exakt hier. Hier stand bis Phase 3 ein RTTR_Assert_Msg(false, ...) - im
+        // Debugbuild also ein ueber das Netz ausloesbarer Programmabbruch an einer Stelle, an der
+        // der alte Code gar nichts tat. Das ist ersatzlos entfernt.
+        //
+        // Die wirksame Behandlung ist das Aufgeben des Slots und NICHT etwa die Spiegelung des
+        // wasLocal1-Zweigs: playerId1 gehoert einem fremden Menschen und ist nach dem Tausch
+        // PlayerState::AI, wofuer der Host bereits einen Dummy angelegt hat
+        // (GameClientCommands.cpp:106-111). Wuerden wir playerId1 uebernehmen, haette dieser Slot
+        // zwei Kommandoquellen. Der Puffer von playerId2 wird verworfen - die dort gesammelten
+        // Kommandos stammen von unserem Menschen und wuerden sonst dem Fremden zugerechnet.
+        LOG.write("Giving up local control of player %1%: slot was taken over by a swap to player %2%\n")
+          % unsigned(playerId2) % unsigned(playerId1);
+        gameCommands_.RemovePlayer(playerId2);
+        localGCFactories_.erase(playerId2);
+    }
+
+    // F2, Ingame-Zweig: Getter nachfuehren.
+    RefreshAdditionalLocalPlayers();
 }
 
 unsigned GameClient::GetNumPlayers() const
@@ -1887,6 +2187,10 @@ void GameClient::ToggleHumanAIPlayer(const AI::Info& aiInfo)
 void GameClient::RequestSwapToPlayer(const unsigned char newId)
 {
     if(state != ClientState::Game)
+        return;
+    // Auf einen lokal gesteuerten Slot darf nicht gewechselt werden - das wuerde
+    // zwei Kommandoquellen fuer denselben Slot erzeugen.
+    if(gameCommands_.IsLocalPlayer(newId))
         return;
     GamePlayer& player = GetPlayer(newId);
     if(player.ps == PlayerState::AI && player.aiInfo.type == AI::Type::Dummy)

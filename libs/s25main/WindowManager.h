@@ -31,6 +31,31 @@ enum class Cursor : unsigned
     Remove = 34
 };
 
+/// Besitzer eines Ingame-Fensters: die Nummer der ANSICHT (nicht die Spieler-ID).
+///
+/// Fenster gehoeren zum Sitzplatz vor dem Fernseher, nicht zum Simulationsslot - damit
+/// ueberlebt der Besitz einen Ingame-Spielertausch (CI_PlayersSwapped), und der Wert ist klein
+/// und beschraenkt (MAX_VIEWPORTS).
+///
+/// SHARED_WINDOW_OWNER heisst: dieses Fenster gehoert keiner Ansicht, sondern dem Bildschirm -
+/// Nachrichtenboxen, Chat, Menuefenster, alles ausserhalb einer Partie. Das ist die Vorgabe,
+/// solange keine Eingabeklammer offen ist; ein Einzelspieler und jeder Menuedesktop laufen
+/// damit exakt wie bisher.
+inline constexpr unsigned SHARED_WINDOW_OWNER = ~0u;
+
+/// Wird gerufen, wenn sich der ambiente Fensterbesitzer aendert.
+///
+/// Der WindowManager kennt weder Spieler noch GameCommands; er kennt nur Ansichtsnummern. Wer
+/// aus einer Ansichtsnummer einen Spieler machen kann - dskGameInterface -, meldet sich hier an
+/// und zieht den handelnden Spieler mit. Ohne angemeldeten Beobachter (jeder Menuedesktop, jeder
+/// UI-Test ohne Partie) passiert nichts.
+class IWindowOwnerObserver
+{
+public:
+    virtual ~IWindowOwnerObserver() = default;
+    virtual void OnWindowOwnerChanged(unsigned ownerIdx) = 0;
+};
+
 /// Verwaltet alle (offenen) Fenster bzw Desktops samt ihren Controls und Messages
 class WindowManager : public Singleton<WindowManager>, public VideoDriverLoaderInterface
 {
@@ -41,6 +66,35 @@ public:
     WindowManager();
     ~WindowManager();
     void CleanUp();
+
+    /// Klammert eine Eingabeverarbeitung, die GENAU EINER Ansicht gehoert.
+    ///
+    /// Innerhalb der Klammer bekommt jedes NEU KONSTRUIERTE IngameWindow diese Ansicht als
+    /// Besitzer (IngameWindow-Konstruktor liest GetCurrentWindowOwner()). Das ist der Hebel,
+    /// mit dem die 100+ Erzeugungsstellen unveraendert bleiben koennen: keine von ihnen nennt
+    /// einen Spieler, aber jede laeuft unter einer Klammer, die ihn kennt.
+    ///
+    /// Bauform absichtlich identisch zu GameClient::ScopedActingPlayer: verschachtelbar, stellt
+    /// im Destruktor den vorigen Wert wieder her.
+    class ScopedWindowOwner
+    {
+    public:
+        ScopedWindowOwner(WindowManager& wm, unsigned ownerIdx);
+        ~ScopedWindowOwner();
+        ScopedWindowOwner(const ScopedWindowOwner&) = delete;
+        ScopedWindowOwner& operator=(const ScopedWindowOwner&) = delete;
+
+    private:
+        WindowManager& wm_;
+        unsigned previous_;
+    };
+
+    /// Wem gehoeren gerade neu erzeugte Fenster? Ausserhalb jeder Klammer SHARED_WINDOW_OWNER.
+    unsigned GetCurrentWindowOwner() const { return curWindowOwner_; }
+    /// Anmelden/Abmelden des Beobachters. Nur EINER; der Anmelder ist fuer das Abmelden
+    /// zustaendig (dskGameInterface tut es in seinem Destruktor).
+    void SetWindowOwnerObserver(IWindowOwnerObserver* observer) { ownerObserver_ = observer; }
+    IWindowOwnerObserver* GetWindowOwnerObserver() const { return ownerObserver_; }
 
     /// Zeichnet Desktop und alle Fenster.
     void Draw();
@@ -60,10 +114,13 @@ public:
     {
         return static_cast<T&>(DoShow(std::move(window), mouse));
     }
+    /// Ersetzt das Fenster derselben Art DESSELBEN Besitzers. Der Besitzer steht am neuen
+    /// Fenster bereits fest (er wurde beim Konstruieren gestempelt), bevor gesucht wird -
+    /// deshalb bleiben alle Aufrufstellen unveraendert richtig.
     template<typename T>
     T& ReplaceWindow(std::unique_ptr<T> window)
     {
-        auto* oldWnd = FindNonModalWindow(window->GetID());
+        auto* oldWnd = FindNonModalWindow(window->GetID(), window->GetOwner());
         if(oldWnd)
             oldWnd->Close();
         return Show(std::move(window));
@@ -71,7 +128,7 @@ public:
     template<typename T>
     T* ToggleWindow(std::unique_ptr<T> window)
     {
-        auto* oldWnd = FindNonModalWindow(window->GetID());
+        auto* oldWnd = FindNonModalWindow(window->GetID(), window->GetOwner());
         if(oldWnd)
         {
             oldWnd->Close();
@@ -81,8 +138,14 @@ public:
     }
     /// Registers a window to be shown after a desktop switch
     IngameWindow* ShowAfterSwitch(std::unique_ptr<IngameWindow> window);
-    /// Sucht ein Fenster mit der entsprechenden Fenster-ID und schließt es (falls es so eins gibt)
-    void Close(unsigned id);
+    /// Schliesst die Fenster mit dieser ID, die DIESER Ansicht gehoeren.
+    /// Der Normalfall: ein Spieler bricht seinen eigenen Strassenbau ab.
+    void Close(unsigned id, unsigned owner);
+    /// Schliesst die Fenster mit dieser ID in ALLEN Ansichten.
+    /// Fuer Weltereignisse: verschwindet ein Gebaeude, muss das Fenster darauf bei JEDEM
+    /// lokalen Spieler zugehen, der es offen hat - sonst bliebe dort ein Fenster auf ein
+    /// zerstoertes Gebaeude stehen.
+    void CloseAll(unsigned id);
     /// Close the window right away and free it.
     void CloseNow(IngameWindow* window);
     /// merkt einen Desktop zum Wechsel vor.
@@ -121,8 +184,14 @@ public:
 
     /// Return the window currently on the top (probably active)
     IngameWindow* GetTopMostWindow() const;
+    /// Oberstes Fenster, das DIESE Ansicht bedienen darf: ihre eigenen und die, die keiner
+    /// Ansicht gehoeren (Nachrichtenboxen, Systemfenster - die sieht und bedient jeder).
+    IngameWindow* GetTopMostWindow(unsigned owner) const;
     IngameWindow* FindWindowAtPos(const Position& pos) const;
-    IngameWindow* FindNonModalWindow(unsigned id) const;
+    /// Sucht ein nicht-modales Fenster dieser Art bei GENAU DIESEM Besitzer.
+    /// Bewusst zweistellig und ohne einstellige Ueberladung: der Compiler soll jede Aufrufstelle
+    /// zeigen, statt sie still auf "irgendein Fenster dieser Art" zurueckfallen zu lassen.
+    IngameWindow* FindNonModalWindow(unsigned id, unsigned owner) const;
 
     Desktop* GetCurrentDesktop() { return curDesktop.get(); }
     /// Makes the given window (desktop or ingame window) active and all others inactive
@@ -152,6 +221,12 @@ private:
     void CloseMarkedIngameWnds();
     /// Close the window and remove it from the window list
     void DoClose(IngameWindow* window);
+    /// Setzt den ambienten Besitzer und meldet den Wechsel dem Beobachter.
+    void setWindowOwner(unsigned ownerIdx);
+
+    /// Ansicht, der neu erzeugte Fenster gehoeren; siehe ScopedWindowOwner.
+    unsigned curWindowOwner_;
+    IWindowOwnerObserver* ownerObserver_;
 
     Cursor cursor_;
     std::unique_ptr<Desktop> curDesktop;  /// aktueller Desktop

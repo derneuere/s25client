@@ -74,6 +74,25 @@ bool ctrlButton::Msg_LeftUp(const MouseCoords& mc)
     return false;
 }
 
+bool ctrlButton::CanFocus() const
+{
+    return isEnabled && IsVisible();
+}
+
+bool ctrlButton::Activate()
+{
+    if(!isEnabled || !IsVisible() || !GetParent())
+        return false;
+    // `state` wird NICHT angefasst. Es ist der Zustand DER MAUS auf diesem Knopf und traegt
+    // deren halben Klick zwischen Msg_LeftDown und Msg_LeftUp. Wer ihn hier setzt, verschluckt
+    // genau diesen Klick (Befund B2), denn Msg_LeftUp loest nur bei ButtonState::Pressed aus.
+    // Ein Haengenbleiben kann daraus nicht entstehen: Activate() setzt Pressed nie, und ohne
+    // Maus auf dem Knopf ist `state` ohnehin Up - der Knopf wird also auch nach einem Padklick
+    // nicht erhellt gezeichnet (siehe Draw_()).
+    GetParent()->Msg_ButtonClick(GetID()); // identisch zum Mauspfad in Msg_LeftUp
+    return true;
+}
+
 /**
  *  zeichnet das Fenster.
  */

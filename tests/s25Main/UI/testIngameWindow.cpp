@@ -10,6 +10,7 @@
 #include "WindowManager.h"
 #include "controls/ctrlButton.h"
 #include "controls/ctrlComboBox.h"
+#include "controls/ctrlTextButton.h"
 #include "controls/ctrlEdit.h"
 #include "controls/ctrlOptionGroup.h"
 #include "controls/ctrlPercent.h"
@@ -53,6 +54,62 @@ static MouseCoords makeLeftDblClick(const Position pos)
     MouseCoords mc(pos);
     mc.dbl_click = true;
     return mc;
+}
+
+// --------------------------------------------------------------------------------------------
+// LUECKE M-H: der MAUSPFAD durch das Fenster hindurch bis in die Controls.
+//
+// Er ist die harte Randbedingung dieses ganzen Umbaus und war bisher von keinem einzigen Test
+// gedeckt: ein Fenster, das seine Mausereignisse nicht mehr an seine Controls weiterreicht,
+// liess die gesamte Suite gruen. Geprueft wird der vollstaendige Produktivweg
+// WindowManager::Msg_LeftDown/-Up -> WindowManager::RelayMouseMessage -> Window::RelayMouseMessage
+// -> IngameWindow::IsMessageRelayAllowed -> ctrlButton, ohne jede Abkuerzung.
+// --------------------------------------------------------------------------------------------
+namespace {
+struct RelayTestWnd : IngameWindow
+{
+    RelayTestWnd()
+        : IngameWindow(CGI_HELP, DrawPoint(50, 50), Extent(200, 120), "Relay", nullptr, false,
+                       CloseBehavior::Regular)
+    {
+        AddTextButton(1, DrawPoint(10, 10), Extent(80, 20), TextureColor::Green1, "A", NormalFont);
+    }
+    std::vector<unsigned> clicks;
+    void Msg_ButtonClick(unsigned id) override { clicks.push_back(id); }
+};
+} // namespace
+
+BOOST_AUTO_TEST_CASE(MouseEventsReachTheControlsThroughTheWindow)
+{
+    auto& wnd = static_cast<RelayTestWnd&>(WINDOWMANAGER.Show(std::make_unique<RelayTestWnd>()));
+    WINDOWMANAGER.Draw(); // das Fenster wirklich oeffnen und aktiv machen
+
+    auto* bt = wnd.GetCtrl<ctrlButton>(1);
+    BOOST_TEST_REQUIRE(bt != nullptr);
+    const Position onBt = bt->GetDrawPos() + DrawPoint(5, 5);
+
+    // Der ganz normale Mausklick eines Einzelspielers.
+    WINDOWMANAGER.Msg_LeftDown(makeLeftDown(onBt));
+    WINDOWMANAGER.Msg_LeftUp(MouseCoords(onBt));
+    BOOST_TEST_REQUIRE(wnd.clicks.size() == 1u);
+    BOOST_TEST(wnd.clicks.back() == 1u);
+
+    // Minimiert erreicht ihn nichts mehr - dieselbe Sperre, an der auch der Padfokus haengt.
+    wnd.SetMinimized(true);
+    WINDOWMANAGER.Draw();
+    WINDOWMANAGER.Msg_LeftDown(makeLeftDown(onBt));
+    WINDOWMANAGER.Msg_LeftUp(MouseCoords(onBt));
+    BOOST_TEST(wnd.clicks.size() == 1u);
+
+    // Und wiederhergestellt wieder alles wie vorher.
+    wnd.SetMinimized(false);
+    WINDOWMANAGER.Draw();
+    WINDOWMANAGER.Msg_LeftDown(makeLeftDown(onBt));
+    WINDOWMANAGER.Msg_LeftUp(MouseCoords(onBt));
+    BOOST_TEST(wnd.clicks.size() == 2u);
+
+    wnd.Close();
+    WINDOWMANAGER.Draw();
 }
 
 BOOST_AUTO_TEST_CASE(MinimizeWindow)
