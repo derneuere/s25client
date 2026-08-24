@@ -397,7 +397,20 @@ protected:
     /// schreibt nie etwas fest" bleibt damit woertlich erhalten.
     ///
     /// false, wenn hier nichts anzubieten ist - dann antwortet der Aufrufer mit PadReject.
+    ///
+    /// Gerufen von ZWEI Knoepfen: von A als dritter Stufe (nur, wenn weder ein Objektfenster
+    /// noch der Strassenbau greift) und unbedingt von der rechten Schulter. Genau die zweite
+    /// Stelle macht den Flaggenreiter erreichbar - hinter A verschwindet er auf einer eigenen
+    /// Flagge dauerhaft, weil der Strassenbau vorher zuschlaegt (BEFUND B).
     bool PadOpenActionWindow(PlayerView& view);
+
+    /// Der B-Knopf ausserhalb des Baumodus: schliesst das oberste Fenster, das DIESER Spieler
+    /// bedienen darf - dieselbe Auswahl, die auch Y betritt, und dieselbe Schliessregel wie der
+    /// Rechtsklick des Mausspielers (nur CloseBehavior::Regular, nie ein angeheftetes).
+    ///
+    /// false, wenn es nichts zu schliessen gibt. Der Aufrufer antwortet dann bewusst NICHT -
+    /// die Begruendung steht am Knopf in OnPadButton.
+    bool PadCloseTopMostWindow(PlayerView& view);
 
     /// Der X-Knopf: setzt eine Flagge auf dem selektierten Punkt DIESER Ansicht, ueber den
     /// GameCommand-Pfad IHRES Spielers (GameClient::GetGCFactory -> LocalPlayerGCFactory ->

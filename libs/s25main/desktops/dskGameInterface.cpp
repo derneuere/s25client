@@ -1697,13 +1697,13 @@ void dskGameInterface::OnPadButton(const unsigned slot, const PadButton button, 
         // Punkt, an dem auch der Mausspieler seinen Strassenbau beginnt. Der Knopf bekommt hier
         // also keine zweite Bedeutung, sondern eine erste.
         //
-        // Dritte Stufe seit dieser Runde: bleibt auch der Strassenbau aus, geht das
-        // AKTIONSFENSTER auf (PadOpenActionWindow) - der Weg, auf dem ein Padspieler Gebaeude
-        // setzt. Die Reihenfolge ist Absicht und nicht beliebig: auf einer EIGENEN FLAGGE
-        // bietet iwAction ebenfalls etwas an (Strasse bauen, Flagge abreissen, Geologe,
-        // Spaeher), aber dort ist der Strassenbau die gewachsene Bedeutung des Knopfes und
-        // kostet einen Druck statt vier. Der Preis dafuer steht ehrlich da: die drei uebrigen
-        // Knoepfe des Flaggenreiters bleiben am Pad vorerst unerreichbar.
+        // Dritte Stufe: bleibt auch der Strassenbau aus, geht das AKTIONSFENSTER auf
+        // (PadOpenActionWindow) - der Weg, auf dem ein Padspieler Gebaeude setzt. Die
+        // Reihenfolge ist Absicht: auf einer EIGENEN FLAGGE bietet iwAction ebenfalls etwas an,
+        // aber dort ist der Strassenbau die gewachsene Bedeutung des Knopfes und die weitaus
+        // haeufigste Handlung. Dass die uebrigen Knoepfe des Flaggenreiters damit hinter A
+        // verschwinden, ist seit dieser Runde KEIN Verlust mehr: sie stehen auf der rechten
+        // Schulter (siehe dort).
         //
         // Geht auch das nicht, ANTWORTET der Knopf (PadReject). Ein Druck, der nichts tut und
         // nichts sagt, sieht aus wie ein totes Pad - derselbe Befund, aus dem NoteRejection
@@ -1732,12 +1732,64 @@ void dskGameInterface::OnPadButton(const unsigned slot, const PadButton button, 
             break;
         // B nimmt im Baumodus ein Wegstueck zurueck und bricht auf leerer Strecke ab. B ist der
         // Zurueck-Knopf, den FocusPath schon INNERHALB eines Fensters so benutzt
-        // (FocusPath::OnPadButton, case B -> Clear) - in der Welt war er bisher frei. Damit
-        // braucht der Padspieler das mausgebundene iwRoadWindow gar nicht erst: dessen beide
-        // Knoepfe sind X und B.
+        // (FocusPath::OnPadButton, case B -> Clear). Damit braucht der Padspieler das
+        // mausgebundene iwRoadWindow gar nicht erst: dessen beide Knoepfe sind X und B.
+        //
+        // BEFUND C: ausserhalb des Baumodus SCHLIESST B jetzt das oberste Fenster dieses
+        // Spielers. Vorher konnte er ein geoeffnetes iwAction gar nicht mehr loswerden, ohne zu
+        // handeln - B loeste nur den Fokus, und die Titelleistenknoepfe sind keine Controls und
+        // damit fuer FocusPath unsichtbar. Das Fenster blieb stehen, bis er etwas kaufte,
+        // abriss oder anderswo A drueckte.
+        //
+        // Warum B und kein neuer Knopf: B ist auf jeder Ebene der Zurueck-Knopf - im Fenster
+        // "raus aus dem Fenster", im Baumodus "ein Stueck zurueck", in der Welt jetzt "das
+        // Fenster weg". Die Staffelung bleibt dabei erhalten und kostet nichts: steht der
+        // Fokus noch im Fenster, verbraucht FocusPath die Flanke (Fokus loesen), und erst der
+        // NAECHSTE Druck schliesst. Ein Padspieler kann ein Fenster also weiterhin stehen
+        // lassen und nur den Fokus abgeben.
+        //
+        // Geschlossen wird nach GENAU DERSELBEN Regel wie beim Rechtsklick des Mausspielers
+        // (WindowManager::Msg_RightDown): nur eigene bzw. besitzerlose Fenster, nur
+        // CloseBehavior::Regular, nie ein angeheftetes. Damit kann ein Padspieler nichts
+        // wegwerfen, was der Mausspieler mit der Maus auch nicht wegwerfen koennte.
+        //
+        // Bewusst OHNE PadReject: anders als bei A ist ein wirkungsloses B kein Sackgassen-
+        // Signal. Es hat auf jeder Ebene eine sichtbare Wirkung, sobald es etwas zu verlassen
+        // oder zu schliessen gibt; eine Chatzeile "hier gibt es nichts zu schliessen" waere
+        // reine Stoerung.
         case PadButton::B:
             if(inRoadMode)
                 PadStepBackRoad(view);
+            else
+                PadCloseTopMostWindow(view);
+            break;
+        // BEFUND B: die rechte Schulter oeffnet das Aktionsfenster unter dem Zeiger.
+        //
+        // Sie ist der Ausweg aus der Luecke, die A hinterlaesst: auf einer eigenen Flagge faengt
+        // A den Strassenbau an und kommt gar nicht bis zu PadOpenActionWindow. Damit waren
+        // "Flagge abreissen", "Geologe rufen" und "Spaeher rufen" am Pad UNERREICHBAR - und an
+        // einer Wasserflagge zusaetzlich der Wasserweg-Knopf des Reiters. Ohne "Flagge
+        // abreissen" wird eine falsch gesetzte Flagge unbeseitigbar; das ist eine Sackgasse und
+        // kein Randfall.
+        //
+        // Warum die Schulter und nicht A: Strassenbau ist die haeufigste Handlung an einer
+        // Flagge und muss bei EINEM Druck bleiben. Wuerde A das Fenster oeffnen, kostete jeder
+        // Strassenbau zusaetzlich Y und mindestens einen Fokusschritt - bei einer Handlung, die
+        // in einer Partie dutzende Male vorkommt. Umgekehrt kostet der seltene Griff in den
+        // Flaggenreiter jetzt genau einen Druck mehr als der haeufige.
+        //
+        // Warum die RECHTE Schulter: LB traegt schon den Wasserweg, RB war in der Welt als
+        // einziger Knopf neben Back/Guide/Sticks ueberhaupt noch frei. Innerhalb eines Fensters
+        // verbraucht FocusPath beide Schultern (Move Prev/Next), aber dort laeuft dieser Zweig
+        // gar nicht erst - der Fokus verbraucht die Flanke vorher. Back und Guide sind bewusst
+        // nicht genommen: Back ist auf vielen Geraeten unbeschriftet, Guide fangen manche
+        // Treiber selbst ab.
+        //
+        // Im Baumodus bleibt die Schulter wirkungslos - dort ist der Modus die Bedeutung, wie
+        // bei A, X und B auch.
+        case PadButton::RightShoulder:
+            if(!inRoadMode && !PadOpenActionWindow(view))
+                PadReject(view, PadRejection::NothingHere);
             break;
         // Der Wasserweg bekommt einen eigenen Knopf statt einer zweiten Bedeutung von A.
         // Grund: an einer Wasserflagge bietet iwAction BEIDE Wege an (iwAction.cpp, Knopf 1 und
@@ -1801,6 +1853,26 @@ bool dskGameInterface::EnterTopMostWindow(PlayerView& view)
     if(!view.GetFocus().SetRoot(wnd))
         return false; // in diesem Fenster gibt es nichts zu bedienen
     wnd->AddFocusRing(view.GetFocus(), view.GetViewer().GetPlayer().color);
+    return true;
+}
+
+bool dskGameInterface::PadCloseTopMostWindow(PlayerView& view)
+{
+    // Dasselbe Fenster, das auch Y betreten wuerde (GetTopMostWindow(view.GetIndex())): seine
+    // eigenen und die, die keiner Ansicht gehoeren. Ohne den Besitzerbezug schloesse Spieler 2
+    // mit B das Fenster von Spieler 1.
+    IngameWindow* const wnd = WINDOWMANAGER.GetTopMostWindow(view.GetIndex());
+    if(!wnd || wnd->ShouldBeClosed())
+        return false;
+    // WOERTLICH die Regel des Rechtsklicks (WindowManager::Msg_RightDown): nur Fenster, die
+    // sich ueberhaupt so schliessen lassen, und kein angeheftetes. Ein Fenster mit
+    // CloseBehavior::Custom regelt sein Ende selbst (es hat dafuer einen beschrifteten Knopf im
+    // Fensterinneren, den der Padspieler mit Y und A erreicht).
+    if(wnd->getCloseBehavior() != CloseBehavior::Regular || wnd->IsPinned())
+        return false;
+    // Die Besitzklammer ist hier bereits offen (OnPadButton) - das Schliessen und alles, was es
+    // ausloest, laeuft im Namen DIESES Spielers.
+    wnd->Close();
     return true;
 }
 
@@ -2102,15 +2174,39 @@ void dskGameInterface::CancelRoadBuilding(PlayerView& view)
     UpdateRoadCursor(view);
 }
 
-/// Die Ansicht, deren Strassenfenster gerade offen ist - sonst die Hauptansicht.
+/// Die Ansicht, in deren Namen gerade ein Strassenfenster handelt - sonst die Hauptansicht.
 ///
 /// iwRoadWindow ruft GI_BuildRoad/GI_CancelRoadBuilding ohne Spielerbezug (GameInterface.h
 /// kennt keine Ansichten). Seit ContextClick das Fenster fuer die Ansicht unter der MAUS
-/// oeffnen kann, waere primary() dort die falsche Antwort: die beiden Knoepfe wirkten auf den
-/// Strassenbau eines anderen Spielers. Der Besitz steht schon da - view.roadwindow -, er wird
-/// hier nur gelesen. Im Einzelspieler und ueberall sonst ist das Ergebnis primary().
+/// oeffnet, waere primary() dort die falsche Antwort: die beiden Knoepfe wirkten auf den
+/// Strassenbau eines anderen Spielers.
+///
+/// Gefragt wird ZUERST die laufende Besitzklammer (WINDOWMANAGER.GetCurrentWindowOwner()) und
+/// nicht die Fensterliste - dieselbe Bauform wie bei ActionWindowOwner(), und aus demselben,
+/// jetzt GEMESSENEN Grund.
+///
+/// Die frueher hier stehende Begruendung ("es kann nur ein iwRoadWindow geben, weil
+/// ausschliesslich der Mauspfad es oeffnet") war falsch. Der erste Halbsatz stimmt, der zweite
+/// nicht: ShowRoadWindow oeffnet fuer die Ansicht UNTER DER MAUS, und
+/// WINDOWMANAGER.Close(CGI_ROADWINDOW, view.GetIndex()) raeumt nur das der EIGENEN Ansicht ab.
+/// Zwei mausgesteuerte Ansichten koennen deshalb gleichzeitig je ein Strassenfenster halten -
+/// mit der einen Maus in zwei Klicks erreicht. Die Suche ueber views_ lieferte dann die ERSTE
+/// der Liste, also unter Umstaenden die Ansicht, die gar nicht gedrueckt hatte: der
+/// Abbrechen-Knopf brach beim Falschen ab, und der Bau-Knopf schickte den GameCommand auf das
+/// Konto des falschen Spielers (gemessen im Replay,
+/// TwoMouseViewsCanHoldARoadWindowEachAndBuildBooksOnThePressedOne).
+///
+/// Die Klammer dagegen wird an genau der Stelle gesetzt, an der bekannt ist, WER drueckt:
+/// WindowManager::RelayMouseMessage stempelt den Besitzer des Fensters, das die Maus bedient.
+///
+/// Die Suche bleibt als zweite Stufe stehen, damit Aufrufe von ausserhalb jeder Klammer sich
+/// unveraendert verhalten. Ohne Fenster und ohne Klammer ist das Ergebnis primary() - der
+/// Einzelspieler bleibt exakt wie bisher.
 PlayerView& dskGameInterface::RoadWindowOwner()
 {
+    const unsigned ambientOwner = WINDOWMANAGER.GetCurrentWindowOwner();
+    if(ambientOwner < views_.size())
+        return *views_[ambientOwner];
     for(auto& view : views_)
     {
         if(view->roadwindow)

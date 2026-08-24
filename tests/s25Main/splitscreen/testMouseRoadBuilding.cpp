@@ -29,6 +29,10 @@
 #include "world/GameWorld.h"
 #include "PadFixture.h"
 #include "PadGameFixture.h"
+#include "controls/ctrlButton.h"
+#include "controls/ctrlGroup.h"
+#include "controls/ctrlTab.h"
+#include "ingameWindows/iwAction.h"
 #include "gameTypes/BuildingQuality.h"
 #include "gameTypes/RoadBuildMode.h"
 #include "gameData/const_gui_ids.h"
@@ -357,6 +361,217 @@ BOOST_FIXTURE_TEST_CASE(TheRoadWindowBuildButtonBooksTheRoadOnTheOwningViewsPlay
     const auto replayPath = stopAndGetReplay();
     BOOST_TEST(numGCsForPlayer(replayPath, 1) == 1u);
     BOOST_TEST(numGCsForPlayer(replayPath, 0) == 0u);
+}
+
+// ============================================================================================
+// BEFUND A: ZWEI Strassenfenster gleichzeitig - und der Knopf wirkt auf das FALSCHE
+// ============================================================================================
+//
+// Die offene Liste der letzten Runde erklaerte RoadWindowOwner() fuer "heute nicht erreichbar
+// falsch, weil iwRoadWindow ausschliesslich der Mauspfad oeffnet und es davon nur eins geben
+// kann". Der erste Halbsatz stimmt, der zweite nicht: ShowRoadWindow oeffnet fuer die Ansicht
+// UNTER DER MAUS (ContextClick -> GetMouseView), und WINDOWMANAGER.Close(CGI_ROADWINDOW,
+// view.GetIndex()) raeumt nur das der EIGENEN Ansicht ab. Zwei mausgesteuerte Ansichten koennen
+// also nacheinander je ein Strassenfenster oeffnen, und beide bleiben stehen.
+//
+// Gefahren wird durchgehend der Produktivweg: Mausklick auf die eigene Flagge ->
+// dskGameInterface::Msg_LeftDown -> ContextClick -> iwAction; darin ein echter Mausklick auf
+// "Strasse bauen" ueber WindowManager::Msg_LeftDown/-Up (genau der setzt die Besitzklammer, aus
+// der ActionWindowOwner liest); danach zwei Klicks auf die Karte, bis das Strassenfenster
+// aufgeht. Keine Besitzklammer wird im Test gesetzt, keine interne Funktion direkt gerufen.
+
+namespace {
+
+/// Bringt Ansicht `v` ueber den vollen MAUSweg in den Strassenbaumodus und laesst ihr
+/// Strassenfenster aufgehen.
+///
+/// Das entstehende iwRoadWindow hat BEIDE Knoepfe: der Weg endet auf einem Knoten, auf dem eine
+/// Flagge moeglich ist, und genau daran haengt Knopf 0 (iwRoadWindow-Konstruktor: flagpossible).
+template<class T_Fixture>
+void mouseOpenRoadWindow(T_Fixture& f, const unsigned v, const RoadSpot& spot)
+{
+    const auto clickMap = [&f, v](const MapPoint pt) {
+        const Position pos = padNodeViewPos(f.world(), f.gwv(v), pt);
+        BOOST_TEST_REQUIRE(f.playerView(v).ContainsViewPos(pos));
+        f.mouseFrame(pos);
+        BOOST_TEST_REQUIRE((f.gwv(v).GetSelectedPt() == pt));
+        // dskGameInterface::Msg_LeftDown ist der Handler, den der WindowManager dem Desktop
+        // zustellt, wenn unter dem Zeiger kein Fenster liegt. Hier direkt gerufen, damit ein
+        // schon offenes Strassenfenster der ANDEREN Ansicht die Kartenklicks nicht abfaengt -
+        // die Knopfklicks unten laufen dagegen ueber den WindowManager, und nur auf die kommt
+        // es in diesem Nachweis an.
+        f.dsk->Msg_LeftDown(MouseCoords(pos));
+    };
+
+    // 1. Klick auf die eigene Flagge: das Aktionsfenster geht auf, Reiter "Flagge" ist gewaehlt.
+    clickMap(spot.start);
+    iwAction* const aw = f.playerView(v).actionwindow;
+    BOOST_TEST_REQUIRE(aw != static_cast<iwAction*>(nullptr));
+    BOOST_TEST_REQUIRE(aw->GetOwner() == v);
+    auto* mainTab = aw->GetCtrl<ctrlTab>(0);
+    BOOST_TEST_REQUIRE(mainTab != static_cast<ctrlTab*>(nullptr));
+    ctrlGroup* flagGroup = mainTab->GetGroup(4); // TAB_FLAG
+    BOOST_TEST_REQUIRE(flagGroup != static_cast<ctrlGroup*>(nullptr));
+    auto* roadBt = flagGroup->GetCtrl<ctrlButton>(1); // "Build road"
+    BOOST_TEST_REQUIRE(roadBt != static_cast<ctrlButton*>(nullptr));
+
+    // 2. Der volle Mausweg auf diesen Knopf. Der erste Losklick raeumt nur die Sperre, die
+    //    WindowManager::DoShow(..., mouse=true) gegen den Durchrutschklick setzt.
+    const Position roadBtPos =
+      roadBt->GetDrawPos() + DrawPoint(roadBt->GetSize().x / 2, roadBt->GetSize().y / 2);
+    WINDOWMANAGER.Msg_LeftUp(MouseCoords(roadBtPos));
+    WINDOWMANAGER.Msg_LeftDown(MouseCoords(roadBtPos));
+    WINDOWMANAGER.Msg_LeftUp(MouseCoords(roadBtPos));
+    BOOST_TEST_REQUIRE((f.playerView(v).GetRoad().mode == RoadBuildMode::Normal));
+    BOOST_TEST_REQUIRE((f.playerView(v).GetRoad().start == spot.start));
+
+    // Das Aktionsfenster hat sich dabei selbst geschlossen. Der Desktop des WindowManagers ist
+    // im Testaufbau ein DummyDesktop, der Rueckruf an dskGameInterface bliebe also aus und
+    // view.actionwindow zeigte gleich auf toten Speicher. Nachgeholt wird GENAU der Aufruf, den
+    // WindowManager::DoClose macht.
+    BOOST_TEST_REQUIRE(aw->ShouldBeClosed());
+    f.dsk->Msg_WindowClosed(*aw);
+    WINDOWMANAGER.Draw();
+
+    // 3. Klick auf den Zielknoten: der Weg wird bis dorthin gelegt - noch ohne Kommando.
+    clickMap(spot.end);
+    BOOST_TEST_REQUIRE((f.playerView(v).GetRoad().route == spot.route), boost::test_tools::per_element());
+    BOOST_TEST_REQUIRE((f.playerView(v).GetRoad().point == spot.end));
+
+    // 4. Klick auf DENSELBEN Knoten: selPt == rb.point -> das Strassenfenster geht auf.
+    clickMap(spot.end);
+    BOOST_TEST_REQUIRE(f.playerView(v).roadwindow != static_cast<IngameWindow*>(nullptr));
+    BOOST_TEST_REQUIRE(f.playerView(v).roadwindow->GetOwner() == v);
+}
+
+/// Der volle Mausweg auf einen Knopf des Strassenfensters von Ansicht `v`.
+/// btId 0 = "Flagge & Weg bauen", btId 1 = "Bau abbrechen".
+template<class T_Fixture>
+void mouseClickRoadWindowButton(T_Fixture& f, const unsigned v, const unsigned btId)
+{
+    IngameWindow* const wnd = f.playerView(v).roadwindow;
+    BOOST_TEST_REQUIRE(wnd != static_cast<IngameWindow*>(nullptr));
+    auto* bt = wnd->GetCtrl<ctrlButton>(btId);
+    BOOST_TEST_REQUIRE(bt != static_cast<ctrlButton*>(nullptr));
+    const Position btPos = bt->GetDrawPos() + DrawPoint(bt->GetSize().x / 2, bt->GetSize().y / 2);
+    // Das Fenster, das der WindowManager unter diesem Punkt findet, MUSS das gemeinte sein -
+    // sonst misst der Nachweis etwas anderes, als er behauptet.
+    BOOST_TEST_REQUIRE(WINDOWMANAGER.FindWindowAtPos(btPos) == wnd);
+    WINDOWMANAGER.Msg_LeftUp(MouseCoords(btPos)); // Sperre aus DoShow(..., mouse=true) raeumen
+    WINDOWMANAGER.Msg_LeftDown(MouseCoords(btPos));
+    WINDOWMANAGER.Msg_LeftUp(MouseCoords(btPos));
+}
+
+/// Schliesst die offenen Strassenfenster, ohne dass etwas gezeichnet wird, was hier nicht
+/// gezeichnet werden kann - und ohne die haengenden Zeiger aus dem DummyDesktop.
+template<class T_Fixture>
+void closeRoadWindows(T_Fixture& f, const unsigned numViews)
+{
+    for(unsigned v = 0; v < numViews; ++v)
+    {
+        if(IngameWindow* wnd = f.playerView(v).roadwindow)
+        {
+            if(!wnd->ShouldBeClosed())
+                wnd->Close();
+            f.dsk->Msg_WindowClosed(*wnd);
+        }
+    }
+    WINDOWMANAGER.Draw();
+}
+
+/// Damit dieselben Hilfen ueber der Partie-losen und der laufenden Partie laufen.
+struct MouseViewFixture : PadViewFixture<2>
+{
+    const GameWorldBase& world() const { return worldFixture.world; }
+    PlayerView& playerView(unsigned v) { return view(v); }
+    void mouseFrame(const Position& pos) { step(16, pos); }
+};
+
+struct MouseGameFixture : rttr::test::PadGameFixture
+{
+    PlayerView& playerView(unsigned v) { return dsk->GetPlayerView(v); }
+    GameWorldView& gwv(unsigned v) { return dsk->GetPlayerView(v).GetView(); }
+    void mouseFrame(const Position& pos) { dsk->UpdateInput(16, pos); }
+};
+
+} // namespace
+
+/// Der gemessene Fall des Pruefers: zwei Strassenfenster gleichzeitig, Abbrechen im Fenster von
+/// Ansicht 1 - und es fiel Ansicht 0 um.
+BOOST_FIXTURE_TEST_CASE(TwoMouseViewsCanHoldARoadWindowEachAndCancelActsOnThePressedOne, MouseViewFixture)
+{
+    const RoadSpot spot0 = findRoadSpotFromHQ(view(0).GetViewer(), 2, 4);
+    const RoadSpot spot1 = findRoadSpotFromHQ(view(1).GetViewer(), 2, 4);
+    BOOST_TEST_REQUIRE(spot0.isValid());
+    BOOST_TEST_REQUIRE(spot1.isValid());
+
+    mouseOpenRoadWindow(*this, 0, spot0);
+    mouseOpenRoadWindow(*this, 1, spot1);
+
+    const bool bothOpen = view(0).roadwindow && view(1).roadwindow && !view(0).roadwindow->ShouldBeClosed()
+                          && !view(1).roadwindow->ShouldBeClosed();
+    BOOST_TEST_MESSAGE("AUDIT: zwei iwRoadWindow gleichzeitig offen - " << (bothOpen ? "ja" : "nein"));
+    BOOST_TEST_REQUIRE(bothOpen);
+
+    mouseClickRoadWindowButton(*this, 1, 1); // Abbrechen im Fenster von ANSICHT 1
+
+    const auto modeName = [](const RoadBuildMode m) {
+        return m == RoadBuildMode::Disabled ? "Disabled" : (m == RoadBuildMode::Normal ? "Normal" : "Boat");
+    };
+    BOOST_TEST_MESSAGE("AUDIT: nach Abbrechen im Fenster von Ansicht 1 -> view0.mode="
+                       << modeName(view(0).GetRoad().mode) << "  view1.mode=" << modeName(view(1).GetRoad().mode));
+
+    // Der Abbruch gehoert Ansicht 1 - und NUR ihr.
+    BOOST_TEST((view(1).GetRoad().mode == RoadBuildMode::Disabled));
+    BOOST_TEST(!viewerDrawsAnyOf(view(1).GetViewer(), spot1.start, spot1.route));
+    BOOST_TEST((view(0).GetRoad().mode == RoadBuildMode::Normal));
+    BOOST_TEST((view(0).GetRoad().route == spot0.route), boost::test_tools::per_element());
+    BOOST_TEST(viewerDrawsRoad(view(0).GetViewer(), spot0.start, spot0.route));
+
+    closeRoadWindows(*this, 2);
+}
+
+/// Und der Knopf, der wirklich etwas kostet: Knopf 0 desselben Fensters ruft GI_BuildRoad und
+/// damit CommitRoad(RoadWindowOwner()). Gemessen wird im REPLAY - also an dem, was tatsaechlich
+/// vom Server zurueckkam - und nicht per Analogie zum Abbruchknopf.
+BOOST_FIXTURE_TEST_CASE(TwoMouseViewsCanHoldARoadWindowEachAndBuildBooksOnThePressedOne, MouseGameFixture)
+{
+    setUpTwoLocalPlayers();
+
+    const RoadSpot spot0 = findRoadSpotFromHQ(playerView(0).GetViewer(), 2, 4);
+    const RoadSpot spot1 = findRoadSpotFromHQ(playerView(1).GetViewer(), 2, 4);
+    BOOST_TEST_REQUIRE(spot0.isValid());
+    BOOST_TEST_REQUIRE(spot1.isValid());
+
+    mouseOpenRoadWindow(*this, 0, spot0);
+    mouseOpenRoadWindow(*this, 1, spot1);
+
+    const unsigned startGF = GAMECLIENT.GetGFNumber();
+    mouseClickRoadWindowButton(*this, 1, 0); // "Flagge & Weg bauen" im Fenster von ANSICHT 1
+
+    BOOST_TEST_MESSAGE("AUDIT: nach Bauen im Fenster von Ansicht 1 -> view0.mode="
+                       << (playerView(0).GetRoad().mode == RoadBuildMode::Disabled ? "Disabled" : "Normal")
+                       << "  view1.mode="
+                       << (playerView(1).GetRoad().mode == RoadBuildMode::Disabled ? "Disabled" : "Normal"));
+
+    closeRoadWindows(*this, 2);
+    pumpUntilGF(startGF + 40);
+    BOOST_TEST_MESSAGE("AUDIT: Strasse von Ansicht 1 steht in der Welt - "
+                       << (worldHasRoad(world(), spot1.start, spot1.route) ? "ja" : "nein")
+                       << " | Strasse von Ansicht 0 steht in der Welt - "
+                       << (worldHasRoad(world(), spot0.start, spot0.route) ? "ja" : "nein"));
+    BOOST_TEST(worldHasRoad(world(), spot1.start, spot1.route));
+    BOOST_TEST(!worldHasRoad(world(), spot0.start, spot0.route));
+    BOOST_TEST(ci().numErrors == 0u);
+    BOOST_TEST(ci().numAsync == 0u);
+
+    tearDownDesktop();
+    const auto replayPath = stopAndGetReplay();
+    const unsigned gcs0 = numGCsForPlayer(replayPath, 0);
+    const unsigned gcs1 = numGCsForPlayer(replayPath, 1);
+    BOOST_TEST_MESSAGE("AUDIT: GameCommands im Replay -> Spieler0=" << gcs0 << "  Spieler1=" << gcs1);
+    BOOST_TEST(gcs1 == 1u);
+    BOOST_TEST(gcs0 == 0u);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
