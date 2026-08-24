@@ -687,6 +687,20 @@ BOOST_FIXTURE_TEST_CASE(PadInputTouchesNeitherTheMouseNorTheWindowManager, TwoVi
     // M5: kein einziges Padereignis hat den WindowManager erreicht
     BOOST_TEST(counting->total() == 0u);
 
+    // Seit dem Padbau oeffnet A auf einem bebaubaren Knoten das Aktionsfenster (iwAction).
+    // Das ist die neue Wirkung dieser Runde und KEIN Verstoss gegen M4/M5: der Mauszeiger ist
+    // nachweislich liegen geblieben (die Zeile darueber), und kein Padereignis ist als
+    // NACHRICHT durch den WindowManager gelaufen (die Zeile davor).
+    //
+    // Fuer die Gegenprobe muss das Fenster trotzdem weg. Der WindowManager stellt
+    // Mausnachrichten seit jeher dem aktiven FENSTER zu und nur ersatzweise dem Desktop
+    // (WindowManager::getActiveWindow). Mit einem offenen Fenster maesse die Gegenprobe also
+    // nicht mehr, ob der Zaehler zaehlt, sondern wohin der WindowManager zustellt - und waere
+    // damit als Gegenprobe wertlos.
+    while(IngameWindow* wnd = WINDOWMANAGER.GetTopMostWindow())
+        WINDOWMANAGER.CloseNow(wnd);
+    BOOST_TEST_REQUIRE(WINDOWMANAGER.IsDesktopActive());
+
     // Gegenprobe, dass die Zaehlung ueberhaupt zaehlt - sonst waere die Null wertlos
     WINDOWMANAGER.Msg_MouseMove(MouseCoords(Position(5, 5)));
     BOOST_TEST(counting->numMouseMove == 1u);

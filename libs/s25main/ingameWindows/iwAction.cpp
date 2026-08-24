@@ -44,9 +44,13 @@ enum TabID
 };
 
 iwAction::iwAction(GameInterface& gi, GameWorldView& gwv, const Tabs& tabs, MapPoint selectedPt,
-                   const DrawPoint& mousePos, Params params, bool military_buildings)
+                   const DrawPoint& mousePos, Params params, bool military_buildings,
+                   const MousePointer mousePointer)
     : IngameWindow(CGI_ACTION, mousePos, Extent(200, 254), _("Activity window"), LOADER.GetImageN("io", 1)), gi(gi),
-      gwv(gwv), selectedPt(selectedPt), mousePosAtOpen_(mousePos)
+      gwv(gwv), selectedPt(selectedPt),
+      // Ungueltig heisst "beim Schliessen den Zeiger nicht zuruecksetzen" - genau das, was
+      // DisableMousePosResetOnClose() sonst nachtraeglich tut.
+      mousePosAtOpen_(mousePointer == MousePointer::Warp ? mousePos : DrawPoint::Invalid())
 {
     /*
         TAB_FLAG    1 = Land road
@@ -337,7 +341,9 @@ iwAction::iwAction(GameInterface& gi, GameWorldView& gwv, const Tabs& tabs, MapP
     if(adjPos != GetPos())
         SetPos(adjPos);
 
-    VIDEODRIVER.SetMousePos(GetDrawPos() + DrawPoint(20, 75));
+    // Siehe MousePointer: nur der Spieler, dem der Zeiger GEHOERT, bekommt ihn hierher gezogen.
+    if(mousePointer == MousePointer::Warp)
+        VIDEODRIVER.SetMousePos(GetDrawPos() + DrawPoint(20, 75));
 }
 
 void iwAction::AddUpgradeRoad(ctrlGroup* group, unsigned& /*x*/, unsigned& width)

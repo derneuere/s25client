@@ -742,6 +742,35 @@ bool dskGameInterface::PadOpenWindow(PlayerView& view)
     return OpenObjectWindow(view, pt);
 }
 
+bool dskGameInterface::PadOpenActionWindow(PlayerView& view)
+{
+    // Die Besitzklammer ist hier bereits offen (OnPadButton): das Fenster gehoert DIESEM
+    // Sitzplatz, und jeder Knopf darin bucht auf SEINEN Spieler.
+    const MapPoint pt = view.GetView().GetSelectedPt();
+    if(!pt.isValid())
+        return false;
+
+    // DIESELBE Entscheidung wie beim Mausklick - kein zweites Regelwerk (ComputeActionOptions).
+    const ActionOptions opts = ComputeActionOptions(view, pt);
+    if(opts.handled)
+        return true; // das Handelsfenster ist aufgegangen
+    // Ein Fenster, in dem nur "Anzeigeoptionen" steht, ist fuer einen Padspieler keine Antwort.
+    // Er bekommt stattdessen die Rueckmeldung des Aufrufers (PadReject).
+    if(!opts.hasAction())
+        return false;
+
+    if(view.actionwindow)
+        view.actionwindow->Close();
+    // Das Fenster erscheint am ZEIGER DIESES SPIELERS - also in seinem Viewport und nicht dort,
+    // wo die Maus eines anderen Menschen gerade liegt. Der Zeiger steht in denselben
+    // Koordinaten wie MouseCoords::pos (PlayerView::GetPadCursor), die Rechnung im
+    // iwAction-Konstruktor stimmt damit unveraendert.
+    const DrawPoint wndPos = view.HasPadCursor() ? DrawPoint(view.GetPadCursor()) : DrawPoint(view.GetViewCenter());
+    ShowActionWindow(view, opts.tabs, pt, wndPos, opts.enableMilitaryBuildings, iwAction::MousePointer::LeaveAlone);
+    view.ClearRejection();
+    return true;
+}
+
 bool dskGameInterface::ContextClick(const MouseCoords& mc)
 {
     // BEFUND 2: der Klick gehoert der Ansicht, die den MAUSZEIGER haelt - nicht mehr
@@ -856,10 +885,6 @@ bool dskGameInterface::ContextClick(const MouseCoords& mc)
         }
     } else // Not in road building mode
     {
-        bool enable_military_buildings = false;
-
-        iwAction::Tabs action_tabs;
-
         const MapPoint cSel = clickedView.GetSelectedPt();
 
         // Das Fenster des Objekts auf diesem Knoten - dieselbe Entscheidung, die auch der
@@ -868,88 +893,14 @@ bool dskGameInterface::ContextClick(const MouseCoords& mc)
         if(OpenObjectWindow(view, cSel))
             return true;
 
-        const noBase& selObj = *viewer.GetWorld().GetNO(cSel);
-        action_tabs.watch = true;
-        // Unser Land
-        if(viewer.IsOwner(cSel))
-        {
-            const BuildingQuality bq = viewer.GetBQ(cSel);
-            // Kann hier was gebaut werden?
-            if(bq >= BuildingQuality::Mine)
-            {
-                action_tabs.build = true;
-
-                // Welches Gebäude kann gebaut werden?
-                switch(bq)
-                {
-                    case BuildingQuality::Mine: action_tabs.build_tabs = iwAction::BuildTab::Mine; break;
-                    case BuildingQuality::Hut: action_tabs.build_tabs = iwAction::BuildTab::Hut; break;
-                    case BuildingQuality::House: action_tabs.build_tabs = iwAction::BuildTab::House; break;
-                    case BuildingQuality::Castle: action_tabs.build_tabs = iwAction::BuildTab::Castle; break;
-                    case BuildingQuality::Harbor: action_tabs.build_tabs = iwAction::BuildTab::Harbor; break;
-                    default: break;
-                }
-
-                if(!viewer.GetWorld().IsFlagAround(cSel))
-                    action_tabs.setflag = true;
-
-                // Prüfen, ob sich Militärgebäude in der Nähe befinden, wenn nein, können auch eigene
-                // Militärgebäude gebaut werden
-                enable_military_buildings =
-                  !viewer.GetWorld().IsMilitaryBuildingNearNode(cSel, viewer.GetPlayerId());
-            } else if(bq == BuildingQuality::Flag)
-                action_tabs.setflag = true;
-            else if(selObj.GetType() == NodalObjectType::Flag)
-                action_tabs.flag = true;
-
-            if(selObj.GetType() != NodalObjectType::Flag && selObj.GetType() != NodalObjectType::Building)
-            {
-                // Check if there are roads
-                for(const Direction dir : helpers::EnumRange<Direction>{})
-                {
-                    const PointRoad curRoad = viewer.GetVisiblePointRoad(cSel, dir);
-                    if(curRoad != PointRoad::None)
-                    {
-                        action_tabs.cutroad = true;
-                        action_tabs.upgradeRoad |= (curRoad == PointRoad::Normal);
-                    }
-                }
-            }
-        }
-        // evtl ists ein feindliches Militärgebäude, welches NICHT im Nebel liegt?
-        else if(viewer.GetVisibility(cSel) == Visibility::Visible)
-        {
-            if(selObj.GetType() == NodalObjectType::Building)
-            {
-                const auto* building = viewer.GetWorld().GetSpecObj<noBuilding>(cSel); //-V807
-                BuildingType bt = building->GetBuildingType();
-
-                // Only if trade is enabled
-                if(viewer.GetWorld().GetGGS().isEnabled(AddonId::TRADE))
-                {
-                    // Allied warehouse? -> Show trade window
-                    if(BuildingProperties::IsWareHouse(bt) && viewer.GetPlayer().IsAlly(building->GetPlayer()))
-                    {
-                        WINDOWMANAGER.Show(std::make_unique<iwTrade>(*static_cast<const nobBaseWarehouse*>(building),
-                                                                     viewer, GAMECLIENT));
-                        return true;
-                    }
-                }
-
-                // Ist es ein gewöhnliches Militärgebäude?
-                if(BuildingProperties::IsMilitary(bt))
-                {
-                    // Dann darf es nicht neu gebaut sein!
-                    if(!static_cast<const nobMilitary*>(building)->IsNewBuilt())
-                        action_tabs.attack = true;
-                }
-                // oder ein HQ oder Hafen?
-                else if(bt == BuildingType::Headquarters || bt == BuildingType::HarborBuilding)
-                    action_tabs.attack = true;
-                action_tabs.sea_attack =
-                  action_tabs.attack && viewer.GetWorld().GetGGS().isEnabled(AddonId::SEA_ATTACK);
-            }
-        }
+        // Was hier moeglich ist, steht jetzt an EINER Stelle - und der Padpfad liest dieselbe
+        // (PadOpenActionWindow). Der Mauspfad oeffnet das Fenster wie bisher IMMER, auch wenn
+        // nur der Reiter "Anzeigeoptionen" darin steht: der Spieler sieht dann selbst, dass
+        // hier nichts geht. Genau das ist der Punkt, an dem der Padpfad bewusst abweicht - er
+        // hat keinen Blick auf ein leeres Fenster uebrig und antwortet stattdessen.
+        const ActionOptions opts = ComputeActionOptions(view, cSel);
+        if(opts.handled)
+            return true;
 
         // Bisheriges Actionfenster schließen, falls es eins gab
         // aktuelle Mausposition merken, da diese durch das Schließen verändert werden kann
@@ -957,10 +908,110 @@ bool dskGameInterface::ContextClick(const MouseCoords& mc)
             view.actionwindow->Close();
         VIDEODRIVER.SetMousePos(mc.pos);
 
-        ShowActionWindow(view, action_tabs, cSel, mc.pos, enable_military_buildings);
+        ShowActionWindow(view, opts.tabs, cSel, mc.pos, opts.enableMilitaryBuildings);
     }
 
     return true;
+}
+
+bool dskGameInterface::ActionOptions::hasAction() const
+{
+    // ContextClick setzt `watch` unbedingt - der Reiter mit Beobachtungsfenster, Haeusernamen,
+    // "zum HQ" und "Verbuendete benachrichtigen" steht auf JEDEM Knoten. Er ist deshalb kein
+    // Merkmal dafuer, dass hier etwas moeglich WAERE, und zaehlt hier bewusst nicht mit.
+    return tabs.build || tabs.setflag || tabs.flag || tabs.cutroad || tabs.upgradeRoad || tabs.attack
+           || tabs.sea_attack;
+}
+
+dskGameInterface::ActionOptions dskGameInterface::ComputeActionOptions(PlayerView& view, const MapPoint cSel)
+{
+    // WOERTLICH der Block, der frueher in ContextClick stand - nur ohne die Annahme, dass die
+    // fragende Ansicht die des Mausspielers ist. Gelesen wird durchgehend der Viewer DIESER
+    // Ansicht: eigenes Gebiet, eigene BQ, eigene Sichtbarkeit, eigene Buendnisse.
+    GameWorldViewer& viewer = view.GetViewer();
+    ActionOptions out;
+    const noBase& selObj = *viewer.GetWorld().GetNO(cSel);
+    out.tabs.watch = true;
+    // Unser Land
+    if(viewer.IsOwner(cSel))
+    {
+        const BuildingQuality bq = viewer.GetBQ(cSel);
+        // Kann hier was gebaut werden?
+        if(bq >= BuildingQuality::Mine)
+        {
+            out.tabs.build = true;
+
+            // Welches Gebäude kann gebaut werden?
+            switch(bq)
+            {
+                case BuildingQuality::Mine: out.tabs.build_tabs = iwAction::BuildTab::Mine; break;
+                case BuildingQuality::Hut: out.tabs.build_tabs = iwAction::BuildTab::Hut; break;
+                case BuildingQuality::House: out.tabs.build_tabs = iwAction::BuildTab::House; break;
+                case BuildingQuality::Castle: out.tabs.build_tabs = iwAction::BuildTab::Castle; break;
+                case BuildingQuality::Harbor: out.tabs.build_tabs = iwAction::BuildTab::Harbor; break;
+                default: break;
+            }
+
+            if(!viewer.GetWorld().IsFlagAround(cSel))
+                out.tabs.setflag = true;
+
+            // Prüfen, ob sich Militärgebäude in der Nähe befinden, wenn nein, können auch eigene
+            // Militärgebäude gebaut werden
+            out.enableMilitaryBuildings = !viewer.GetWorld().IsMilitaryBuildingNearNode(cSel, viewer.GetPlayerId());
+        } else if(bq == BuildingQuality::Flag)
+            out.tabs.setflag = true;
+        else if(selObj.GetType() == NodalObjectType::Flag)
+            out.tabs.flag = true;
+
+        if(selObj.GetType() != NodalObjectType::Flag && selObj.GetType() != NodalObjectType::Building)
+        {
+            // Check if there are roads
+            for(const Direction dir : helpers::EnumRange<Direction>{})
+            {
+                const PointRoad curRoad = viewer.GetVisiblePointRoad(cSel, dir);
+                if(curRoad != PointRoad::None)
+                {
+                    out.tabs.cutroad = true;
+                    out.tabs.upgradeRoad |= (curRoad == PointRoad::Normal);
+                }
+            }
+        }
+    }
+    // evtl ists ein feindliches Militärgebäude, welches NICHT im Nebel liegt?
+    else if(viewer.GetVisibility(cSel) == Visibility::Visible)
+    {
+        if(selObj.GetType() == NodalObjectType::Building)
+        {
+            const auto* building = viewer.GetWorld().GetSpecObj<noBuilding>(cSel); //-V807
+            BuildingType bt = building->GetBuildingType();
+
+            // Only if trade is enabled
+            if(viewer.GetWorld().GetGGS().isEnabled(AddonId::TRADE))
+            {
+                // Allied warehouse? -> Show trade window
+                if(BuildingProperties::IsWareHouse(bt) && viewer.GetPlayer().IsAlly(building->GetPlayer()))
+                {
+                    WINDOWMANAGER.Show(std::make_unique<iwTrade>(*static_cast<const nobBaseWarehouse*>(building),
+                                                                 viewer, GAMECLIENT));
+                    out.handled = true;
+                    return out;
+                }
+            }
+
+            // Ist es ein gewöhnliches Militärgebäude?
+            if(BuildingProperties::IsMilitary(bt))
+            {
+                // Dann darf es nicht neu gebaut sein!
+                if(!static_cast<const nobMilitary*>(building)->IsNewBuilt())
+                    out.tabs.attack = true;
+            }
+            // oder ein HQ oder Hafen?
+            else if(bt == BuildingType::Headquarters || bt == BuildingType::HarborBuilding)
+                out.tabs.attack = true;
+            out.tabs.sea_attack = out.tabs.attack && viewer.GetWorld().GetGGS().isEnabled(AddonId::SEA_ATTACK);
+        }
+    }
+    return out;
 }
 
 bool dskGameInterface::Msg_LeftDown(const MouseCoords& mc)
@@ -1584,6 +1635,7 @@ void dskGameInterface::PadReject(PlayerView& view, const PadRejection reason)
         case PadRejection::RoadNoWay: text = _("No road can be built to that point."); break;
         case PadRejection::RoadOutsideTerritory: text = _("You cannot build outside your own territory."); break;
         case PadRejection::RoadEndBlocked: text = _("A road has to end where a flag can stand."); break;
+        case PadRejection::NothingHere: text = _("Nothing can be done here."); break;
     }
     messenger.AddMessage(worldViewer.GetWorld().GetPlayer(view.GetPlayerId()).name,
                          worldViewer.GetWorld().GetPlayer(view.GetPlayerId()).color, ChatDestination::System, text,
@@ -1644,11 +1696,24 @@ void dskGameInterface::OnPadButton(const unsigned slot, const PadButton button, 
         // kennt nur Schiff, Gebaeude und Baustelle -, und eine eigene Flagge ist genau der
         // Punkt, an dem auch der Mausspieler seinen Strassenbau beginnt. Der Knopf bekommt hier
         // also keine zweite Bedeutung, sondern eine erste.
+        //
+        // Dritte Stufe seit dieser Runde: bleibt auch der Strassenbau aus, geht das
+        // AKTIONSFENSTER auf (PadOpenActionWindow) - der Weg, auf dem ein Padspieler Gebaeude
+        // setzt. Die Reihenfolge ist Absicht und nicht beliebig: auf einer EIGENEN FLAGGE
+        // bietet iwAction ebenfalls etwas an (Strasse bauen, Flagge abreissen, Geologe,
+        // Spaeher), aber dort ist der Strassenbau die gewachsene Bedeutung des Knopfes und
+        // kostet einen Druck statt vier. Der Preis dafuer steht ehrlich da: die drei uebrigen
+        // Knoepfe des Flaggenreiters bleiben am Pad vorerst unerreichbar.
+        //
+        // Geht auch das nicht, ANTWORTET der Knopf (PadReject). Ein Druck, der nichts tut und
+        // nichts sagt, sieht aus wie ein totes Pad - derselbe Befund, aus dem NoteRejection
+        // entstanden ist.
         case PadButton::A:
             if(inRoadMode)
                 PadExtendRoad(view);
-            else if(!PadOpenWindow(view))
-                PadStartRoad(view, /*waterRoad*/ false);
+            else if(!PadOpenWindow(view) && !PadStartRoad(view, /*waterRoad*/ false)
+                    && !PadOpenActionWindow(view))
+                PadReject(view, PadRejection::NothingHere);
             break;
         // X setzt eine Flagge, bewusst als Ausnahme von der Regel darueber und bewusst NICHT
         // auf A: die Flagge ist das einzige Primitiv ohne Kosten - sie laesst sich im eigenen
@@ -1981,9 +2046,44 @@ void dskGameInterface::StartRoadBuilding(PlayerView& view, const MapPoint startP
     UpdateRoadCursor(view);
 }
 
+/// Die Ansicht, in deren Namen gerade ein Aktionsfenster handelt - sonst die Hauptansicht.
+///
+/// Das Gegenstueck zu RoadWindowOwner(), aus demselben Grund: iwAction ruft
+/// gi.GI_StartRoadBuilding() ohne jeden Spielerbezug (GameInterface.h kennt keine Ansichten).
+/// Seit ContextClick das Aktionsfenster fuer die Ansicht UNTER DER MAUS oeffnet - und seit ein
+/// Padspieler es selbst oeffnen kann - waere primary() dort die falsche Antwort: der Bauknopf
+/// startete den Strassenbau bei einem anderen Spieler, der davon nichts weiss, und der
+/// Ausloeser saehe gar keine Wirkung.
+///
+/// Gefragt wird ZUERST die laufende Besitzklammer und nicht die Fensterliste. Der Grund ist
+/// die Lage, in der eine Suche ueber views_ nachweislich falsch antwortet: zwei lokale Spieler
+/// koennen GLEICHZEITIG ein Aktionsfenster offen haben (einer per Maus, einer per Pad). Die
+/// Suche liefert dann das erste in der Liste - also unter Umstaenden die Ansicht, die gar
+/// nicht gedrueckt hat. Die Klammer dagegen wird an genau der Stelle gesetzt, an der bekannt
+/// ist, WER drueckt: WindowManager::RelayMouseMessage stempelt den Besitzer des Fensters,
+/// das die Maus bedient, und dskGameInterface::ViewScope die Ansicht des Pads. Beides ist
+/// dieselbe Zahl - die Nummer der Ansicht.
+///
+/// Die Suche bleibt als zweite Stufe stehen: Aufrufe, die von ausserhalb jeder Klammer kommen
+/// (die spielerlose Signatur in den Nachweisen), verhalten sich damit unveraendert. Ohne
+/// Fenster und ohne Klammer ist das Ergebnis primary() - der Einzelspieler und jeder andere
+/// Fall bleiben exakt wie bisher.
+PlayerView& dskGameInterface::ActionWindowOwner()
+{
+    const unsigned ambientOwner = WINDOWMANAGER.GetCurrentWindowOwner();
+    if(ambientOwner < views_.size())
+        return *views_[ambientOwner];
+    for(auto& view : views_)
+    {
+        if(view->actionwindow)
+            return *view;
+    }
+    return primary();
+}
+
 void dskGameInterface::GI_StartRoadBuilding(const MapPoint startPt, bool waterRoad)
 {
-    StartRoadBuilding(primary(), startPt, waterRoad);
+    StartRoadBuilding(ActionWindowOwner(), startPt, waterRoad);
 }
 
 void dskGameInterface::CancelRoadBuilding(PlayerView& view)
@@ -2147,7 +2247,8 @@ void dskGameInterface::ShowActionWindow(const iwAction::Tabs& action_tabs, MapPo
 }
 
 void dskGameInterface::ShowActionWindow(PlayerView& view, const iwAction::Tabs& action_tabs, MapPoint cSel,
-                                        const DrawPoint& mousePos, const bool enable_military_buildings)
+                                        const DrawPoint& mousePos, const bool enable_military_buildings,
+                                        const iwAction::MousePointer mousePointer)
 {
     GameWorldViewer& worldViewer = view.GetViewer();
     const GameWorldBase& world = worldViewer.GetWorld();
@@ -2185,7 +2286,7 @@ void dskGameInterface::ShowActionWindow(PlayerView& view, const iwAction::Tabs& 
     // das im Splitscreen die Ansicht eines fremden Spielers gewesen.
     view.actionwindow = &WINDOWMANAGER.Show(
       std::make_unique<iwAction>(*this, view.GetView(), action_tabs, cSel, mousePos, params,
-                                 enable_military_buildings),
+                                 enable_military_buildings, mousePointer),
       true);
 }
 

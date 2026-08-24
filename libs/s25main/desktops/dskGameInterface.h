@@ -159,6 +159,10 @@ public:
     /// Die Ansicht, deren Strassenfenster gerade offen ist - sonst die Hauptansicht.
     /// Siehe die Begruendung an der Umsetzung.
     PlayerView& RoadWindowOwner();
+    /// Die Ansicht, deren AKTIONSfenster gerade offen ist - sonst die Hauptansicht.
+    /// Das Gegenstueck zu RoadWindowOwner() fuer GI_StartRoadBuilding; siehe die Begruendung
+    /// an der Umsetzung.
+    PlayerView& ActionWindowOwner();
     /// Baut Weg zurück von Ende bis zu start_id
     void DemolishRoad(PlayerView& view, unsigned start_id);
     void DemolishRoad(unsigned start_id);
@@ -168,9 +172,35 @@ public:
     void ShowRoadWindow(const Position& mousePos);
     /// Zeigt das Actionwindow an, bei Flaggen werden z.B. noch berücksichtigt, obs ne besondere Flagge ist usw
     void ShowActionWindow(PlayerView& view, const iwAction::Tabs& action_tabs, MapPoint cSel,
-                          const DrawPoint& mousePos, bool enable_military_buildings);
+                          const DrawPoint& mousePos, bool enable_military_buildings,
+                          iwAction::MousePointer mousePointer = iwAction::MousePointer::Warp);
     void ShowActionWindow(const iwAction::Tabs& action_tabs, MapPoint cSel, const DrawPoint& mousePos,
                           bool enable_military_buildings);
+
+    /// Was auf einem Knoten aus Sicht EINER Ansicht ueberhaupt moeglich ist.
+    ///
+    /// Das ist die Entscheidung, die frueher mitten in ContextClick stand und damit nur dem
+    /// Mauspfad gehoerte. Sie ist jetzt herausgezogen, weil der Padpfad sie MITBENUTZEN muss:
+    /// ein zweites Regelwerk, das dieselbe Frage beantwortet ("was darf dieser Spieler hier"),
+    /// laeuft garantiert vom ersten Zusatz an auseinander.
+    struct ActionOptions
+    {
+        iwAction::Tabs tabs;
+        bool enableMilitaryBuildings = false;
+        /// Statt eines Aktionsfensters wurde bereits ein ANDERES gezeigt (das Handelsfenster
+        /// am verbuendeten Lagerhaus). Der Aufrufer ist dann fertig.
+        bool handled = false;
+        /// Bietet dieses Fenster ueberhaupt eine HANDLUNG an - also mehr als den Reiter
+        /// "Anzeigeoptionen", den ContextClick unbedingt setzt?
+        ///
+        /// Der Mauspfad braucht die Frage nicht: sein Klick oeffnet immer ein Fenster, und der
+        /// Spieler sieht sofort, dass darin nichts steht. Der Padspieler dagegen braucht eine
+        /// Antwort auf seinen Knopfdruck (PadReject), sonst sieht ein Druck, der nichts tut,
+        /// aus wie ein totes Pad.
+        bool hasAction() const;
+    };
+    /// Berechnet obiges fuer DIESE Ansicht. Nicht const: der Handelsfall zeigt ein Fenster.
+    ActionOptions ComputeActionOptions(PlayerView& view, MapPoint cSel);
 
     const GameWorldView& GetView() const { return gwv; }
 
@@ -358,6 +388,16 @@ protected:
     /// Der A-Knopf: oeffnet das Fenster unter dem Zeiger DIESER Ansicht. Erzeugt selbst nie ein
     /// GameCommand - siehe die Begruendung an der Knopfbelegung in OnPadButton.
     bool PadOpenWindow(PlayerView& view);
+
+    /// Der A-Knopf, dritte Stufe: das AKTIONSFENSTER auf dem Knoten unter dem Zeiger DIESER
+    /// Ansicht - der Weg, auf dem ein Padspieler Gebaeude setzt.
+    ///
+    /// Erzeugt selbst kein GameCommand; das tut erst ein beschrifteter Knopf IM Fenster, und
+    /// zwar ueber die Besitzklammer dieses Sitzplatzes (OnPadButton). Die Invariante "A
+    /// schreibt nie etwas fest" bleibt damit woertlich erhalten.
+    ///
+    /// false, wenn hier nichts anzubieten ist - dann antwortet der Aufrufer mit PadReject.
+    bool PadOpenActionWindow(PlayerView& view);
 
     /// Der X-Knopf: setzt eine Flagge auf dem selektierten Punkt DIESER Ansicht, ueber den
     /// GameCommand-Pfad IHRES Spielers (GameClient::GetGCFactory -> LocalPlayerGCFactory ->

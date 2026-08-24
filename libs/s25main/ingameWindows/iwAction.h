@@ -28,6 +28,25 @@ public:
     };
     using Params = boost_variant2<FlagType, SoldierCount>;
 
+    /// Darf dieses Fenster die EINE echte Maus anfassen?
+    ///
+    /// Der Konstruktor zieht den Mauszeiger seit jeher auf seinen ersten Reiter und Close()
+    /// wieder auf die Klickstelle zurueck. Fuer den Mausspieler ist das eine Bequemlichkeit -
+    /// es ist SEIN Zeiger, und er hat das Fenster gerade selbst aufgeklickt. Deshalb bleibt
+    /// Warp die Vorgabe: Einzelspieler und Mauspfad verhalten sich exakt wie vorher, auch im
+    /// Splitscreen (dort oeffnet ContextClick das Fenster fuer die Ansicht UNTER der Maus, es
+    /// ist also weiterhin der Zeiger dessen, der geklickt hat).
+    ///
+    /// Oeffnet dagegen ein PADspieler dieses Fenster, gehoert der Mauszeiger einem ANDEREN
+    /// Menschen am selben Bildschirm. Ihn dorthin zu reissen waere ein Eingriff in dessen
+    /// Partie - deshalb LeaveAlone fuer den Padpfad. Dieselbe Begruendung, aus der der Padpfad
+    /// das iwRoadWindow gar nicht erst benutzt.
+    enum class MousePointer
+    {
+        Warp,
+        LeaveAlone
+    };
+
     enum class BuildTab
     {
         Hut,
@@ -71,7 +90,7 @@ private:
 
 public:
     iwAction(GameInterface& gi, GameWorldView& gwv, const Tabs& tabs, MapPoint selectedPt, const DrawPoint& mousePos,
-             Params params, bool military_buildings);
+             Params params, bool military_buildings, MousePointer mousePointer = MousePointer::Warp);
 
     void Close() override;
 

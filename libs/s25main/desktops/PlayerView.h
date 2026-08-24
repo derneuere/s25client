@@ -47,7 +47,16 @@ enum class PadRejection
     /// deshalb ablehnen (world/GameWorld.cpp:222-241). Der Mausspieler sieht das daran, dass
     /// iwRoadWindow seinen Bauknopf gar nicht erst anbietet; der Padspieler hat kein Fenster,
     /// also muss es ihm der Knopf selbst sagen.
-    RoadEndBlocked
+    RoadEndBlocked,
+    /// A auf einem Knoten, auf dem dieser Spieler NICHTS tun kann: kein Fenster zu oeffnen,
+    /// keine eigene Flagge zum Anfangen, und auch das Aktionsfenster haette nichts als den
+    /// Reiter "Anzeigeoptionen" anzubieten.
+    ///
+    /// Der Mausspieler bekommt in derselben Lage ein leeres Aktionsfenster und SIEHT damit,
+    /// dass hier nichts geht. Der Padspieler bekaeme ohne diese Meldung gar nichts - und ein
+    /// Knopf, der nichts tut, sieht aus wie ein totes Pad (derselbe Befund, aus dem
+    /// NoteRejection ueberhaupt entstanden ist).
+    NothingHere
 };
 
 /// Alles, was in einer Splitscreen-Partie je lokalem Spieler GENAU EINMAL existiert:
