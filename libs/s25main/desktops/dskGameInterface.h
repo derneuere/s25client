@@ -364,6 +364,18 @@ protected:
     /// Wirft die Pad-Ereignisse weg, die aufgelaufen sind, BEVOR es diese Partie gab.
     /// Der Geraetebestand (Connected/Disconnected) bleibt erhalten, Achsen und Knoepfe nicht.
     void DiscardStalePadEvents();
+    /// Uebernimmt Geraetebestand UND Sitzverteilung aus dem Menue.
+    ///
+    /// ZWEI Gruende, und der zweite ist der wichtigere:
+    ///  1. Seit der Menuenavigation leert der WindowManager die Treiberwarteschlange schon im
+    ///     Hauptmenue. Die Connected-Ereignisse, aus denen DiscardStalePadEvents bisher den
+    ///     Bestand baute, sind beim Spielstart also laengst verbraucht - ohne diese Uebernahme
+    ///     waere jedes Pad die ganze Partie ueber unbekannt.
+    ///  2. Die Sitzverteilung des Zuordnungsbildschirms muss den Desktopwechsel ueberleben.
+    ///     Ohne sie entschiede in der Partie wieder die Reihenfolge der ersten Benutzung
+    ///     (PadRouter.h:20-23), und wer in der Lobby Sitz 3 genommen hat, saesse hier auf
+    ///     Sitz 2 - der Zuordnungsbildschirm waere eine Luege.
+    void AdoptPadAssignmentFromMenu();
 
     /// Initializes player specific stuff after start or player swap
     void InitPlayer();

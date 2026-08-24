@@ -37,6 +37,7 @@
 #include "gameData/MilitaryConsts.h"
 #include "gameData/NationConsts.h"
 #include "libsiedler2/ArchivItem_Font.h"
+#include "libsiedler2/ArchivItem_Ini.h"
 #include "libsiedler2/ArchivItem_Palette.h"
 #include "libsiedler2/ArchivItem_PaletteAnimation.h"
 #include "libsiedler2/ArchivItem_Text.h"
@@ -458,6 +459,17 @@ void Loader::LoadDummySoundFiles()
         auto snd = std::make_unique<glArchivItem_Sound_Wave>();
         archive.set(id, std::move(snd));
     }
+}
+
+void Loader::LoadDummyLanguageFiles()
+{
+    libsiedler2::Archiv& archive = files_["languages"].archive;
+    if(archive.find("Languages"))
+        return;
+    auto ini = std::make_unique<libsiedler2::ArchivItem_Ini>("Languages");
+    ini->setValue("English", "en");
+    ini->setValue("German", "de");
+    archive.push(std::move(ini));
 }
 
 namespace {

@@ -100,8 +100,22 @@ public:
     /// Feste Zuordnung. Verdraengt ein evtl. dort sitzendes Geraet auf "unversorgt".
     /// false, wenn das Geraet unbekannt oder slot >= GetNumSlots() ist.
     bool AssignSlot(PadDeviceId device, unsigned slot);
+    /// Gibt die freien Slots an die bisher unversorgten, aber schon BENUTZTEN Geraete.
+    ///
+    /// Dieselbe Regel, die SetNumSlots beim Wachsen anwendet - hier als eigener Schritt, weil
+    /// AssignSlot ein Geraet verdraengen kann. Ohne diesen Ausgleich bliebe ein so verdraengtes
+    /// Pad fuer immer ohne Slot: Activate kehrt bei einem schon benutzten Geraet sofort zurueck,
+    /// es gaebe also keinen zweiten Anlauf. Im Zuordnungsbildschirm hiesse das: wer zufaellig
+    /// auf dem Slot sass, den ein anderer als Sitz bekommt, koennte selbst nie mehr beitreten.
+    void RebalanceUnassigned();
     /// Alle bekannten (= angesteckten) Geraete in Ansteckreihenfolge.
     std::vector<PadDeviceId> GetDevices() const;
+    /// Steckt DIESES Geraet noch? Dieselbe Frage wie "GetDevices() enthaelt es", nur ohne den
+    /// Vektor: die Frage faellt je Frame an (dskGameLobby::Msg_PaintBefore), die Kopie waere
+    /// eine Zuteilung je Frame fuer eine Antwort, die fast immer "ja" lautet.
+    bool HasDevice(PadDeviceId device) const { return Find(device) != nullptr; }
+    /// Zahl der bekannten (= angesteckten) Geraete. Gleiche Begruendung wie HasDevice.
+    unsigned GetNumDevices() const { return static_cast<unsigned>(devices_.size()); }
     /// Zahl der Geraete MIT Slot.
     unsigned GetNumAssigned() const;
 
@@ -126,6 +140,10 @@ public:
     /// 15 Prozent Geschwindigkeit - fuehlbar als Ruck, gerade am Fernseher.
     static float FilterTrigger(float value);
 
+    /// Alles vergessen: Geraete, offene Flanken UND die Slotzahl. Ohne das letzte waere
+    /// Reset() (MenuPadInput::Reset) kein vollstaendiger Reset - SetNumSlots kehrt bei
+    /// gleicher Zahl sofort zurueck, ein frisch aufgesetzter Router truege also noch die
+    /// Slotzahl des vorigen Bildschirms.
     void Clear();
 
 private:

@@ -15,6 +15,8 @@ public:
     dskOptions();
     ~dskOptions() override;
 
+    bool WantsPadInput() const override { return true; }
+
     void Msg_ScreenResize(const ScreenResizeEvent& sr) override;
     bool Msg_WheelUp(const MouseCoords& mc) override;
     bool Msg_WheelDown(const MouseCoords& mc) override;

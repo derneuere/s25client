@@ -13,6 +13,7 @@
 #include "SoundManager.h"
 #include "TvDisplay.h"
 #include "WindowManager.h"
+#include "input/MenuPadInput.h"
 #include "addons/AddonMaxWaterwayLength.h"
 #include "buildings/noBuildingSite.h"
 #include "buildings/nobHQ.h"
@@ -287,6 +288,8 @@ dskGameInterface::dskGameInterface(std::shared_ptr<Game> game, std::shared_ptr<c
 
     // ... und zuletzt: alles wegwerfen, was vor dieser Partie am Pad passiert ist.
     DiscardStalePadEvents();
+    // ... und dann das mitnehmen, was im Menue schon entschieden wurde.
+    AdoptPadAssignmentFromMenu();
 }
 
 void dskGameInterface::DiscardStalePadEvents()
@@ -308,10 +311,34 @@ void dskGameInterface::DiscardStalePadEvents()
         if(ev.type == PadEvent::Type::Connected || ev.type == PadEvent::Type::Disconnected)
             padRouter_.OnEvent(ev);
     }
+    // ... und derselbe Bestand geht an den Menuerouter. Diese Warteschlange gehoert ab jetzt
+    // dieser Partie; der WindowManager kaeme an ein hier abgeholtes Connected nie wieder heran.
+    WINDOWMANAGER.NotifyPadDevices(padEvents_);
     // Achsen und Knoepfe fallen bewusst weg: ein im Menue gehaltener Stick soll den Zeiger beim
     // Spielstart nicht sofort wegschleudern, und ein im Menue gedrueckter Knopf ist keine
     // Spielhandlung. Beides heilt von selbst, sobald der Spieler das Pad wirklich benutzt.
     padEvents_.clear();
+}
+
+void dskGameInterface::AdoptPadAssignmentFromMenu()
+{
+    const PadRouter& menuRouter = WINDOWMANAGER.GetPadInput().GetRouter();
+    const std::vector<PadDeviceId> devices = menuRouter.GetDevices();
+    if(devices.empty())
+        return; // niemand hat im Menue ein Pad benutzt - alles wie vor dieser Phase
+    // Vor AssignSlot, sonst weist der Router jeden Slot als ausserhalb des Bereichs zurueck.
+    // UpdateInput setzt denselben Wert im ersten Frame noch einmal.
+    padRouter_.SetNumSlots(GetNumViews());
+    for(const PadDeviceId dev : devices)
+    {
+        // Der Bestand kommt hier als kuenstliches Connected herein - genau die Form, in der ihn
+        // sonst der Treiber liefert. Damit gibt es weiterhin nur EINEN Weg, auf dem ein Geraet
+        // dem Router bekannt wird.
+        padRouter_.OnEvent(PadEvent::Connected(dev));
+        const unsigned slot = menuRouter.GetSlot(dev);
+        if(slot < GetNumViews())
+            padRouter_.AssignSlot(dev, slot);
+    }
 }
 
 void dskGameInterface::LayoutViews(const Extent& renderSize)
@@ -390,6 +417,14 @@ dskGameInterface::~dskGameInterface()
     // sterbende Vorgaenger ihn nicht wieder abraeumen.
     if(WINDOWMANAGER.GetWindowOwnerObserver() == this)
         WINDOWMANAGER.SetWindowOwnerObserver(nullptr);
+    // Und ebenso den Rohzeiger, den die WELT auf dieses Objekt haelt (oben, SetGameInterface).
+    // Der Game-Zeiger gehoert nicht diesem Desktop allein - GameClient haelt ihn ebenfalls -,
+    // die Welt ueberlebt den Desktop also. Blieb der Zeiger stehen, griff der naechste Leser
+    // auf freigegebenen Speicher zu; GameWorldViewer::IsAllVisible tut genau das ungeprueft
+    // ueber gi->GI_GetCheats() (world/GameWorldViewer.cpp:130-131), und schon der KONSTRUKTOR
+    // eines neuen dskGameInterface laeuft dort hindurch, bevor er den Zeiger neu setzt.
+    if(game_ && const_cast<Game&>(*game_).world_.GetGameInterface() == this)
+        const_cast<Game&>(*game_).world_.SetGameInterface(nullptr);
     // Ein offener handelnder Spieler wuerde sonst ueber das Ende dieser Partie hinaus stehen
     // bleiben.
     GAMECLIENT.SetWindowOwnerPlayer(std::nullopt);
@@ -1474,6 +1509,11 @@ void dskGameInterface::UpdateInput(const unsigned elapsedMs, const Position& mou
         padEvents_.clear();
         driver->FetchPadEvents(padEvents_);
         padRouter_.OnEvents(padEvents_);
+        // BEFUND 4.1: Wer die Warteschlange leert, ist fuer den Geraetebestand ALLER
+        // verantwortlich. Ein Pad, das waehrend der Partie abgezogen oder angesteckt wird,
+        // waere dem Menue sonst fuer den Rest der Programmlaufzeit unbekannt - es gibt keine
+        // Bestandsabfrage, die das spaeter nachholen koennte (WindowManager::NotifyPadDevices).
+        WINDOWMANAGER.NotifyPadDevices(padEvents_);
     }
     // Ein Fenster kann seit dem letzten Frame minimiert worden sein - dann gehoert der Fokus
     // dort nicht mehr hin (Befund B3). Vor jeder Auslieferung von Eingaben, damit derselbe

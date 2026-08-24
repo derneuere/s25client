@@ -29,15 +29,19 @@
 #include "desktops/dskLobby.h"
 #include "desktops/dskSinglePlayer.h"
 #include "helpers/containerUtils.h"
+#include "input/MenuPadInput.h"
+#include "input/PadRouter.h"
 #include "helpers/format.hpp"
 #include "ingameWindows/iwAddons.h"
 #include "ingameWindows/iwMsgbox.h"
 #include "lua/LuaInterfaceSettings.h"
+#include "network/ClientError.h"
 #include "network/GameClient.h"
 #include "ogl/FontStyle.h"
 #include "gameData/GameConsts.h"
 #include "gameData/PortraitConsts.h"
 #include "gameData/const_gui_ids.h"
+#include "world/ViewportLayout.h"
 #include "liblobby/LobbyPlayerInfo.h"
 #include "libsiedler2/ArchivItem_Map.h"
 #include "libsiedler2/ErrorCodes.h"
@@ -102,6 +106,17 @@ enum CtrlIds
     ID_btChatLobby,
     ID_grpPlayerStart,                           // up to and including ID_grpPlayerStart + MAX_PLAYERS - 1
     ID_btSwap = ID_grpPlayerStart + MAX_PLAYERS, // up to and including ID_btSwap + MAX_PLAYERS - 1
+    /// Der Zuordnungsbildschirm: eine Karte je Sitzplatz vor dem Fernseher.
+    ID_btSeat = ID_btSwap + MAX_PLAYERS, // up to and including ID_btSeat + MAX_VIEWPORTS - 1
+    ID_txtSeats = ID_btSeat + MAX_VIEWPORTS,
+    /// Bewusst hier hinten und nicht bei den anderen ID_mb*: die Aufzaehlung traegt mit
+    /// ID_grpPlayerStart eine Basis, auf die sich Gruppen- und Sitzids beziehen. Ein Einschub
+    /// weiter oben verschoebe sie alle.
+    ID_mbQuestionLeave,
+    /// Die Meldung aus PrepareSeatsForStart. Sie hat ABSICHTLICH keinen Fall in
+    /// Msg_MsgBoxResult: der Zustand ist bereits repariert, es gibt nichts zu bestaetigen -
+    /// anders als ID_mbError, das Stop() und GoBack() ausloest.
+    ID_mbSeatsDropped,
 };
 template<typename T>
 constexpr T nextEnumValue(T value)
@@ -371,6 +386,11 @@ dskGameLobby::dskGameLobby(ServerType serverType, std::shared_ptr<GameLobby> gam
             bt->SetPos(DrawPoint(bt->GetPos().x, rowPos));
         }
     }
+    // Der Zuordnungsbildschirm. NACH den Spielerreihen, damit er ihre Beschriftung schon
+    // aktualisieren kann, und nach der Uebernahme von --local-players oben, damit er deren
+    // Sitze anzeigt statt sie zu ueberschreiben.
+    CreateSeatPanel();
+
     CI_GGSChanged(gameLobby_->getSettings());
 
     if(serverType == ServerType::Lobby && lobbyClient_ && lobbyClient_->IsLoggedIn())
@@ -425,6 +445,480 @@ void dskGameLobby::SetActive(bool activate /*= true*/)
             lua.reset();
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Der Zuordnungsbildschirm: wer sitzt auf welchem Platz vor dem Fernseher?
+//
+// Es fehlt hier KEIN Spielmechanismus. GameClient::SetAdditionalLocalPlayers,
+// ValidateAdditionalLocalPlayers und ApplyAdditionalLocalPlayers gibt es seit Phase 1; bis
+// hierher konnte sie nur die Kommandozeile fuellen (--local-players). Was fehlte, war die
+// Bedienung - und damit die Erreichbarkeit vom Sofa aus.
+// ---------------------------------------------------------------------------------------------
+
+bool dskGameLobby::AreLocalSeatsAvailable() const
+{
+    // Genau die Bedingungen, unter denen ValidateAdditionalLocalPlayers zustimmen kann.
+    // Savegames sind bewusst ausgenommen: dort haengt an jedem Slot ein frueherer Spieler, und
+    // ohne eine Anzeige "welcher Sitz war frueher wer" (ID_cbMove) waere die Zuordnung geraten.
+    return lobbyController && IsSinglePlayer() && gameLobby_ && gameLobby_->isHost() && !gameLobby_->isSavegame()
+           && !GAMECLIENT.IsAIBattleModeOn();
+}
+
+void dskGameLobby::CreateSeatPanel()
+{
+    seats_.clear();
+    if(!AreLocalSeatsAvailable())
+        return;
+
+    const unsigned numPlayers = gameLobby_->getNumPlayers();
+    const unsigned numSeats = std::min<unsigned>(MAX_VIEWPORTS, numPlayers);
+    if(numSeats < 2)
+        return; // eine Karte fuer einen Spieler - da gibt es nichts zu verteilen
+
+    // Sitz 1 ist der Hostslot. Er ist immer besetzt und kann nicht verlassen werden; Maus und
+    // Tastatur bleiben fuer ihn zustaendig.
+    seats_.push_back(LocalSeat{localPlayerId_, InvalidPadDevice, true});
+
+    // Danach zuerst die Slots, die --local-players schon benannt hat - sonst haette die
+    // Kommandozeile Sitze, die auf keiner Karte auftauchen -, dann die uebrigen aufsteigend.
+    const std::vector<uint8_t> fromCmdLine = GAMECLIENT.GetAdditionalLocalPlayers();
+    const auto canSeat = [&](const unsigned id) {
+        if(id == localPlayerId_ || id >= numPlayers)
+            return false;
+        const PlayerState ps = gameLobby_->getPlayer(id).ps;
+        return ps != PlayerState::Occupied && ps != PlayerState::Locked;
+    };
+    const auto alreadySeated = [&](const unsigned id) {
+        return helpers::contains_if(seats_, [id](const LocalSeat& s) { return s.playerId == id; });
+    };
+    for(const uint8_t id : fromCmdLine)
+    {
+        if(seats_.size() >= numSeats)
+            break;
+        if(canSeat(id) && !alreadySeated(id))
+        {
+            // applied = true, und der Rueckgabewert ist die GEWOEHNLICHE KI, nicht das, was
+            // gerade dort steht: dort steht bereits der Dummy, den der Konstruktor fuer genau
+            // diesen lokalen Spieler geschrieben hat (GameClient::ApplyAdditionalLocalPlayers).
+            // Ihn beim Aufstehen wiederherzustellen hiesse, eine untaetige KI zu hinterlassen.
+            LocalSeat seat{id, InvalidPadDevice, true};
+            seat.applied = true;
+            seats_.push_back(seat);
+        }
+    }
+    for(unsigned id = 0; id < numPlayers && seats_.size() < numSeats; ++id)
+    {
+        if(canSeat(id) && !alreadySeated(id))
+            seats_.push_back(LocalSeat{id, InvalidPadDevice, false});
+    }
+    if(seats_.size() < 2)
+    {
+        seats_.clear();
+        return;
+    }
+
+    // Der Platz unter der Spielertabelle ist im Einzelspieler frei: die Chatcontrols entstehen
+    // nur, wenn !IsSinglePlayer(), und den Zuordnungsbildschirm gibt es nur dort.
+    AddText(ID_txtSeats, DrawPoint(20, 318), _("Splitscreen seats (gamepad):"), COLOR_YELLOW, FontStyle{}, NormalFont);
+    for(unsigned i = 0; i < seats_.size(); ++i)
+    {
+        const DrawPoint pos(20 + static_cast<int>(i % 2) * 190, 340 + static_cast<int>(i / 2) * 30);
+        AddTextButton(ID_btSeat + i, pos, Extent(180, 22), TextureColor::Green2, "", NormalFont);
+    }
+    UpdateSeatPanel();
+}
+
+void dskGameLobby::UpdateSeatPanel()
+{
+    if(seats_.empty())
+        return;
+    // DER ZUORDNUNGSBILDSCHIRM GEHOERT DEM PAD. Steckt keins, blieben hier Knoepfe stehen, die
+    // auf einen Mausklick ABSICHTLICH nichts tun - OnSeatButton verwirft jede Betaetigung ohne
+    // handelndes Geraet, weil ein Sitzplatz ohne Pad ein Spieler ohne Eingabegeraet waere.
+    // Sichtbar und wirkungslos ist davon die schlechtere Haelfte: es laedt zu der Annahme ein,
+    // hier sei etwas kaputt. Die Karten erscheinen also, sobald ein Pad steckt, und
+    // verschwinden wieder, wenn das letzte abgezogen wird.
+    //
+    // Gefragt wird "steckt" und nicht "wird benutzt": wer sein Pad gerade erst in die Hand
+    // nimmt, soll die Karten schon sehen und sie nicht erst durch einen Knopfdruck ins Leere
+    // herbeirufen muessen. Die Sichtbarkeit wird ausserdem in GetPadEntryCtrl nachgezogen -
+    // der Einstiegsfokus eines Pads laeuft ueber FocusPath::Collect, und das ueberspringt
+    // unsichtbare Controls (input/FocusPath.cpp).
+    const bool visible = WINDOWMANAGER.GetPadInput().GetRouter().GetNumDevices() > 0;
+    if(auto* txt = GetCtrl<Window>(ID_txtSeats))
+        txt->SetVisible(visible);
+    for(unsigned i = 0; i < seats_.size(); ++i)
+    {
+        auto* bt = GetCtrl<ctrlTextButton>(ID_btSeat + i);
+        if(!bt)
+            continue;
+        bt->SetVisible(visible);
+        LocalSeat& seat = seats_[i];
+        SeatCardKind kind;
+        unsigned value = 0;
+        if(i == 0)
+            kind = SeatCardKind::Host;
+        else if(!IsSeatJoinable(i))
+            kind = SeatCardKind::Closed;
+        else if(!seat.taken)
+            kind = SeatCardKind::Free;
+        else if(seat.device == InvalidPadDevice)
+        {
+            kind = SeatCardKind::Slot;
+            value = seat.playerId;
+        } else
+        {
+            kind = SeatCardKind::Pad;
+            value = static_cast<unsigned>(seat.device);
+        }
+        // Msg_PaintBefore laeuft je Frame. Solange sich daran nichts aendert, entsteht hier
+        // keine Zeichenkette.
+        if(seat.cardValid && seat.cardKind == kind && seat.cardValue == value)
+            continue;
+        seat.cardKind = kind;
+        seat.cardValue = value;
+        seat.cardValid = true;
+        std::string text;
+        switch(kind)
+        {
+            case SeatCardKind::Host: text = helpers::format(_("Seat %1%: host"), i + 1); break;
+            case SeatCardKind::Closed: text = helpers::format(_("Seat %1%: closed"), i + 1); break;
+            case SeatCardKind::Free: text = helpers::format(_("Seat %1%: press A to join"), i + 1); break;
+            case SeatCardKind::Slot: text = helpers::format(_("Seat %1%: slot %2%"), i + 1, value + 1); break;
+            case SeatCardKind::Pad: text = helpers::format(_("Seat %1%: pad %2%"), i + 1, value); break;
+        }
+        bt->SetText(text);
+    }
+}
+
+bool dskGameLobby::IsSeatJoinable(const unsigned seat) const
+{
+    if(seat == 0 || seat >= seats_.size() || !gameLobby_)
+        return false;
+    const PlayerState ps = gameLobby_->getPlayer(seats_[seat].playerId).ps;
+    // Occupied: dort sitzt eine echte Netzwerkverbindung. Locked: der Host hat den Slot
+    // geschlossen. In beiden Faellen ist der Platz keiner mehr, den dieser Bildschirm vergibt.
+    // Ein Sitz, den wir schon in der Hand haben, bleibt natuerlich seiner (Aufstehen).
+    return seats_[seat].applied || (ps != PlayerState::Occupied && ps != PlayerState::Locked);
+}
+
+unsigned dskGameLobby::SeatOfDevice(const PadDeviceId device) const
+{
+    if(device == InvalidPadDevice)
+        return static_cast<unsigned>(seats_.size());
+    for(unsigned i = 0; i < seats_.size(); ++i)
+    {
+        if(seats_[i].device == device)
+            return i;
+    }
+    return static_cast<unsigned>(seats_.size());
+}
+
+void dskGameLobby::OnSeatButton(const unsigned seat, const unsigned slot)
+{
+    if(seat == 0 || seat >= seats_.size())
+        return; // Sitz 1 ist der Host und wird nicht vergeben
+    const PadDeviceId device = WINDOWMANAGER.GetPadInput().GetActingDevice();
+    if(device == InvalidPadDevice)
+        return; // Maus und Tastatur setzen sich hier nicht hin
+    if(slot == 0)
+        return; // wer den Hostplatz steuert, sitzt schon
+
+    const unsigned mySeat = SeatOfDevice(device);
+    if(mySeat != seat && !IsSeatJoinable(seat))
+        return; // der Host hat diesen Slot geschlossen oder ein Netzwerkspieler sitzt darauf
+    if(mySeat == seat)
+    {
+        // Aufstehen. ApplyLocalSeats stellt auf dem Slot GENAU DAS wieder her, was vor dem
+        // Hinsetzen dort stand - nicht den Dummy aus ApplyAdditionalLocalPlayers, sonst
+        // hinterliesse jeder Aussteiger eine untaetige KI, und nicht eine pauschale Vorgabe,
+        // sonst verlaere der Host seine Einstellung (BEFUND 2).
+        seats_[seat].taken = false;
+        seats_[seat].device = InvalidPadDevice;
+    } else if(mySeat < seats_.size())
+        return; // ein Pad sitzt auf genau einem Platz
+    else if(!seats_[seat].taken)
+    {
+        seats_[seat].taken = true;
+        seats_[seat].device = device;
+    } else if(seats_[seat].device == InvalidPadDevice)
+    {
+        // Ein Sitz, den --local-players belegt hat, bekommt jetzt sein Pad.
+        seats_[seat].device = device;
+    } else
+        return; // besetzt
+
+    ApplyLocalSeats();
+}
+
+void dskGameLobby::ApplyLocalSeats()
+{
+    if(seats_.empty() || !lobbyController)
+        return;
+
+    std::vector<uint8_t> ids;
+    for(unsigned i = 1; i < seats_.size(); ++i)
+    {
+        if(seats_[i].taken)
+            ids.push_back(static_cast<uint8_t>(seats_[i].playerId));
+    }
+    const std::string err =
+      GameClient::ValidateAdditionalLocalPlayers(*gameLobby_, localPlayerId_, ids, GAMECLIENT.IsAIBattleModeOn());
+    if(!err.empty())
+    {
+        // Kann von hier aus nicht vorkommen - die Sitze werden aus genau den Slots gebildet, die
+        // die Pruefung zulaesst. Falls doch: den Spielzustand NICHT anfassen.
+        LOG.write("dskGameLobby: seat assignment rejected: %1%\n") % err;
+        return;
+    }
+
+    GAMECLIENT.SetAdditionalLocalPlayers(ids);
+    // BEFUND 2: NUR die Slots anfassen, die dieser Bildschirm selbst in der Hand hat.
+    //
+    // Hier stand einmal eine Schleife, die JEDEN nicht eingenommenen Sitz auf die Standard-KI
+    // schrieb. Sie war als Rueckabwicklung des Aufstehens gedacht, traf aber auch jeden Slot,
+    // den der Host inzwischen mit der Maus eingestellt hatte - ein geschlossener Slot wurde
+    // wieder KI, eine schwere KI wieder leicht, und zwar bei jedem einzelnen Beitritt.
+    //
+    // Stattdessen: beim Hinsetzen merken, was dort stand, beim Aufstehen genau das
+    // wiederherstellen. Ein Sitz, auf dem nie jemand sass, wird nie angefasst.
+    for(unsigned i = 1; i < seats_.size(); ++i)
+    {
+        LocalSeat& seat = seats_[i];
+        if(seat.taken && !seat.applied)
+        {
+            const JoinPlayerInfo& before = gameLobby_->getPlayer(seat.playerId);
+            seat.savedPs = before.ps;
+            seat.savedAi = before.aiInfo;
+            seat.applied = true;
+        } else if(!seat.taken && seat.applied)
+        {
+            lobbyController->SetPlayerState(seat.playerId, seat.savedPs, seat.savedAi);
+            seat.applied = false;
+        }
+    }
+    // Erst die Rueckgabe oben, dann die belegten festnageln - ApplyAdditionalLocalPlayers muss
+    // NACH der Standardbelegung laufen (network/GameClient.cpp:1948-1949).
+    GameClient::ApplyAdditionalLocalPlayers(*lobbyController, ids);
+
+    // Und die Padzuordnung LUECKENLOS nachziehen: Ansicht i gehoert zu ids[i-1], der Padslot ist
+    // die Ansichtsnummer. Ohne diese Zeilen entschiede in der Partie wieder die Reihenfolge der
+    // ersten Benutzung, und wer hier Sitz 3 genommen hat, saesse dort auf Sitz 2.
+    PadRouter& router = WINDOWMANAGER.GetPadInput().GetRouter();
+    unsigned viewIdx = 1;
+    for(unsigned i = 1; i < seats_.size(); ++i)
+    {
+        if(!seats_[i].taken)
+            continue;
+        if(seats_[i].device != InvalidPadDevice)
+            router.AssignSlot(seats_[i].device, viewIdx);
+        ++viewIdx;
+    }
+    // Wer dabei verdraengt wurde - ein Pad, das nur navigiert hat und zufaellig auf diesem Slot
+    // sass -, bekommt einen freien zurueck. Ohne diesen Ausgleich koennte es selbst nie mehr
+    // beitreten (PadRouter::RebalanceUnassigned).
+    router.RebalanceUnassigned();
+
+    for(const LocalSeat& seat : seats_)
+        UpdatePlayerRow(seat.playerId);
+    UpdateSeatPanel();
+}
+
+void dskGameLobby::SyncSeatsWithGameState()
+{
+    if(seats_.empty())
+        return;
+    // Bewusst zwei Anweisungen und kein ||: beide Pruefungen muessen laufen, auch wenn die
+    // erste schon etwas gefunden hat.
+    const bool unplugged = DropDisconnectedSeats();
+    const bool closed = DropSeatsClosedByTheHost();
+    if(unplugged || closed)
+        ApplyLocalSeats();
+}
+
+bool dskGameLobby::DropDisconnectedSeats()
+{
+    const PadRouter& router = WINDOWMANAGER.GetPadInput().GetRouter();
+    bool changed = false;
+    for(unsigned i = 1; i < seats_.size(); ++i)
+    {
+        if(seats_[i].device == InvalidPadDevice || router.HasDevice(seats_[i].device))
+            continue;
+        seats_[i].device = InvalidPadDevice;
+        seats_[i].taken = false;
+        changed = true;
+    }
+    return changed;
+}
+
+bool dskGameLobby::DropSeatsClosedByTheHost()
+{
+    if(!gameLobby_)
+        return false;
+    bool changed = false;
+    for(unsigned i = 1; i < seats_.size(); ++i)
+    {
+        LocalSeat& seat = seats_[i];
+        if(!seat.taken)
+            continue;
+        const PlayerState ps = gameLobby_->getPlayer(seat.playerId).ps;
+        // Locked: der Host hat den Slot geschlossen. Occupied: eine echte Netzwerkverbindung
+        // sitzt darauf. Genau die beiden Zustaende, die IsSeatJoinable auch beim BEITRETEN
+        // abweist - nur schuetzte das bisher nie einen Sitz, den schon jemand haelt.
+        //
+        // WARUM NICHT "ps != AI", also genau das Kriterium, an dem GameClient::SetupLocalPlayers
+        // haengt: unsere eigene Umstellung auf die Dummy-KI laeuft ueber den Server und steht
+        // erst ein paar Frames spaeter im gameLobby_. In diesem Fenster saehe ein gerade
+        // eingenommener Sitz wie ein weggenommener aus, und der Spieler floege aus dem Platz,
+        // den er im selben Frame genommen hat. Diese beiden Zustaende dagegen kann unsere
+        // eigene Schreibung nie erzeugen. Was hier durchrutscht, faengt PrepareSeatsForStart.
+        if(ps != PlayerState::Locked && ps != PlayerState::Occupied)
+            continue;
+        seat.taken = false;
+        seat.device = InvalidPadDevice;
+        // DER HOST HAT ENTSCHIEDEN. `applied` faellt HIER und nicht erst in ApplyLocalSeats,
+        // damit dort nicht der Zustand von VOR dem Hinsetzen zurueckgeschrieben wird: das
+        // machte die Schliessung wortlos rueckgaengig - derselbe Datenverlust wie in BEFUND 2,
+        // nur in der anderen Richtung.
+        seat.applied = false;
+        changed = true;
+    }
+    return changed;
+}
+
+bool dskGameLobby::PrepareSeatsForStart()
+{
+    if(seats_.empty() || !gameLobby_)
+        return true;
+    // Erst die gewoehnliche Nachfuehrung. Sie laeuft ohnehin je Frame; hier noch einmal, damit
+    // die Startfaehigkeit nicht daran haengt, ob zwischen der letzten Aenderung des Hosts und
+    // dem Startknopf ueberhaupt ein Frame lag.
+    SyncSeatsWithGameState();
+    // Und dann GENAU DAS Kriterium, an dem GameClient::SetupLocalPlayers den Spielstart
+    // scheitern laesst: ein zusaetzlicher lokaler Slot muss eine KI sein. Was es nicht besteht,
+    // wird geraeumt und GENANNT - statt den Start mit OnError(LocalPlayerSetup) -> Stop()
+    // abzubrechen und die ganze Partievorbereitung mitzunehmen.
+    bool dropped = false;
+    for(unsigned i = 1; i < seats_.size(); ++i)
+    {
+        LocalSeat& seat = seats_[i];
+        if(!seat.taken || gameLobby_->getPlayer(seat.playerId).ps == PlayerState::AI)
+            continue;
+        seat.taken = false;
+        seat.device = InvalidPadDevice;
+        seat.applied = false;
+        dropped = true;
+    }
+    if(!dropped)
+        return true;
+    ApplyLocalSeats();
+    // Der Zustand ist damit repariert: derselbe Knopf startet beim naechsten Druck. Die
+    // Meldung sagt nur, warum ein Sitz leer geworden ist.
+    WINDOWMANAGER.Show(std::make_unique<iwMsgbox>(_("Error"), ClientErrorToStr(ClientError::LocalPlayerSetup), this,
+                                                  MsgboxButton::Ok, MsgboxIcon::ExclamationRed, ID_mbSeatsDropped));
+    return false;
+}
+
+unsigned dskGameLobby::GetNumPadSlots() const
+{
+    // Nur hier duerfen mehrere Pads gleichzeitig navigieren - anderswo waere das ein Wettlauf
+    // um den naechsten Desktopwechsel.
+    return seats_.empty() ? 1u : static_cast<unsigned>(seats_.size());
+}
+
+bool dskGameLobby::Msg_PadCommand(const unsigned slot, const PadButton button)
+{
+    if(button == PadButton::Start)
+    {
+        // BEFUND B. Start handelt fuer ALLE: er startet die Partie und bricht einen laufenden
+        // Countdown ab. Geprueft wurde bisher nur der CLIENT (isHost) - also ob DIESER RECHNER
+        // hostet -, nie der handelnde SLOT. Damit konnte jedes Gastpad die Partie fuer alle
+        // starten.
+        //
+        // Der Knopf gehoert dem Pad des HOSTPLATZES, und das ist Slot 0: Sitz 1 ist immer der
+        // Hostslot (CreateSeatPanel), und ApplyLocalSeats vergibt die uebrigen Ansichten erst
+        // ab 1. Dieselbe Klammer, mit der B ausdruecklich verhindert, dass ein sitzloses
+        // Zweitpad die Lobby fuer alle verlaesst - und Starten ist mindestens so folgenreich
+        // wie Verlassen.
+        //
+        // Ausserhalb des Zuordnungsbildschirms gibt es nur einen Slot (Desktop::GetNumPadSlots),
+        // dort ist slot immer 0: fuer jede andere Lobby aendert sich nichts.
+        if(slot == 0 && gameLobby_ && gameLobby_->isHost())
+        {
+            Msg_ButtonClick(ID_btStartGame);
+            return true;
+        }
+        return false;
+    }
+    if(button != PadButton::B)
+        return false;
+
+    const unsigned mySeat = SeatOfDevice(WINDOWMANAGER.GetPadInput().GetActingDevice());
+    if(mySeat > 0 && mySeat < seats_.size())
+    {
+        OnSeatButton(mySeat, slot); // eigener Sitz -> aufstehen
+        return true;
+    }
+    if(slot != 0)
+        return false; // ein sitzloses Zweitpad soll die Partie nicht fuer alle verlassen
+    AskToLeave();
+    return true;
+}
+
+void dskGameLobby::AskToLeave()
+{
+    // BEFUND 3. "Return" haelt den Client an und raeumt die ganze Partievorbereitung ab -
+    // Karte, Addons, Voelker, Sitzverteilung. Es ist der einzige unwiderrufliche Knopf dieses
+    // Bildschirms.
+    //
+    // WARUM EINE RUECKFRAGE UND KEINE ANDERE BELEGUNG: B ist am Pad der Zurueckknopf, und er
+    // ist es ueberall - er schliesst Fenster, und wer sitzt, steht damit auf. Ihm hier
+    // ausgerechnet gar keine Bedeutung zu geben, waere die einzige Stelle, an der der gelernte
+    // Griff ins Leere geht; ihn wie bisher ohne Nachfrage durchzureichen, macht aus dem
+    // meistgedrueckten Knopf am Pad den gefaehrlichsten. Die Rueckfrage behaelt beides: die
+    // gelernte Bedeutung und den Weg nach draussen, der rein mit dem Pad begehbar bleibt.
+    //
+    // Der Fokus liegt dabei auf "Nein" (iwMsgbox::GetPadEntryCtrl, dieselbe Vorgabeantwort, auf
+    // die iwMsgbox auch den Mauszeiger stellt). Ein reflexhaftes B-dann-A bleibt damit in der
+    // Lobby; wer heraus will, muss den Fokus ausdruecklich bewegen.
+    //
+    // DER MAUSWEG BLEIBT UNVERAENDERT: der rote Knopf "Return" tut, was er immer getan hat.
+    // Er verlangt schon durch Zielen und Klicken eine Absicht, die ein Daumen auf B nicht hat.
+    // Eine zweite Frage kann von hier aus nicht entstehen: solange ein Fenster offen ist, geht
+    // B dorthin und erreicht Msg_PadCommand gar nicht (MenuPadInput::OnPadButton).
+    WINDOWMANAGER.Show(std::make_unique<iwMsgbox>(_("Return"), _("Do you really want to leave this game?"), this,
+                                                  MsgboxButton::YesNo, MsgboxIcon::QuestionRed, ID_mbQuestionLeave));
+}
+
+Window* dskGameLobby::GetPadEntryCtrl(const unsigned slot)
+{
+    if(seats_.empty() || slot == 0)
+        return nullptr; // der Hostspieler faengt wie bisher beim ersten Control an
+    // Die Sitzkarten sind unsichtbar, solange kein Pad steckt (UpdateSeatPanel). Hier steckt
+    // gerade eins - und der Aufrufer sucht seinen Einstiegsfokus ueber FocusPath::Collect, das
+    // unsichtbare Controls ueberspringt. Msg_PaintBefore zieht die Sichtbarkeit erst NACH
+    // diesem Aufruf nach (WindowManager::Draw ruft PumpPadInput davor), also hier.
+    UpdateSeatPanel();
+    // Ein neu hinzukommendes Pad sieht seinen Beitritt dort, wo er stattfindet. Das ist die
+    // Uebersetzung von "Press A to join" (XR-115) in diese Oberflaeche - ohne sie laege der
+    // Fokus eines Beitretenden auf "Spiel starten".
+    //
+    // ZUERST ein Sitz, den --local-players belegt hat, der aber noch kein Pad steuert: die
+    // Kommandozeile hat ausdruecklich zwei lokale Spieler verlangt, also gehoert das erste Pad
+    // dorthin und nicht auf einen zusaetzlichen Platz.
+    for(unsigned i = 1; i < seats_.size(); ++i)
+    {
+        if(seats_[i].taken && seats_[i].device == InvalidPadDevice)
+            return GetCtrl<Window>(ID_btSeat + i);
+    }
+    for(unsigned i = 1; i < seats_.size(); ++i)
+    {
+        // Ein vom Host geschlossener Slot ist kein Beitrittsangebot mehr.
+        if(!seats_[i].taken && IsSeatJoinable(i))
+            return GetCtrl<Window>(ID_btSeat + i);
+    }
+    return GetCtrl<Window>(ID_btSeat + 1);
 }
 
 void dskGameLobby::UpdatePlayerRow(const unsigned row)
@@ -571,6 +1065,10 @@ void dskGameLobby::UpdatePlayerRow(const unsigned row)
 void dskGameLobby::Msg_PaintBefore()
 {
     Desktop::Msg_PaintBefore();
+    // Der Host kann einen Slot mit der Maus geschlossen oder umgestellt haben, ohne dass diese
+    // Sitzkarte davon erfahren haette, und ein Pad kann abgezogen worden sein.
+    SyncSeatsWithGameState();
+    UpdateSeatPanel();
     // Chatfenster Fokus geben
     if(!IsSinglePlayer())
         GetCtrl<ctrlEdit>(ID_edtChatMsg)->SetFocus();
@@ -732,6 +1230,16 @@ bool dskGameLobby::IsChangeAllowed(const std::string& setting) const
 
 void dskGameLobby::Msg_ButtonClick(const unsigned ctrl_id)
 {
+    if(ctrl_id >= ID_btSeat && ctrl_id < ID_btSeat + MAX_VIEWPORTS)
+    {
+        // Der HANDELNDE SLOT kommt aus der Klammer, unter der der WindowManager den Knopfdruck
+        // zustellt (MenuPadInput::GetActingSlot) - dieselbe Bauform, mit der auch der
+        // Fensterbesitz ohne Aenderung an 100+ Erzeugungsstellen auskommt. Ein MAUSKLICK auf
+        // eine Sitzkarte laeuft ohne diese Klammer und wird in OnSeatButton verworfen: ein
+        // Sitzplatz ohne Pad waere ein Spieler ohne Eingabegeraet.
+        OnSeatButton(ctrl_id - ID_btSeat, WINDOWMANAGER.GetPadInput().GetActingSlot());
+        return;
+    }
     if(ctrl_id >= ID_btSwap && ctrl_id < ID_btSwap + MAX_PLAYERS)
     {
         unsigned targetPlayer = ctrl_id - ID_btSwap;
@@ -752,6 +1260,8 @@ void dskGameLobby::Msg_ButtonClick(const unsigned ctrl_id)
             if(gameLobby_->isHost())
             {
                 if(!checkOptions())
+                    return;
+                if(!PrepareSeatsForStart())
                     return;
 
                 SetPlayerReady(localPlayerId_, true);
@@ -874,6 +1384,12 @@ void dskGameLobby::Msg_MsgBoxResult(const unsigned msgbox_id, const MsgboxResult
             GAMECLIENT.Stop();
 
             GoBack();
+        }
+        break;
+        case ID_mbQuestionLeave:
+        {
+            if(mbr == MsgboxResult::Yes)
+                Msg_ButtonClick(ID_btReturn);
         }
         break;
         case CGI_ADDONS: // addon-window applied settings?
@@ -1106,6 +1622,27 @@ void dskGameLobby::CI_PlayersSwapped(const unsigned player1, const unsigned play
         localPlayerId_ = player2;
     else if(localPlayerId_ == player2)
         localPlayerId_ = player1;
+    // BEFUND D: Ein Sitz zeigt auf einen SLOT, und ein Tausch bewegt die Spieler zwischen den
+    // Slots. Der Sitz folgt deshalb seinem Spieler - mitsamt savedPs/savedAi, denn was vor dem
+    // Hinsetzen auf seinem Slot stand, ist mit ihm gewandert
+    // (GameClient::OnGameMessage(GameMessage_Player_Swap) tauscht die JoinPlayerInfos und zieht
+    // die Liste der zusaetzlichen lokalen Spieler genau so mit).
+    //
+    // Ohne diese Zeilen zeigte das Aufstehen auf den falschen Slot: der Rueckgabewert liefe ins
+    // Leere - der Server laesst einen Slot, der zugleich der Absender ist, unveraendert -, und
+    // auf dem tatsaechlich verlassenen Slot bliebe die Dummy-KI stehen. Also genau die
+    // untaetige KI, die ApplyLocalSeats vermeiden soll.
+    //
+    // Die REIHENFOLGE von seats_ bleibt unangetastet: sie ist die Reihenfolge der Ansichten auf
+    // dem Bildschirm (dskGameInterface::CreateViews), und GameClient benennt seine Liste
+    // ebenfalls an Ort und Stelle um. Ein Tausch verschiebt Spieler, keine Sitzplaetze.
+    for(LocalSeat& seat : seats_)
+    {
+        if(seat.playerId == player1)
+            seat.playerId = player2;
+        else if(seat.playerId == player2)
+            seat.playerId = player1;
+    }
     // Spieler wurden vertauscht, beide Reihen updaten
     UpdatePlayerRow(player1);
     UpdatePlayerRow(player2);

@@ -18,6 +18,11 @@ public:
     /// Create using the specified background
     dskMenuBase(glArchivItem_Bitmap* background);
 
+    /// Alle Menuebildschirme der Kette Hauptmenue -> Einzelspieler -> ... sind mit dem Pad
+    /// bedienbar. Ihre Controls sind gewoehnliche ctrlButton, ihr Activate() ist derselbe
+    /// Weg wie der Mausklick (controls/ctrlButton.cpp:82-94).
+    bool WantsPadInput() const override { return true; }
+
     enum ControlIds
     {
         ID_txtVersion,

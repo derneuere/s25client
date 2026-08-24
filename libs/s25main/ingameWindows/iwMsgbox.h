@@ -19,6 +19,10 @@ class iwMsgbox : public IngameWindow
     std::vector<std::string> strings;
 
     Window* msgHandler_;
+    /// Id des Knopfes, der die HARMLOSE Antwort traegt (Abbrechen/Nein, sonst der einzige).
+    /// iwMsgbox stellt den Mauszeiger schon immer dorthin; GetPadEntryCtrl gibt der
+    /// Padnavigation denselben Ausgangspunkt.
+    unsigned defaultBtId_ = 0;
 
 public:
     iwMsgbox(const std::string& title, const std::string& text, Window* msgHandler, MsgboxButton button,
@@ -30,6 +34,9 @@ public:
 
     /// Moves the icon to given position
     void MoveIcon(const DrawPoint& pos);
+
+    /// Die Padnavigation faengt auf der harmlosen Antwort an - siehe Window::GetPadEntryCtrl.
+    Window* GetPadEntryCtrl(unsigned /*slot*/) override { return GetCtrl<Window>(defaultBtId_); }
 
 private:
     void Init(const std::string& text, const ResourceId& iconFile, unsigned iconIdx);

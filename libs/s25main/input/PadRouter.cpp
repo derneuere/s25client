@@ -50,6 +50,11 @@ void PadRouter::SetNumSlots(const unsigned numSlots)
             dev.slot = NoSlot;
         }
     }
+    RebalanceUnassigned();
+}
+
+void PadRouter::RebalanceUnassigned()
+{
     for(Device& dev : devices_)
     {
         // Nur BENUTZTE Pads bekommen einen Slot. Ein bloss angestecktes, nie angefasstes Pad
@@ -343,4 +348,5 @@ void PadRouter::Clear()
     devices_.clear();
     pendingButtons_.clear();
     pendingAssignments_.clear();
+    numSlots_ = 0;
 }

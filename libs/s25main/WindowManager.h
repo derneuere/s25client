@@ -19,7 +19,9 @@ class Desktop;
 class IngameWindow;
 struct MouseCoords;
 struct KeyEvent;
+struct PadEvent;
 class ctrlBaseTooltip;
+class MenuPadInput;
 
 // Cursor types with values equal to indices in resource.idx
 enum class Cursor : unsigned
@@ -98,6 +100,29 @@ public:
 
     /// Zeichnet Desktop und alle Fenster.
     void Draw();
+
+    /// Die Gamepadbedienung ausserhalb einer Partie.
+    ///
+    /// Sie liegt hier und nicht bei einem Desktop, weil der GERAETEBESTAND Desktopwechsel
+    /// ueberleben muss und weil das gerade bediente Ding im Menue oft ein IngameWindow ist
+    /// (iwConnecting traegt den Uebergang von der Kartenauswahl in die Lobby). Beides sieht nur
+    /// der WindowManager. Siehe input/MenuPadInput.h.
+    MenuPadInput& GetPadInput() { return *padInput_; }
+    const MenuPadInput& GetPadInput() const { return *padInput_; }
+
+    /// Meldet den GERAETEBESTAND aus einer Treiberwarteschlange, die jemand ANDERES geleert hat.
+    ///
+    /// Es gibt genau einen solchen anderen: dskGameInterface holt waehrend einer Partie selbst
+    /// ab (Desktop::WantsPadInput). Ohne diese Meldung verpasste der Menuerouter jedes
+    /// Connected und Disconnected einer laufenden Partie - und nachfragen kann er nicht, weil
+    /// der Bestand FLANKENBASIERT ist: SDL meldet ein Geraet genau einmal beim Anstecken
+    /// (VideoSDL2.cpp, SDL_CONTROLLERDEVICEADDED) und kennt keine Bestandsabfrage. Eine
+    /// verpasste Flanke ist damit fuer immer verpasst.
+    ///
+    /// Bewusst NUR Connected/Disconnected: Achsen und Knoepfe gehoeren dem, der abgeholt hat.
+    /// Der Menuerouter lernt das Geraet also, ordnet ihm aber keinen Slot zu - dafuer braucht es
+    /// wie immer eine Benutzung, die er hier gerade nicht sieht.
+    void NotifyPadDevices(const std::vector<PadEvent>& events);
     /// liefert ob der aktuelle Desktop den Focus besitzt oder nicht.
     bool IsDesktopActive() const;
 
@@ -223,6 +248,9 @@ private:
     void DoClose(IngameWindow* window);
     /// Setzt den ambienten Besitzer und meldet den Wechsel dem Beobachter.
     void setWindowOwner(unsigned ownerIdx);
+    /// Ein Eingabeframe fuer das Gamepad im Menue. Holt NUR ab, wenn der aktuelle Desktop es
+    /// will - waehrend einer Partie holt dskGameInterface selbst ab.
+    void PumpPadInput();
 
     /// Ansicht, der neu erzeugte Fenster gehoeren; siehe ScopedWindowOwner.
     unsigned curWindowOwner_;
@@ -244,6 +272,11 @@ private:
     // Für Doppelklick merken:
     unsigned lastLeftClickTime; /// Zeit des letzten Links-Klicks
     Position lastLeftClickPos;  /// Position beim letzten Links-Klick
+
+    std::unique_ptr<MenuPadInput> padInput_; /// Gamepad im Menue
+    std::vector<PadEvent> padEvents_;        /// Puffer fuer genau einen Frame
+    unsigned lastPadTick_;                   /// Zeitstempel des letzten Padframes
+    bool hasPadTick_;                        /// ... und ob es ueberhaupt schon einen gab
 };
 
 #define WINDOWMANAGER WindowManager::inst()

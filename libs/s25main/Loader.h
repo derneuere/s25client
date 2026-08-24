@@ -88,6 +88,10 @@ public:
     void LoadDummyGUIFiles();
     void LoadDummyMapFiles();
     void LoadDummySoundFiles();
+    /// Ein Ersatz fuer languages.ini. Ohne ihn stuerzt Languages::loadLanguages im Test ab
+    /// (es dereferenziert das Suchergebnis ungeprueft) und mit ihm jeder Bildschirm, der eine
+    /// Sprachliste zeigt - dskOptions.
+    void LoadDummyLanguageFiles();
     /// Load a file and save it into the loader repo
     bool Load(const boost::filesystem::path& path, const libsiedler2::ArchivItem_Palette* palette = nullptr);
     bool Load(const ResourceId& resId, const libsiedler2::ArchivItem_Palette* palette = nullptr);

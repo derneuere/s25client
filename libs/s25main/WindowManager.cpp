@@ -19,6 +19,7 @@
 #include "helpers/pointerContainerUtils.h"
 #include "helpers/reverse.h"
 #include "ingameWindows/IngameWindow.h"
+#include "input/MenuPadInput.h"
 #include "ogl/FontStyle.h"
 #include "ogl/SoundEffectItem.h"
 #include "ogl/glFont.h"
@@ -40,7 +41,8 @@ constexpr std::make_unsigned_t<T> square(T x)
 
 WindowManager::WindowManager()
     : curWindowOwner_(SHARED_WINDOW_OWNER), ownerObserver_(nullptr), cursor_(Cursor::Hand), disable_mouse(false),
-      lastMousePos(Position::Invalid()), curRenderSize(0, 0), lastLeftClickTime(0), lastLeftClickPos(0, 0)
+      lastMousePos(Position::Invalid()), curRenderSize(0, 0), lastLeftClickTime(0), lastLeftClickPos(0, 0),
+      padInput_(std::make_unique<MenuPadInput>()), lastPadTick_(0), hasPadTick_(false)
 {}
 
 WindowManager::~WindowManager() = default;
@@ -65,6 +67,7 @@ WindowManager::ScopedWindowOwner::~ScopedWindowOwner()
 
 void WindowManager::CleanUp()
 {
+    padInput_->Reset();
     windows.clear();
     curDesktop.reset();
     nextdesktop.reset();
@@ -101,6 +104,20 @@ void WindowManager::Draw()
     if(!curDesktop)
         return;
 
+    // Vor dem Zeichnen, damit dieser Frame schon zeigt, was das Pad gerade ausgeloest hat -
+    // dieselbe Stellung, die dskGameInterface mit Msg_PaintBefore -> Run -> UpdateInput hat.
+    PumpPadInput();
+    // Ein Padknopf kann den Desktop gewechselt haben (Hauptmenue -> Einzelspieler). Der Wechsel
+    // ist nur VORGEMERKT; ihn erst im naechsten Frame zu vollziehen hiesse, diesen Frame noch
+    // den alten Desktop zu zeichnen - genau das, was WindowManager::Draw fuer den Mauspfad
+    // oben schon vermeidet.
+    if(nextdesktop)
+    {
+        DoDesktopSwitch();
+        if(!curDesktop)
+            return;
+    }
+
     curDesktop->Msg_PaintBefore();
     curDesktop->Draw();
     curDesktop->Msg_PaintAfter();
@@ -123,8 +140,63 @@ void WindowManager::Draw()
             wnd->Msg_PaintAfter();
     }
 
+    // Der Fokusrahmen der Padnavigation liegt UEBER allem, was er umrahmen kann - genau die
+    // Stellung, die IngameWindow::Msg_PaintAfter ihm innerhalb eines Fensters gibt
+    // (IngameWindow.cpp:520-530). Ohne benutztes Pad zeichnet DrawRings nichts.
+    padInput_->DrawRings();
+
     DrawToolTip();
     DrawCursor();
+}
+
+void WindowManager::PumpPadInput()
+{
+    // NUR abholen, wenn der aktuelle Desktop es will. Waehrend einer Partie liefert
+    // dskGameInterface hier false und holt selbst ab (dskGameInterface::UpdateInput); es gibt
+    // damit keinen Frame, in dem zwei Stellen dieselbe Warteschlange leeren.
+    if(!curDesktop || !curDesktop->WantsPadInput())
+    {
+        // Die Uhr wieder anhalten: sonst kaeme nach einer Stunde Partie der erste Menueframe
+        // mit einer Stunde elapsedMs an, und die Wiederholrate der Fokusnavigation saehe einen
+        // Sprung, den niemand ausgeloest hat.
+        hasPadTick_ = false;
+        return;
+    }
+    IVideoDriver* const driver = VIDEODRIVER.GetDriver();
+    if(!driver)
+        return;
+
+    const unsigned now = VIDEODRIVER.GetTickCount();
+    const unsigned elapsedMs = (hasPadTick_ && now >= lastPadTick_) ? now - lastPadTick_ : 0u;
+    lastPadTick_ = now;
+    hasPadTick_ = true;
+
+    padEvents_.clear();
+    driver->FetchPadEvents(padEvents_);
+
+    // Wurzel der Navigation: das oberste Fenster, das noch lebt - sonst der Desktop. Ohne diese
+    // Zeile bliebe der Padpfad an jeder Nachrichtenbox und an iwConnecting stehen, also mitten
+    // auf dem Weg von der Kartenauswahl in die Lobby.
+    IngameWindow* topWnd = nullptr;
+    for(auto it = windows.rbegin(); it != windows.rend(); ++it)
+    {
+        if(!(*it)->ShouldBeClosed())
+        {
+            topWnd = it->get();
+            break;
+        }
+    }
+    padInput_->Pump(padEvents_, elapsedMs, curDesktop.get(), topWnd);
+}
+
+void WindowManager::NotifyPadDevices(const std::vector<PadEvent>& events)
+{
+    PadRouter& router = padInput_->GetRouter();
+    for(const PadEvent& ev : events)
+    {
+        if(ev.type == PadEvent::Type::Connected || ev.type == PadEvent::Type::Disconnected)
+            router.OnEvent(ev);
+    }
 }
 
 bool WindowManager::IsDesktopActive() const
@@ -525,6 +597,10 @@ void WindowManager::DoClose(IngameWindow* window)
     // Remove from list and notify parent, hold onto it till parent is notified
     const auto tmpHolder = std::move(*it);
     windows.erase(it);
+    // Die Padnavigation kann in genau diesem Fenster gestanden haben. Deterministisch hier
+    // abmelden, statt sich auf einen Destruktor-Backstop zu verlassen: FocusPath::GetRoot ist
+    // ein roher Zeiger, und der naechste Frame vergliche ihn mit einer neuen Wurzel.
+    padInput_->OnRootDestroyed(tmpHolder.get());
     if(isActiveWnd)
     {
         if(windows.empty())
@@ -578,6 +654,15 @@ void WindowManager::DoDesktopSwitch()
     // If we have a current desktop close all windows
     if(curDesktop)
         windows.clear();
+
+    // Der Fokus der Padnavigation gehoert immer in den Bildschirm, der gerade da ist. Beim
+    // Desktopwechsel wird die gesamte Fensterliste geraeumt, ohne dass Msg_WindowClosed laeuft -
+    // ohne diese Zeile hinge jeder Fokus an einer Wurzel, die es nicht mehr gibt. Der
+    // GERAETEBESTAND bleibt bewusst stehen: wer im Hauptmenue sein Pad in der Hand hatte, hat es
+    // in der Kartenauswahl immer noch.
+    padInput_->ClearFocus();
+    if(curDesktop)
+        padInput_->OnRootDestroyed(curDesktop.get());
 
     // Do the switch
     curDesktop = std::move(nextdesktop);

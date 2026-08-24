@@ -144,6 +144,16 @@ public:
     /// Braucht dieses Control Freitext, solange es den Fokus hat?
     virtual bool WantsTextInput() const { return false; }
 
+    /// Control, auf dem ein NEU hinzukommendes Eingabegeraet seinen Fokus beginnen soll.
+    /// nullptr = das erste fokussierbare Control (Vorgabe).
+    ///
+    /// Sitzt hier und nicht nur beim Desktop, weil die Wurzel der Menuenavigation genauso oft
+    /// ein Fenster ist: iwConnecting traegt den Uebergang in die Lobby, iwMsgbox jede
+    /// Rueckfrage. Eine Rueckfrage, deren Fokus auf der ZERSTOERENDEN Antwort begaenne, waere
+    /// keine Rueckfrage - iwMsgbox nennt deshalb dieselbe Vorgabeantwort, auf die es auch den
+    /// Mauszeiger stellt.
+    virtual Window* GetPadEntryCtrl(unsigned /*slot*/) { return nullptr; }
+
     /// Set the position for the window
     void SetPos(const DrawPoint& newPos);
 

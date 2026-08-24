@@ -8,6 +8,7 @@
 #include "WindowManager.h"
 #include "desktops/Desktop.h"
 #include "drivers/VideoDriverWrapper.h"
+#include "input/MenuPadInput.h"
 #include "ogl/glAllocator.h"
 #include <libsiedler2/libsiedler2.h>
 #include <rttr/test/LogAccessor.hpp>
@@ -41,6 +42,11 @@ void initGUITests()
     }
     // Don't try to play sounds
     SETTINGS.sound.effectsEnabled = false;
+    // Der Geraetebestand der Padnavigation lebt so lange wie der Prozess. Im Spiel ist das
+    // richtig - ein Pad ueberlebt jeden Bildschirmwechsel, und seit WindowManager::NotifyPadDevices
+    // auch jede Partie -, zwischen zwei Testfaellen ist es falsch: sonst faende ein Fall die
+    // Pads des vorigen vor. Derselbe Grund, aus dem hier auch der Desktop zurueckgesetzt wird.
+    WINDOWMANAGER.GetPadInput().Reset();
     BOOST_TEST_CHECKPOINT("GUI test initialized");
 }
 

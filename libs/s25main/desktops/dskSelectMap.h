@@ -24,6 +24,11 @@ public:
     dskSelectMap(CreateServerInfo csi);
     ~dskSelectMap() override;
 
+    /// Die Kartenauswahl erbt NICHT von dskMenuBase, liegt aber mitten auf dem Weg zur
+    /// Splitscreenpartie. Ihre Tabelle ist eine Fokusstation (ctrlTable::CanFocus), deren
+    /// Hoch/Runter das Control selbst als Wertaenderung verbraucht.
+    bool WantsPadInput() const override { return true; }
+
 private:
     void Draw_() override;
 

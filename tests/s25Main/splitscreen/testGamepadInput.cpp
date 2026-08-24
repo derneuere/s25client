@@ -138,6 +138,35 @@ BOOST_AUTO_TEST_SUITE(GamepadInputTests)
 // 1. PadRouter pur: Zuordnung, Kennlinie, Flanken - ohne Spiel, ohne Treiber, ohne Ansicht
 // ============================================================================================
 
+/// Clear() ist der Reset. Vergaesse er die SLOTZAHL, waere ein frisch aufgesetzter Router
+/// keiner: SetNumSlots kehrt bei gleicher Zahl sofort zurueck (PadRouter.cpp), die Meldung
+/// ueber den neu vergebenen Slot bliebe dann aus und ein Geraet auf einem zu hohen Slot
+/// behielte ihn. MenuPadInput::Reset baut genau darauf.
+BOOST_AUTO_TEST_CASE(PadRouterClearAlsoForgetsTheSlotCount)
+{
+    PadRouter router;
+    router.SetNumSlots(4);
+    router.OnEvent(PadEvent::Connected(10));
+    router.OnEvent(PadEvent::Button(10, PadButton::A, true));
+    BOOST_TEST_REQUIRE(router.GetSlot(10) == 0u);
+    BOOST_TEST_REQUIRE(router.GetNumSlots() == 4u);
+
+    router.Clear();
+    BOOST_TEST(router.GetNumSlots() == 0u);
+    BOOST_TEST(router.GetNumDevices() == 0u);
+    BOOST_TEST(!router.HasDevice(10));
+
+    // Und die GEGENPROBE, die den Unterschied ueberhaupt sichtbar macht: derselbe Wert wie
+    // vorher wird wieder angenommen, statt als "unveraendert" durchzufallen.
+    router.SetNumSlots(4);
+    RecordingTarget target;
+    router.OnEvent(PadEvent::Connected(10));
+    router.OnEvent(PadEvent::Button(10, PadButton::A, true));
+    router.UpdateMotion(16, target);
+    BOOST_TEST(router.GetSlot(10) == 0u);
+    BOOST_TEST(target.assigns.size() == 1u);
+}
+
 /// Grundregel der Zuordnung: nicht das Anstecken, sondern die erste BENUTZUNG vergibt den
 /// Slot. Das ist die Stelle, an der aus "irgendein Geraet" ein bestimmter lokaler Spieler wird.
 BOOST_AUTO_TEST_CASE(PadRouterAssignsSlotsInFirstUseOrderAndNotOnPlugIn)

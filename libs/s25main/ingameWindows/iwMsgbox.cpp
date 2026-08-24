@@ -86,7 +86,8 @@ void iwMsgbox::Init(const std::string& text, const ResourceId& iconFile, unsigne
             defaultBt = 2;
             break;
     }
-    const Window* defBt = GetCtrl<Window>(defaultBt + ID_BT_0);
+    defaultBtId_ = defaultBt + ID_BT_0;
+    const Window* defBt = GetCtrl<Window>(defaultBtId_);
     if(defBt)
         VIDEODRIVER.SetMousePos(defBt->GetDrawPos() + DrawPoint(defBt->GetSize()) / 2);
     WINDOWMANAGER.SetCursor();
