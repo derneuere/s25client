@@ -110,6 +110,18 @@ public:
     ///
     /// Neu in DRIVERAPIVERSION 9.
     virtual void FetchPadEvents(std::vector<PadEvent>& out) { out.clear(); }
+
+    /// Hoehe der logischen Leinwand, gegen die die EMPFOHLENE GUI-Skalierung gerechnet wird.
+    /// 0 (Standard) = altes Verhalten: die Empfehlung kommt aus getDpiScale().
+    ///
+    /// Warum das hier und nicht beim Aufrufer steht: die Empfehlung wird auch TREIBERINTERN
+    /// gebraucht - setGuiScalePercent(0) und jedes SetNewSize holen sie sich aus
+    /// getGuiScaleRange(). Saesse die Regel im Spielcode, bliebe die Automatik beim alten Wert
+    /// stehen, sobald sich die Fenstergroesse aendert.
+    ///
+    /// Neu in DRIVERAPIVERSION 10.
+    virtual void setUiReferenceHeight(unsigned) {}
+    virtual unsigned getUiReferenceHeight() const { return 0; }
 };
 
 class VideoDriverLoaderInterface;

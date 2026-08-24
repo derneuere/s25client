@@ -9,4 +9,4 @@
 //    (drivers/DriverWrapper.cpp:104); ein veraltetes Plugin wird mit "Invalid API version!"
 //    abgelehnt und taucht nicht in der Treiberliste auf - sauberer Abbruch statt Absturz.
 //    ACHTUNG: dieselbe Konstante gilt fuer Video UND Audio.
-#define DRIVERAPIVERSION 9
+#define DRIVERAPIVERSION 10

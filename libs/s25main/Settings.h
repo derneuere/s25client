@@ -83,6 +83,15 @@ public:
         bool vbo;
         bool sharedTextures;
         unsigned guiScale; ///< UI scaling in percent; 0 indicates automatic selection
+        /// Fernsehmodus. Aus (Standard) heisst: die Darstellung ist BIT-IDENTISCH zu der vor
+        /// dieser Aenderung - weder die empfohlene GUI-Skalierung noch der Startzoom noch die
+        /// Fensterklemme aendern sich. An heisst: die Bedienoberflaeche wird gegen eine logische
+        /// Leinwand von tv::UI_REFERENCE_HEIGHT Zeilen skaliert, die Karte startet auf einem
+        /// dazu passenden Zoom, und Fenster halten den Safe-Area-Rand ein.
+        bool tvMode;
+        /// Safe-Area-Rand je Seite in Prozent (0..tv::SAFE_AREA_PERCENT_MAX). Wirkt nur bei
+        /// eingeschaltetem Fernsehmodus.
+        unsigned tvSafeAreaPercent;
     } video;
 
     struct

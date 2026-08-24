@@ -41,6 +41,9 @@ public:
 
     GuiScaleRange getGuiScaleRange() const override;
 
+    void setUiReferenceHeight(unsigned referenceHeight) override;
+    unsigned getUiReferenceHeight() const override final { return uiReferenceHeight_; }
+
     /// prüft auf Initialisierung.
     bool IsInitialized() const override final { return initialized; }
     bool IsOpenGL() const override { return true; }
@@ -56,6 +59,11 @@ protected:
     DisplayMode displayMode_;       /// Fullscreen/resizable?
 
 private:
+    /// Groesste GANZE Prozentzahl, bei der die Renderflaeche in View-Einheiten noch mindestens
+    /// 800x600 misst - nachgeprueft mit derselben, ABSCHNEIDENDEN Umrechnung, die auch
+    /// scaledRenderSize_ erzeugt. Mindestens 100.
+    unsigned largestScaleFittingTheUi() const;
+
     // cached as possibly used often
     VideoMode windowSize_;    ///< Size of the window or fullscreen resolution
     Extent renderSize_;       ///< Size of the renderable surface
@@ -64,4 +72,7 @@ private:
     float dpiScale_;    ///< Scale factor required to convert "normal" DPI to the display DPI
     GuiScale guiScale_; ///< Scale factor applied to the user interface
     bool autoGuiScale_; ///< Whether the recommended GUI scale is used
+    /// Hoehe der logischen Leinwand fuer die Skalierungsempfehlung; 0 = aus (DPI-basiert wie
+    /// bisher). Siehe IVideoDriver::setUiReferenceHeight.
+    unsigned uiReferenceHeight_;
 };

@@ -40,7 +40,32 @@ public:
 
     /// Radiale Totzone auf dem Stickpaar (NICHT je Achse). Unterhalb passiert exakt nichts.
     static constexpr float Deadzone = 0.25f;
-    /// Zeigergeschwindigkeit bei Vollausschlag, in View-Pixeln je Sekunde.
+    /// Zeigergeschwindigkeit bei Vollausschlag, in VIEW-Pixeln je Sekunde.
+    ///
+    /// BEFUND G, ausdrueckliche Entscheidung: gemessen wird in View-Einheiten, NICHT in
+    /// physischen Bildschirmpixeln. Das heisst, der Fernsehmodus macht den Zeiger auf einem
+    /// 4K-Bildschirm bildschirmbezogen doppelt so schnell (2,13 s statt 4,27 s ueber die volle
+    /// Breite), weil die Renderflaeche in View-Einheiten auf die Haelfte schrumpft.
+    ///
+    /// Warum das die richtige Achse ist:
+    ///  - AUFLOESUNG IST NICHT GROESSE. Ein 55-Zoll-Fernseher mit 4K und einer mit 1080p sind
+    ///    gleich gross. In physischen Pixeln gemessen braeuchte der Zeiger auf dem 4K-Geraet
+    ///    doppelt so lange ueber dasselbe Glas - eine Verlangsamung, fuer die der Spieler keine
+    ///    Ursache sehen kann. In View-Einheiten braucht er auf beiden Geraeten gleich lang.
+    ///  - Die 4,27 s des heutigen 4K-Falls sind nicht der bewahrenswerte Zustand, sondern
+    ///    dieselbe Ursache wie der Befund "zu klein": die Oberflaeche wird bei 100 % ueber die
+    ///    doppelte Zahl Pixel gestreckt. Wird sie zurueckskaliert, muss der Zeiger mit.
+    ///  - Alles, was der Zeiger TREFFEN muss - Knoepfe, Fensterkanten, die untere Leiste - ist
+    ///    in View-Einheiten bemasst und aendert dort seine Groesse nie. Die Zeit vom Zeiger zum
+    ///    Knopf bleibt damit ueber alle Skalierungen und Aufloesungen konstant.
+    ///
+    /// Was das NICHT aendert: ohne Fernsehmodus sind View-Einheiten und Bildschirmpixel
+    /// dasselbe. Fuer jeden heutigen Spieler bleibt die Zeigergeschwindigkeit unveraendert.
+    ///
+    /// Anders als die MAUS, die in physischen Pixeln laeuft (der Treiber rechnet sie mit
+    /// GuiScale::screenToView herunter). Das ist Absicht und kein Widerspruch: die Maus hat mit
+    /// Hand und Tisch eine physische Bezugsgroesse ausserhalb des Bildschirms, der Stick hat
+    /// keine - fuer ihn ist der Bildschirm selbst das einzige Mass.
     static constexpr float PixelsPerSecond = 900.f;
     /// Kamerageschwindigkeit des RECHTEN Sticks bei Vollausschlag, in View-Pixeln je Sekunde.
     ///

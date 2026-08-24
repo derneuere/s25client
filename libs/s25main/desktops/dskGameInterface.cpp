@@ -11,6 +11,7 @@
 #include "NWFInfo.h"
 #include "Settings.h"
 #include "SoundManager.h"
+#include "TvDisplay.h"
 #include "WindowManager.h"
 #include "addons/AddonMaxWaterwayLength.h"
 #include "buildings/noBuildingSite.h"
@@ -107,6 +108,38 @@ constexpr Extent btSize = Extent(37, 32);
 /// Offsets of the buttons relative to the "border" graphics on the lower bar
 constexpr DrawPoint btOffset(44, 4);
 
+/// Linke obere Ecke der GRAFIK der unteren Knopfleiste.
+///
+/// Bei ausgeschaltetem Fernsehmodus liefert tv::ScreenChromeRect die volle Flaeche, dann liegt
+/// die Leiste wie bisher mittig am unteren Bildschirmrand. Im Fernsehmodus wandert sie mit dem
+/// Rahmen und den Statuen gemeinsam um den Safe-Rand herein - sonst schneidet ein Fernseher mit
+/// Overscan genau das Bedienelement ab, das am haeufigsten gebraucht wird.
+///
+/// Gerechnet wird gegen den KASTEN und nicht gegen den Bildschirm, obwohl beide bei einem
+/// symmetrischen Rand dieselbe Mitte haben: die Leiste sitzt auf dem Mittelstueck des unteren
+/// Rahmens, das der Rahmenbauer bei size.x/2 SEINES Rahmens einsetzt. Steht die Rechnung am
+/// Kasten, bleiben die beiden auch dann zusammen, wenn der Rand einmal nur auf einer Achse
+/// nachgibt.
+///
+/// Bewusst EINE Funktion fuer alle vier Aufrufer (Konstruktor, Resize, Msg_PaintBefore,
+/// Msg_LeftDown): die Grafik, die Knoepfe darauf und das Rechteck, das den Klick abfaengt,
+/// muessen dieselbe Rechnung benutzen, sonst wandern sie auseinander.
+///
+/// EINE der vier Stellen rechnet dadurch NICHT mehr Zahl fuer Zahl wie vorher: Msg_LeftDown
+/// bildete die Mitte frueher als `renderSize.x / 2 - barWidth / 2`, also mit zwei getrennten
+/// Ganzzahldivisionen. Das weicht von `(renderSize.x - barWidth) / 2` - der Form, die
+/// Konstruktor, Resize und Msg_PaintBefore schon immer benutzt haben - um genau einen Pixel ab,
+/// sobald Bildbreite und Leistenbreite verschiedene Paritaet haben. Der Klickfaenger lag damit
+/// um einen Pixel neben der gezeichneten Leiste; jetzt liegt er darauf. Das ist die einzige
+/// Verhaltensaenderung ohne Fernsehmodus, und sie ist eine Korrektur.
+DrawPoint CalcButtonBarOrigin(const Extent& screenSize, const Extent& barSize)
+{
+    const Rect chrome = tv::ScreenChromeRect(screenSize);
+    const auto chromeSize = chrome.getSize();
+    return DrawPoint(chrome.left + (static_cast<int>(chromeSize.x) - static_cast<int>(barSize.x)) / 2,
+                     chrome.bottom - static_cast<int>(barSize.y));
+}
+
 float getNextZoomLevel(const float currentZoom)
 {
     // Get first level bigger than current zoom
@@ -154,10 +187,27 @@ std::vector<std::unique_ptr<PlayerView>> dskGameInterface::CreateViews(const uns
       CalcViewports(VIDEODRIVER.GetRenderSize(), static_cast<unsigned>(playerIds.size()));
     RTTR_Assert(viewports.size() == playerIds.size());
 
+    // Startzoom der KARTE. Zweiter Hebel neben der GUI-Skalierung, und fuer die Karte der
+    // einzige: GameWorldView::updateEffectiveZoomFactor rechnet die GUI-Skalierung fuer die Welt
+    // ausdruecklich wieder heraus (world/GameWorldView.cpp:829-833), ein Knoten bleibt also bei
+    // jeder Skalierung TR_W = 56 physische Pixel breit.
+    //
+    // Gerechnet wird gegen die PHYSISCHE Hoehe (GetWindowSize), nicht gegen GetRenderSize() -
+    // letztere ist bereits durch die GUI-Skalierung geteilt und wuerde sich selbst aufheben.
+    //
+    // Ohne Fernsehmodus ist das Ergebnis ZOOM_FACTORS[ZOOM_DEFAULT_INDEX] == 1.0, also exakt der
+    // Wert, den der GameWorldView-Konstruktor ohnehin setzt: fuer Einzelspieler, Replay und
+    // Netzwerkpartie aendert sich nichts.
+    const float startZoom = tv::IsTvModeEnabled() ? tv::RecommendedZoomFactor(VIDEODRIVER.GetWindowSize().height) : 1.f;
+
     std::vector<std::unique_ptr<PlayerView>> result;
     result.reserve(playerIds.size());
     for(unsigned i = 0; i < playerIds.size(); ++i)
+    {
         result.push_back(std::make_unique<PlayerView>(i, playerIds[i], world, viewports[i]));
+        if(startZoom != 1.f) //-V550
+            result.back()->GetView().SetZoomFactor(startZoom, false);
+    }
     return result;
 }
 
@@ -180,8 +230,7 @@ dskGameInterface::dskGameInterface(std::shared_ptr<Game> game, std::shared_ptr<c
 
     const glArchivItem_Bitmap& imgButtonBar = *LOADER.GetImageN("resource", 29);
 
-    auto barPos =
-      DrawPoint((GetSize().x - imgButtonBar.getWidth()) / 2, GetSize().y - imgButtonBar.getHeight()) + btOffset;
+    auto barPos = CalcButtonBarOrigin(GetSize(), imgButtonBar.GetSize()) + btOffset;
 
     AddImageButton(ID_btMap, barPos, btSize, TextureColor::Green1, LOADER.GetImageN("io", 50), _("Map"))
       ->SetBorder(false);
@@ -203,7 +252,10 @@ dskGameInterface::dskGameInterface(std::shared_ptr<Game> game, std::shared_ptr<c
 
     std::fill(borders.begin(), borders.end(), (glArchivItem_Bitmap*)(nullptr));
     cbb.loadEdges(LOADER.GetArchive("resource"));
-    cbb.buildBorder(VIDEODRIVER.GetRenderSize(), borders);
+    // Der Rahmen wird fuer den KASTEN gebaut, nicht fuer die ganze Flaeche - er soll im
+    // Fernsehmodus mit der Knopfleiste zusammen hereinruecken (tv::ScreenChromeRect). Ohne
+    // Fernsehmodus ist das dieselbe Groesse wie bisher.
+    cbb.buildBorder(tv::ScreenChromeRect(VIDEODRIVER.GetRenderSize()).getSize(), borders);
 
     // Bis zum ersten UpdateInput haelt die Hauptansicht die Maus: ein Pad kann vor dem ersten
     // Frame gar keinen Slot bekommen haben (PadRouter::SetNumSlots laeuft dort). Ohne diesen
@@ -466,14 +518,13 @@ void dskGameInterface::Resize(const Extent& newSize)
     // recreate borders
     for(auto& border : borders)
         deletePtr(border);
-    cbb.buildBorder(newSize, borders);
+    cbb.buildBorder(tv::ScreenChromeRect(newSize).getSize(), borders);
 
     // move buttons
     // Get real renderer size as newSize may get capped but we want to keep the manually drawn borders intact
     const Extent realNewSize = VIDEODRIVER.GetRenderSize();
     const glArchivItem_Bitmap& imgButtonBar = *LOADER.GetImageN("resource", 29);
-    DrawPoint barPos =
-      DrawPoint((realNewSize.x - imgButtonBar.getWidth()) / 2, realNewSize.y - imgButtonBar.getHeight()) + btOffset;
+    DrawPoint barPos = CalcButtonBarOrigin(realNewSize, imgButtonBar.GetSize()) + btOffset;
 
     auto* button = GetCtrl<ctrlButton>(ID_btMap);
     button->SetPos(barPos);
@@ -537,26 +588,32 @@ void dskGameInterface::Msg_PaintBefore()
 
     /// Padding of the figures
     const DrawPoint figPadding(12, 12);
-    const DrawPoint screenSize(VIDEODRIVER.GetRenderSize());
+    // Rahmen, Statuen und Knopfleiste liegen in EINEM Kasten - siehe tv::ScreenChromeRect.
+    // Ohne Fernsehmodus ist das Rect(0, 0, GetRenderSize()), und dann rechnen alle Zeilen
+    // unten Zahl fuer Zahl wie vorher.
+    const Rect chrome = tv::ScreenChromeRect(VIDEODRIVER.GetRenderSize());
+    const DrawPoint chromeOrigin = chrome.getOrigin();
+    const DrawPoint chromeSize(chrome.getSize());
     // Rahmen zeichnen
-    borders[0]->DrawFull(DrawPoint(0, 0));                                      // oben (mit Ecken)
-    borders[1]->DrawFull(DrawPoint(0, screenSize.y - figPadding.y));            // unten (mit Ecken)
-    borders[2]->DrawFull(DrawPoint(0, figPadding.y));                           // links
-    borders[3]->DrawFull(DrawPoint(screenSize.x - figPadding.x, figPadding.y)); // rechts
+    borders[0]->DrawFull(chromeOrigin);                                                       // oben (mit Ecken)
+    borders[1]->DrawFull(chromeOrigin + DrawPoint(0, chromeSize.y - figPadding.y));            // unten (mit Ecken)
+    borders[2]->DrawFull(chromeOrigin + DrawPoint(0, figPadding.y));                           // links
+    borders[3]->DrawFull(chromeOrigin + DrawPoint(chromeSize.x - figPadding.x, figPadding.y)); // rechts
 
     // The figure/statues and the button bar
     glArchivItem_Bitmap& imgFigLeftTop = *LOADER.GetImageN("resource", 17);
     glArchivItem_Bitmap& imgFigRightTop = *LOADER.GetImageN("resource", 18);
     glArchivItem_Bitmap& imgFigLeftBot = *LOADER.GetImageN("resource", 19);
     glArchivItem_Bitmap& imgFigRightBot = *LOADER.GetImageN("resource", 20);
-    imgFigLeftTop.DrawFull(figPadding);
-    imgFigRightTop.DrawFull(DrawPoint(screenSize.x - figPadding.x - imgFigRightTop.getWidth(), figPadding.y));
-    imgFigLeftBot.DrawFull(DrawPoint(figPadding.x, screenSize.y - figPadding.y - imgFigLeftBot.getHeight()));
-    imgFigRightBot.DrawFull(screenSize - figPadding - imgFigRightBot.GetSize());
+    imgFigLeftTop.DrawFull(chromeOrigin + figPadding);
+    imgFigRightTop.DrawFull(chromeOrigin
+                            + DrawPoint(chromeSize.x - figPadding.x - imgFigRightTop.getWidth(), figPadding.y));
+    imgFigLeftBot.DrawFull(chromeOrigin
+                           + DrawPoint(figPadding.x, chromeSize.y - figPadding.y - imgFigLeftBot.getHeight()));
+    imgFigRightBot.DrawFull(chromeOrigin + chromeSize - figPadding - DrawPoint(imgFigRightBot.GetSize()));
 
     glArchivItem_Bitmap& imgButtonBar = *LOADER.GetImageN("resource", 29);
-    imgButtonBar.DrawFull(
-      DrawPoint((screenSize.x - imgButtonBar.getWidth()) / 2, screenSize.y - imgButtonBar.getHeight()));
+    imgButtonBar.DrawFull(CalcButtonBarOrigin(VIDEODRIVER.GetRenderSize(), imgButtonBar.GetSize()));
 }
 
 void dskGameInterface::Msg_PaintAfter()
@@ -1017,9 +1074,7 @@ dskGameInterface::ActionOptions dskGameInterface::ComputeActionOptions(PlayerVie
 bool dskGameInterface::Msg_LeftDown(const MouseCoords& mc)
 {
     const glArchivItem_Bitmap& imgButtonBar = *LOADER.GetImageN("resource", 29);
-    const auto btOrig = DrawPoint(VIDEODRIVER.GetRenderSize().x / 2 - imgButtonBar.getWidth() / 2,
-                                  VIDEODRIVER.GetRenderSize().y - imgButtonBar.getHeight())
-                        + btOffset;
+    const auto btOrig = CalcButtonBarOrigin(VIDEODRIVER.GetRenderSize(), imgButtonBar.GetSize()) + btOffset;
     if(IsPointInRect(mc.pos, Rect(btOrig, btSize * 4u)))
         return false;
 

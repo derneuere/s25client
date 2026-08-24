@@ -513,3 +513,13 @@ GuiScaleRange VideoDriverWrapper::getGuiScaleRange() const
 {
     return videodriver->getGuiScaleRange();
 }
+
+void VideoDriverWrapper::setUiReferenceHeight(unsigned referenceHeight)
+{
+    videodriver->setUiReferenceHeight(referenceHeight);
+}
+
+unsigned VideoDriverWrapper::getUiReferenceHeight() const
+{
+    return videodriver->getUiReferenceHeight();
+}

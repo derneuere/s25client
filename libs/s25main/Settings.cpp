@@ -6,6 +6,7 @@
 #include "DrawPoint.h"
 #include "RTTR_Version.h"
 #include "RttrConfig.h"
+#include "TvDisplay.h"
 #include "driver/VideoInterface.h"
 #include "drivers/AudioDriverWrapper.h"
 #include "drivers/VideoDriverWrapper.h"
@@ -109,6 +110,9 @@ void Settings::LoadDefaults()
     video.vbo = true;
     video.sharedTextures = SHARED_TEXTURES_DEFAULT;
     video.guiScale = 0; // special value indicating automatic selection
+    // Aus: der Auslieferungszustand aendert an der Darstellung von heute NICHTS.
+    video.tvMode = false;
+    video.tvSafeAreaPercent = tv::SAFE_AREA_PERCENT_DEFAULT;
     // }
 
     // language
@@ -261,6 +265,12 @@ void Settings::Load()
         video.vbo = iniVideo->getBoolValue("vbo");
         video.sharedTextures = iniVideo->getBoolValue("shared_textures");
         video.guiScale = iniVideo->getValue("gui_scale", 0);
+        // Fehlende Schluessel (jede bestehende Konfiguration) liefern hier den Aus-Zustand.
+        video.tvMode = iniVideo->getValue("tv_mode", false);
+        // getValue liefert einen INT, und der darf in der Datei alles sein - die Pruefung steht
+        // deshalb noch in der signierten Achse (tv::SanitizeSafeAreaPercent).
+        video.tvSafeAreaPercent = tv::SanitizeSafeAreaPercent(
+          iniVideo->getValue("tv_safe_area", static_cast<int>(tv::SAFE_AREA_PERCENT_DEFAULT)));
         // };
 
         if(video.fullscreenSize.width == 0 || video.fullscreenSize.height == 0 || video.windowedSize.width == 0
@@ -464,6 +474,8 @@ void Settings::Save()
     iniVideo->setValue("vbo", video.vbo);
     iniVideo->setValue("shared_textures", video.sharedTextures);
     iniVideo->setValue("gui_scale", video.guiScale);
+    iniVideo->setValue("tv_mode", video.tvMode);
+    iniVideo->setValue("tv_safe_area", video.tvSafeAreaPercent);
     // };
 
     // language

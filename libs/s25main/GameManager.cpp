@@ -8,6 +8,7 @@
 #include "RTTR_Assert.h"
 #include "RttrConfig.h"
 #include "Settings.h"
+#include "TvDisplay.h"
 #include "WindowManager.h"
 #include "desktops/dskLobby.h"
 #include "desktops/dskMainMenu.h"
@@ -55,6 +56,9 @@ bool GameManager::Start()
         return false;
     videoDriver_.setTargetFramerate(settings_.video.framerate);
     videoDriver_.SetMouseWarping(settings_.global.smartCursor);
+    // MUSS vor setGuiScalePercent stehen: bei "automatisch" (guiScale == 0) entscheidet die
+    // Referenzhoehe, welcher Prozentwert die Automatik ueberhaupt liefert.
+    videoDriver_.setUiReferenceHeight(settings_.video.tvMode ? tv::UI_REFERENCE_HEIGHT : 0u);
     videoDriver_.setGuiScalePercent(settings_.video.guiScale);
 
     /// Audiodriver laden

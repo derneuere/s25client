@@ -87,6 +87,11 @@ public:
     /// Get minimum, maximum, and recommended GUI scale percentages for the current window and render size
     GuiScaleRange getGuiScaleRange() const;
 
+    /// Logische Leinwandhoehe fuer die Skalierungsempfehlung; 0 = aus (Auslieferungszustand).
+    /// Siehe IVideoDriver::setUiReferenceHeight und tv::UI_REFERENCE_HEIGHT.
+    void setUiReferenceHeight(unsigned referenceHeight);
+    unsigned getUiReferenceHeight() const;
+
     bool IsLeftDown();
     bool IsRightDown();
     bool IsTouch();

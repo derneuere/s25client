@@ -7,6 +7,7 @@
 #include "Loader.h"
 #include "MusicPlayer.h"
 #include "Settings.h"
+#include "TvDisplay.h"
 #include "WindowManager.h"
 #include "controls/ctrlComboBox.h"
 #include "controls/ctrlEdit.h"
@@ -90,6 +91,7 @@ enum
     ID_grpOptTextures,
     ID_txtGuiScale,
     ID_cbGuiScale,
+    ID_grpTvMode,
     ID_txtAudioDriver,
     ID_cbAudioDriver,
     ID_grpMusic,
@@ -385,6 +387,15 @@ dskOptions::dskOptions() : Desktop(LOADER.GetImageN("setup013", 0))
     curPos.y += sectionSpacing;
     groupGraphics->AddText(ID_txtGuiScale, curPos, _("GUI Scale:"), COLOR_YELLOW, FontStyle{}, NormalFont);
     groupGraphics->AddComboBox(ID_cbGuiScale, curPos + ctrlOffset, ctrlSize, TextureColor::Grey, NormalFont, 100);
+    curPos.y += rowHeight;
+
+    // Der Regler, ohne den es nicht geht: das Programm kann die Bildschirmdiagonale und den
+    // Sitzabstand nicht ermitteln, also muss der Spieler sagen, dass er am Fernseher sitzt.
+    curPos.y += sectionSpacing;
+    addOnOffOption(*groupGraphics, curPos, ID_grpTvMode, _("TV mode:"), SETTINGS.video.tvMode);
+
+    // Muss NACH dem Fernsehmodus stehen: updateGuiScale liest die Empfehlung aus dem Treiber,
+    // und die haengt an der Referenzhoehe.
     updateGuiScale();
 
     curPos = optionRowsStartPosition;
@@ -616,6 +627,36 @@ void dskOptions::Msg_Group_OptionGroupChange(const unsigned /*group_id*/, const 
                 VIDEODRIVER.ResizeScreen(VIDEODRIVER.GetWindowSize(), newDisplayMode);
         }
         break;
+        case ID_grpTvMode:
+            SETTINGS.video.tvMode = enabled;
+            // BEFUND D: der Fernsehmodus wirkt nur ueber die EMPFEHLUNG, und die greift nur,
+            // solange die Skalierung auf "automatisch" steht. Wer irgendwann einmal einen festen
+            // Prozentwert gewaehlt hat - und das ist die Mehrheit, sobald jemand den Regler auch
+            // nur angefasst hat - haette den Schalter umgelegt und GAR NICHTS gesehen. Ein
+            // Schalter, der bei den meisten Spielern folgenlos bleibt, ist ein Fehler und keine
+            // Feinheit.
+            //
+            // Einschalten stellt die Skalierung deshalb auf "automatisch" zurueck: der ganze
+            // Sinn des Modus ist "such du einen fernsehtauglichen Wert aus". Das ist keine
+            // Entmuendigung - die Auswahlliste steht direkt darueber, springt sichtbar auf
+            // "Auto (200%)" und der Spieler kann sofort wieder einen festen Wert nehmen, der
+            // dann auch im Fernsehmodus gewinnt (siehe AnExplicitGuiScaleWinsOverTvMode).
+            //
+            // AUSschalten laesst die Auswahl stehen: dort etwas zurueckzusetzen, was der Spieler
+            // selbst gewaehlt haben kann, waere die schlimmere Ueberraschung.
+            if(enabled)
+                SETTINGS.video.guiScale = 0;
+            // Sofort wirksam, damit der Spieler die Wirkung vom Sofa aus sieht statt sie zu
+            // erraten. setUiReferenceHeight zieht bei "automatisch" die neue Empfehlung selbst
+            // nach (libs/driver/src/VideoDriver.cpp) ...
+            VIDEODRIVER.setUiReferenceHeight(enabled ? tv::UI_REFERENCE_HEIGHT : 0u);
+            // ... reichte aber nicht, wenn vorher ein fester Wert eingestellt war: dann steht
+            // autoGuiScale_ im Treiber noch auf false. Diese Zeile schaltet ihn um.
+            if(enabled)
+                VIDEODRIVER.setGuiScalePercent(0);
+            // Schreibt den neuen Text ("Auto (200%)") und die neue Auswahl in die Liste.
+            updateGuiScale();
+            break;
         case ID_grpVBO: SETTINGS.video.vbo = enabled; break;
         case ID_grpOptTextures: SETTINGS.video.sharedTextures = enabled; break;
         case ID_grpEffects: SETTINGS.sound.effectsEnabled = enabled; break;

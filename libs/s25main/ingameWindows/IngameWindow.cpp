@@ -8,6 +8,7 @@
 #include "Point.h"
 #include "RTTR_Assert.h"
 #include "Settings.h"
+#include "TvDisplay.h"
 #include "WindowManager.h"
 #include "driver/MouseCoords.h"
 #include "drivers/VideoDriverWrapper.h"
@@ -136,23 +137,42 @@ DrawPoint IngameWindow::GetRightBottomBoundary()
 
 void IngameWindow::SetPos(DrawPoint newPos, bool saveRestorePos)
 {
-    const Extent screenSize = VIDEODRIVER.GetRenderSize();
+    // Der Bereich, in dem ein Fenster liegen DARF. Bei ausgeschaltetem Fernsehmodus ist das
+    // exakt Rect(0, 0, GetRenderSize()) - dann rechnen die vier Zweige unten Zahl fuer Zahl
+    // dasselbe wie vor der Safe Area (tv::WindowBoundsRect -> tv::SafeAreaRect mit 0 Prozent).
+    const Rect bounds = tv::WindowBoundsRect(VIDEODRIVER.GetRenderSize(), GetSize());
+    // Groesste Position, an der das Fenster noch vollstaendig im Kasten liegt.
+    //
+    // Hier stand vorher `newPos.x + GetSize().x >= bounds.right`, und das war in zweierlei
+    // Hinsicht der falsche Rechenraum. Erstens ist GetSize() ein Extent, also UNSIGNED: die
+    // Summe zog die signierte Position mit nach unsigned, der Vergleich gegen die (signierte)
+    // Kante von Rect lief damit vorzeichenlos - genau die Warnung C4018. Zweitens wird SetPos
+    // ausdruecklich mit DrawPoint::MaxElementValue als "klebe an der rechten/unteren Kante"-
+    // Sonderwert aufgerufen (Resize(), restorePos_, posLastOrCenter); newPos + GetSize() liefe
+    // dabei ueber.
+    //
+    // Position minus Groesse ist eine Position, und Point rechnet gemischt vorzeichenbehaftet
+    // (Point.h: "Combining a signed with an unsigned point will result in a signed type").
+    // Damit steht die ganze Klemme in einer Achse, kommt ohne Cast aus und kann nicht
+    // ueberlaufen. Die Bedingung ist zu der alten aequivalent: pos + size >= right <=>
+    // pos >= right - size.
+    const DrawPoint maxPos = bounds.getEndPt() - GetSize();
     DrawPoint newRestorePos = newPos;
     // Too far left or right?
-    if(newPos.x < 0)
-        newRestorePos.x = newPos.x = 0;
-    else if(newPos.x + GetSize().x >= screenSize.x)
+    if(newPos.x < bounds.left)
+        newRestorePos.x = newPos.x = bounds.left;
+    else if(newPos.x >= maxPos.x)
     {
-        newPos.x = screenSize.x - GetSize().x;
+        newPos.x = maxPos.x;
         newRestorePos.x = DrawPoint::MaxElementValue; // make window stick to the right
     }
 
     // Too high or low?
-    if(newPos.y < 0)
-        newRestorePos.y = newPos.y = 0;
-    else if(newPos.y + GetSize().y >= screenSize.y)
+    if(newPos.y < bounds.top)
+        newRestorePos.y = newPos.y = bounds.top;
+    else if(newPos.y >= maxPos.y)
     {
-        newPos.y = screenSize.y - GetSize().y;
+        newPos.y = maxPos.y;
         newRestorePos.y = DrawPoint::MaxElementValue; // make window stick to the bottom
     }
 
@@ -511,7 +531,15 @@ void IngameWindow::Msg_PaintAfter()
 
 void IngameWindow::MoveToCenter()
 {
-    SetPos(DrawPoint(VIDEODRIVER.GetRenderSize() - GetSize()) / 2);
+    // Mitte des Kastens, in dem das Fenster liegen darf, nicht der Renderflaeche. Beide sind
+    // identisch, solange der Fernsehmodus aus ist - dann ist die Zeile Zahl fuer Zahl das alte
+    // DrawPoint(GetRenderSize() - GetSize()) / 2.
+    //
+    // (links + rechts - Breite) / 2 statt Ursprung + (Groesse - Breite) / 2: die zweite Form
+    // rechnete die Differenz in einem Extent, also UNSIGNED, und liefe bei einem Fenster
+    // ueber, das breiter ist als der Kasten.
+    const Rect bounds = tv::WindowBoundsRect(VIDEODRIVER.GetRenderSize(), GetSize());
+    SetPos((bounds.getOrigin() + bounds.getEndPt() - GetSize()) / 2);
 }
 
 void IngameWindow::MoveNextToMouse()
