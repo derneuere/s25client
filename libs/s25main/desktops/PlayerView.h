@@ -6,6 +6,7 @@
 
 #include "IngameMinimap.h"
 #include "input/FocusPath.h"
+#include "input/PlayerBrief.h"
 #include "world/GameWorldView.h"
 #include "world/GameWorldViewer.h"
 #include "world/ViewportLayout.h"
@@ -56,7 +57,24 @@ enum class PadRejection
     /// dass hier nichts geht. Der Padspieler bekaeme ohne diese Meldung gar nichts - und ein
     /// Knopf, der nichts tut, sieht aus wie ein totes Pad (derselbe Befund, aus dem
     /// NoteRejection ueberhaupt entstanden ist).
-    NothingHere
+    ///
+    /// Seit Phase 9 ist das der RESTFALL: eigenes Gebiet, aber weder Platz noch Flagge noch
+    /// Strasse. Die drei haeufigeren Ursachen stehen darunter und haben einen eigenen Satz.
+    NothingHere,
+    /// Der Knoten liegt im Nebel - der Spieler hat ihn nie gesehen.
+    ///
+    /// BEFUND PHASE 9: alle vier Faelle hier fielen frueher in EINEN Satz zusammen ("Nothing
+    /// can be done here."). Der Ausloeser war woertlich "als Anfaenger ist auch nicht klar,
+    /// wann Flagge und wann Gebaeude kommt" - und die Antwort des Spiels darauf war ein Satz,
+    /// der zu jeder der vier Ursachen gleich gut und gleich schlecht passte. Ein Anfaenger
+    /// lernt daraus nichts; er weiss danach nicht, ob er woanders hingehen, erst Gebiet erobern
+    /// oder einfach ein Feld weiterruecken muss.
+    Unexplored,
+    /// Sichtbares Land, das niemandem gehoert. Der Ausweg ist ein Militaergebaeude in Richtung
+    /// dieser Stelle - eine voellig andere Handlung als "einen Knoten weiter".
+    NoMansLand,
+    /// Das Gebiet eines anderen Spielers.
+    ForeignTerritory
 };
 
 /// Alles, was in einer Splitscreen-Partie je lokalem Spieler GENAU EINMAL existiert:
@@ -144,6 +162,24 @@ public:
     /// Wie oft in Folge etwas wirkungslos blieb. Nur zum Messen; die Anzeige braucht es nicht.
     unsigned GetRejectionCount() const { return rejectionCount_; }
 
+    /// Der Klartext, den DIESER Spieler gerade unter seiner Ansicht liest.
+    ///
+    /// Warum hier und nicht im Tooltip des Controls: es gibt genau EINEN Tooltip fuer den
+    /// ganzen Bildschirm (WindowManager::curTooltip), er wird an der Mausposition gezeichnet,
+    /// und ohne je bewegte Maus gar nicht. Vier lokale Spieler koennten darueber nie
+    /// gleichzeitig verschiedene Texte lesen. Die ausfuehrliche Begruendung steht am Kopf von
+    /// input/PlayerBrief.h.
+    ///
+    /// Gesetzt wird der Wert im Produktivcode an genau EINER Stelle
+    /// (dskGameInterface::RefreshBrief, einmal je Frame und Ansicht) und gelesen an genau einer
+    /// (dskGameInterface::DrawBrief). Damit ist das, was ein Nachweis hier liest, die QUELLE
+    /// dessen, was gezeichnet wird, und keine zweite Rechnung daneben. Zeichen fuer Zeichen
+    /// dasselbe ist es nicht: DrawBrief bricht die Zeilen erst auf die Kastenbreite um. Und
+    /// SetBrief ist oeffentlich - ein Testfall darf einen Block auch von Hand setzen, um den
+    /// Zeichenweg mit einem bestimmten Inhalt zu durchlaufen.
+    const brief::Brief& GetBrief() const { return brief_; }
+    void SetBrief(brief::Brief brief) { brief_ = std::move(brief); }
+
     /// Zustand des Eingabegeraets DIESER Ansicht.
     unsigned touchDuration = 0;
     bool isScrolling = false;
@@ -165,6 +201,7 @@ private:
     std::optional<Position> padCursor_;
     std::optional<PadRejection> rejection_;
     unsigned rejectionCount_ = 0;
+    brief::Brief brief_;
 
     GameWorldViewer worldViewer_;
     GameWorldView view_;

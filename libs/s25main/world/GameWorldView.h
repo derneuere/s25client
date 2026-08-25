@@ -46,8 +46,19 @@ class GameWorldView
     /// Callbacks called when node is printed
     std::vector<IDrawNodeCallback*> drawNodeCallbacks;
 
-    /// Show building quality icons
+    /// Show building quality icons. DIE EINSTELLUNG DES MENSCHEN - und nur sie geht je nach
+    /// SETTINGS.ingame.showBQ zurueck (SaveIngameSettingsValues).
     bool show_bq;
+    /// Bauhilfe, die dieser Ansicht fuer DIESE PARTIE aufgezwungen wurde (ForceShowBQ).
+    ///
+    /// Getrennt von show_bq und nicht mit ihm verrechnet, weil SaveIngameSettingsValues ALLE
+    /// drei HUD-Werte dieser Ansicht in die ini schreibt und nicht nur den gerade geaenderten.
+    /// Lebte die erzwungene Bauhilfe in show_bq, truege der naechste HUD-Umschalter DIESER
+    /// Ansicht sie dort hinein - iwAction, Reiter "Anzeigeoptionen" ruft
+    /// ToggleShowNamesAndProductivity() auf der Ansicht, aus der das Fenster geoeffnet wurde,
+    /// also auf der des PADSPIELERS. Der Mausspieler faende die Bauhilfe danach dauerhaft
+    /// eingeschaltet vor, ohne sie je angefasst zu haben.
+    bool forcedShowBQ_ = false;
     /// Show building names
     bool show_names;
     /// Show productivities
@@ -128,8 +139,21 @@ public:
     /// Ausgelagert, damit die Begrenzung dieser Ansicht ohne OpenGL pruefbar ist.
     Rect GetScissorRect() const;
 
-    /// Show or hide construction aid
+    /// Show or hide construction aid. Der ausdrueckliche Wille eines Menschen: er hebt eine
+    /// erzwungene Bauhilfe auf (sonst liesse sie sich nie wieder abschalten) und er wird
+    /// gespeichert.
     void ToggleShowBQ();
+    /// Erzwingt die Bauhilfe fuer DIESE Ansicht und DIESE Partie.
+    ///
+    /// Sie wird NICHT in SETTINGS.ingame.showBQ geschrieben - weder hier noch spaeter durch
+    /// irgendeinen anderen HUD-Umschalter dieser Ansicht. Genau dafuer gibt es forcedShowBQ_ als
+    /// eigenes Feld; die ausfuehrliche Begruendung steht dort.
+    ///
+    /// Ein Padspieler, der in Ansicht 2 das Baumenue oeffnet, aendert dem Mausspieler damit
+    /// nichts - auch nicht nach einem Neustart.
+    void ForceShowBQ();
+    /// Zeigt diese Ansicht gerade die Bauhilfe? Einstellung ODER Zwang.
+    bool IsShowingBQ() const { return show_bq || forcedShowBQ_; }
     /// Show or hide building names
     void ToggleShowNames();
     /// Show or hide productivity

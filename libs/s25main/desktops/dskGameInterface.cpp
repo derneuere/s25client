@@ -755,6 +755,17 @@ void dskGameInterface::Msg_PaintAfter()
                          COLOR_YELLOW);
         iconPos -= DrawPoint(magnifierImg->getWidth() + 4, 0);
     }
+
+    // Der Klartext je Ansicht - die einzige Lesestelle von PlayerView::GetBrief().
+    //
+    // HIER und nicht in Run(): Msg_PaintBefore zeichnet nach Run() noch Rahmen, Statuen und
+    // Knopfleiste, die dem Kasten sonst ueber die Unterkante liefen. Fensterinhalte liegen
+    // weiterhin darueber - genau wie beim Postfach und der Chatzeile, und das ist richtig: ein
+    // Fenster, das der Spieler gerade bedient, gehoert nach vorn.
+    //
+    // Ohne angestecktes Pad ist jeder Block leer (RefreshBrief), und diese Schleife zeichnet
+    // nichts. Der Einzelspieler mit Maus bekommt also keinen einzigen zusaetzlichen Zeichenruf.
+    forEachView([this](const PlayerView& view) { DrawBrief(view); });
 }
 
 bool dskGameInterface::OpenObjectWindow(PlayerView& view, const MapPoint cSel)
@@ -844,8 +855,12 @@ bool dskGameInterface::PadOpenActionWindow(PlayerView& view)
 
     // DIESELBE Entscheidung wie beim Mausklick - kein zweites Regelwerk (ComputeActionOptions).
     const ActionOptions opts = ComputeActionOptions(view, pt);
-    if(opts.handled)
-        return true; // das Handelsfenster ist aufgegangen
+    if(opts.tradeWarehouse)
+    {
+        WINDOWMANAGER.Show(std::make_unique<iwTrade>(*opts.tradeWarehouse, view.GetViewer(), GAMECLIENT));
+        view.ClearRejection();
+        return true;
+    }
     // Ein Fenster, in dem nur "Anzeigeoptionen" steht, ist fuer einen Padspieler keine Antwort.
     // Er bekommt stattdessen die Rueckmeldung des Aufrufers (PadReject).
     if(!opts.hasAction())
@@ -859,6 +874,25 @@ bool dskGameInterface::PadOpenActionWindow(PlayerView& view)
     // iwAction-Konstruktor stimmt damit unveraendert.
     const DrawPoint wndPos = view.HasPadCursor() ? DrawPoint(view.GetPadCursor()) : DrawPoint(view.GetViewCenter());
     ShowActionWindow(view, opts.tabs, pt, wndPos, opts.enableMilitaryBuildings, iwAction::MousePointer::LeaveAlone);
+    // BAUHILFE ERZWINGEN, sobald es hier ueberhaupt etwas zu bauen gibt.
+    //
+    // Der zweite Halbsatz des Auftraggebers war "als Anfaenger ist auch nicht klar, wann Flagge
+    // und wann Gebaeude kommt". Die Auskunft steht laengst auf dem Bildschirm - die Bauhilfe
+    // malt je Knoten ein Symbol (gelbe Flagge, Huette, Haus, Burg, Bergwerk) -, sie ist nur
+    // voreingestellt AUS (Settings.cpp: ingame.showBQ = false) und laesst sich nur ueber eine
+    // Taste einschalten, die ein Padspieler gar nicht hat.
+    //
+    // Sie einzuschalten ist deshalb richtig, aber allein NICHT genug: die Symbole sagen einem
+    // Anfaenger nichts, solange ihm niemand sagt, was sie bedeuten. Das tut der Klartext
+    // (RefreshBrief), und zwar in denselben Worten - "Platz fuer eine kleine Huette" steht dort,
+    // wo im Bild die Huette liegt. Erst zusammen ergeben die beiden eine Lektion: der Spieler
+    // liest den Satz und lernt dabei das Symbol.
+    //
+    // Nur diese eine Ansicht, und in einem Feld, das SaveIngameSettingsValues nicht anfasst
+    // (ForceShowBQ) - siehe die Begruendung dort. Der Mausspieler merkt davon nichts, auch nicht
+    // nach einem Neustart.
+    if(opts.tabs.build)
+        view.GetView().ForceShowBQ();
     view.ClearRejection();
     return true;
 }
@@ -991,8 +1025,11 @@ bool dskGameInterface::ContextClick(const MouseCoords& mc)
         // hier nichts geht. Genau das ist der Punkt, an dem der Padpfad bewusst abweicht - er
         // hat keinen Blick auf ein leeres Fenster uebrig und antwortet stattdessen.
         const ActionOptions opts = ComputeActionOptions(view, cSel);
-        if(opts.handled)
+        if(opts.tradeWarehouse)
+        {
+            WINDOWMANAGER.Show(std::make_unique<iwTrade>(*opts.tradeWarehouse, view.GetViewer(), GAMECLIENT));
             return true;
+        }
 
         // Bisheriges Actionfenster schließen, falls es eins gab
         // aktuelle Mausposition merken, da diese durch das Schließen verändert werden kann
@@ -1083,9 +1120,11 @@ dskGameInterface::ActionOptions dskGameInterface::ComputeActionOptions(PlayerVie
                 // Allied warehouse? -> Show trade window
                 if(BuildingProperties::IsWareHouse(bt) && viewer.GetPlayer().IsAlly(building->GetPlayer()))
                 {
-                    WINDOWMANAGER.Show(std::make_unique<iwTrade>(*static_cast<const nobBaseWarehouse*>(building),
-                                                                 viewer, GAMECLIENT));
-                    out.handled = true;
+                    // NUR gemerkt, nicht gezeigt: diese Funktion laeuft seit Phase 9 einmal je
+                    // Frame und Ansicht (RefreshBrief). Ein Show() an dieser Stelle machte
+                    // daraus sechzig Handelsfenster in der Sekunde, sobald ein Spieler mit dem
+                    // Zeiger auf einem verbuendeten Lagerhaus stehenbleibt.
+                    out.tradeWarehouse = static_cast<const nobBaseWarehouse*>(building);
                     return out;
                 }
             }
@@ -1104,6 +1143,161 @@ dskGameInterface::ActionOptions dskGameInterface::ComputeActionOptions(PlayerVie
         }
     }
     return out;
+}
+
+brief::NodeVerdict dskGameInterface::JudgeNode(PlayerView& view, const MapPoint pt)
+{
+    // ZWEI Herkuenfte, und der Kommentar hat frueher nur die erste genannt ("es wird NICHTS ein
+    // zweites Mal entschieden"). Das stimmt fuer die untere Haelfte dieser Funktion und nicht
+    // fuer die obere:
+    //
+    //  - Was das Aktionsfenster ANBIETEN wuerde (Bauplatz, Flagge, Strasse), wird aus
+    //    ComputeActionOptions abgelesen und nirgends nachgerechnet. Waere es nachgerechnet,
+    //    koennte der Klartext "hier passt eine Huette" sagen, waehrend das Fenster gleich darauf
+    //    keinen Baureiter zeigt.
+    //  - Die vier Faelle darueber (Nebel, Niemandsland, fremdes Gebiet, eigenes Gebaeude)
+    //    entscheidet diese Funktion SELBST. ComputeActionOptions kennt sie nicht auseinander:
+    //    fuer Nebel und Niemandsland liefert sie dieselbe leere Auswahl, und das eigene
+    //    Gebaeude faengt OpenObjectWindow schon vor ihr ab.
+    //
+    // WAS DAS KOSTET, statt es zu verschweigen: auf FREMDEM Gebiet kann das Fenster sehr wohl
+    // etwas anbieten - ComputeActionOptions setzt tabs.attack an einem sichtbaren feindlichen
+    // Militaergebaeude, Hauptquartier oder Hafen. Der Klartext sagt dort trotzdem nur "hier
+    // kannst du nicht bauen" und schweigt vom Angriff. Das ist unvollstaendig, aber nicht
+    // falsch, und es ist die einzige bekannte Stelle, an der Text und Fenster verschieden viel
+    // wissen. Sie zu schliessen hiesse, dem Klartext einen fuenften Zweig zu geben; das gehoert
+    // in den Abschnitt ueber den Angriff und nicht in diese Phase.
+    const GameWorldViewer& viewer = view.GetViewer();
+    if(!viewer.IsOwner(pt))
+    {
+        // Reihenfolge: erst der Nebel. Wer den Knoten nie gesehen hat, weiss ueber seinen
+        // Besitzer nichts Verlaessliches - die gemerkten Daten koennen beliebig alt sein.
+        if(viewer.GetVisibility(pt) != Visibility::Visible)
+            return brief::NodeVerdict::Unexplored;
+        return viewer.GetWorld().GetNode(pt).owner == 0 ? brief::NodeVerdict::NoMansLand :
+                                                          brief::NodeVerdict::ForeignTerritory;
+    }
+    // Eigenes Gebiet. Ein eigenes Gebaeude oder eine eigene Baustelle faengt A bereits vor
+    // ComputeActionOptions ab (OpenObjectWindow), deshalb steht der Fall auch hier vorn.
+    const NodalObjectType noType = viewer.GetWorld().GetNO(pt)->GetType();
+    if(noType == NodalObjectType::Building || noType == NodalObjectType::Buildingsite)
+        return brief::NodeVerdict::OwnBuilding;
+
+    const ActionOptions opts = ComputeActionOptions(view, pt);
+    if(opts.tabs.build)
+    {
+        switch(opts.tabs.build_tabs)
+        {
+            case iwAction::BuildTab::Mine: return brief::NodeVerdict::Mine;
+            case iwAction::BuildTab::Hut: return brief::NodeVerdict::Hut;
+            case iwAction::BuildTab::House: return brief::NodeVerdict::House;
+            case iwAction::BuildTab::Castle: return brief::NodeVerdict::Castle;
+            case iwAction::BuildTab::Harbor: return brief::NodeVerdict::Harbor;
+        }
+    }
+    if(opts.tabs.flag)
+        return brief::NodeVerdict::OwnFlag;
+    if(opts.tabs.setflag)
+        return brief::NodeVerdict::FlagOnly;
+    if(opts.tabs.cutroad)
+        return brief::NodeVerdict::OwnRoad;
+    return brief::NodeVerdict::NoSpace;
+}
+
+void dskGameInterface::RefreshBrief(PlayerView& view)
+{
+    // NUR fuer Ansichten mit Pad. Der Mausspieler hat Tooltips, und die harte Randbedingung
+    // dieser Phase heisst, dass sich fuer ihn nichts aendert - kein zusaetzlicher Kasten, kein
+    // zusaetzlicher Text, kein zusaetzlicher Zeichenaufruf. Ohne angestecktes Pad ist dieser
+    // Zweig der einzige, der laeuft, und er setzt einen leeren Block.
+    if(!view.HasPadCursor())
+    {
+        view.SetBrief(brief::Brief());
+        return;
+    }
+    // Steht der Spieler in einem Fenster, ist das fokussierte Control die Frage, die er gerade
+    // stellt - nicht der Knoten unter seinem Zeiger. Das ist der Kern: die Auskunft folgt dem
+    // FOKUS, und der Fokus ist je Ansicht gefuehrt (FocusPath). Deshalb koennen vier Spieler
+    // gleichzeitig vier verschiedene Texte lesen; mit dem einen WindowManager::curTooltip
+    // waere das konstruktiv unmoeglich.
+    if(view.GetFocus().IsActive())
+    {
+        view.SetBrief(brief::ForControl(view.GetFocus().GetFocused()));
+        return;
+    }
+    // Der Strassenbau ist ein MODUS, in dem A, X und B etwas anderes tun als sonst. Ohne Ansage
+    // ist er die Sackgasse, aus der PadRejection ueberhaupt entstanden ist.
+    if(view.GetRoad().mode != RoadBuildMode::Disabled)
+    {
+        view.SetBrief(brief::ForRoadBuilding(view.GetRoad().mode == RoadBuildMode::Boat));
+        return;
+    }
+    const MapPoint pt = view.GetView().GetSelectedPt();
+    if(!pt.isValid())
+    {
+        view.SetBrief(brief::Brief());
+        return;
+    }
+    view.SetBrief(brief::ForNode(JudgeNode(view, pt)));
+}
+
+void dskGameInterface::DrawBrief(const PlayerView& view) const
+{
+    const brief::Brief& b = view.GetBrief();
+    if(b.empty())
+        return;
+    const glFont& font = *NormalFont;
+    const unsigned lineHeight = font.getHeight();
+    const Rect viewport(view.GetView().GetPos(), view.GetView().GetSize());
+    const Rect safeArea = tv::ActiveSafeAreaRect(VIDEODRIVER.GetRenderSize());
+
+    // Das Aktionsfenster DIESER Ansicht ist das einzige, das dem Kasten regelmaessig im Weg
+    // steht - es steht am Zeiger des Padspielers und ist genau dann offen, wenn der Kasten
+    // gebraucht wird. Der Zeiger ist gueltig, solange das Fenster lebt: Msg_WindowClosed setzt
+    // ihn beim Schliessen auf nullptr. Andere Fenster bleiben aussen vor; sie liegen ohnehin
+    // ueber dem Kasten und gehoeren dorthin (siehe die Begruendung am Aufruf in Msg_PaintAfter).
+    const Rect avoid = view.actionwindow ?
+                         Rect(view.actionwindow->GetDrawPos(), view.actionwindow->GetSize()) :
+                         Rect(Position(0, 0), Extent(0, 0));
+
+    // Zweimal PanelRect: die BREITE haengt nicht von der Zeilenzahl ab, die Zeilenzahl aber von
+    // der Breite (Umbruch). Erst den Kasten ohne Hoehe holen, damit umbrechen, dann den
+    // endgueltigen Kasten. Beide Aufrufe sind rein und liefern dieselbe Waagerechte - das
+    // Ausweichen aendert nur die Senkrechte, deshalb braucht die Probe das Hindernis nicht.
+    const Rect probe = brief::PanelRect(viewport, safeArea, 0, 0);
+    constexpr int textPadding = 5;
+    const auto textWidth = static_cast<unsigned short>(
+      std::max(16, static_cast<int>(probe.getSize().x) - 2 * textPadding));
+
+    std::vector<std::string> wrapped;
+    for(const std::string& line : b.lines)
+    {
+        for(std::string& part : font.GetWrapInfo(line, textWidth, textWidth).CreateSingleStrings(line))
+            wrapped.push_back(std::move(part));
+    }
+    const unsigned numLines = static_cast<unsigned>(wrapped.size()) + (b.title.empty() ? 0u : 1u);
+    if(numLines == 0)
+        return;
+
+    const Rect panel = brief::PanelRect(viewport, safeArea, numLines, lineHeight, avoid);
+    DrawRectangle(panel, 0xB4000000);
+    // Ein schmaler Streifen in der Spielerfarbe: bei vier Kaesten auf einem Fernseher ist das
+    // der schnellste Weg zu erkennen, welcher der eigene ist. Dieselbe Farbe traegt schon der
+    // Fokusrahmen (ClearFocusRing/AddFocusRing).
+    const unsigned playerColor = worldViewer.GetWorld().GetPlayer(view.GetPlayerId()).color;
+    DrawRectangle(Rect(panel.getOrigin(), Extent(2, panel.getSize().y)), playerColor);
+
+    DrawPoint textPos = panel.getOrigin() + DrawPoint(textPadding, 3);
+    if(!b.title.empty())
+    {
+        font.Draw(textPos, b.title, FontStyle{}, COLOR_YELLOW);
+        textPos.y += static_cast<int>(lineHeight);
+    }
+    for(const std::string& line : wrapped)
+    {
+        font.Draw(textPos, line, FontStyle{}, COLOR_WHITE);
+        textPos.y += static_cast<int>(lineHeight);
+    }
 }
 
 bool dskGameInterface::Msg_LeftDown(const MouseCoords& mc)
@@ -1593,6 +1787,13 @@ void dskGameInterface::UpdateInput(const unsigned elapsedMs, const Position& mou
     // Erst JETZT, denn eine Padaktion wirkt auf GetSelectedPt() - der Punkt muss aus dem
     // fortgeschriebenen Zeiger dieses Frames stammen und nicht aus dem des vorigen.
     padRouter_.DispatchButtons(*this);
+
+    // --- 4. Klartext ------------------------------------------------------------------------
+    // GANZ zum Schluss, aus demselben Grund wie Schritt 3: ein A-Druck kann in diesem Frame ein
+    // Fenster geoeffnet, den Fokus gesetzt oder den Strassenbau gestartet haben. Der Text muss
+    // den Zustand NACH der Eingabe beschreiben, sonst haengt er dem Spieler um einen Frame
+    // hinterher - bei 110 ms Wiederholrate der Fokusnavigation waere das sichtbar.
+    forEachView([this](PlayerView& view) { RefreshBrief(view); });
 }
 
 void dskGameInterface::OnPadAssigned(const unsigned slot, const bool assigned)
@@ -1713,6 +1914,23 @@ void dskGameInterface::OnPadZoom(const unsigned slot, const float step)
     gameView.SetZoomFactorAt(target, view.HasPadCursor() ? view.GetPadCursor() : view.GetViewCenter());
 }
 
+PadRejection dskGameInterface::NothingHereReason(PlayerView& view)
+{
+    const MapPoint pt = view.GetView().GetSelectedPt();
+    if(!pt.isValid())
+        return PadRejection::NothingHere;
+    // Derselbe Grund, den auch der Klartext unter der Ansicht nennt - eine Rechnung, zwei
+    // Ausgaenge. Saehe der Spieler hier einen anderen Satz als dort, waere einer von beiden
+    // falsch, und niemand wuesste welcher.
+    switch(JudgeNode(view, pt))
+    {
+        case brief::NodeVerdict::Unexplored: return PadRejection::Unexplored;
+        case brief::NodeVerdict::NoMansLand: return PadRejection::NoMansLand;
+        case brief::NodeVerdict::ForeignTerritory: return PadRejection::ForeignTerritory;
+        default: return PadRejection::NothingHere;
+    }
+}
+
 void dskGameInterface::PadReject(PlayerView& view, const PadRejection reason)
 {
     const bool isNew = view.NoteRejection(reason);
@@ -1730,7 +1948,21 @@ void dskGameInterface::PadReject(PlayerView& view, const PadRejection reason)
         case PadRejection::RoadNoWay: text = _("No road can be built to that point."); break;
         case PadRejection::RoadOutsideTerritory: text = _("You cannot build outside your own territory."); break;
         case PadRejection::RoadEndBlocked: text = _("A road has to end where a flag can stand."); break;
-        case PadRejection::NothingHere: text = _("Nothing can be done here."); break;
+        // Die vier Faelle darunter waren bis Phase 9 EIN Satz. Der Auftraggeber hat nach seinem
+        // ersten Spieltest genau das benannt: er wusste nicht, "wann Flagge und wann Gebaeude
+        // kommt" - und die Antwort des Spiels darauf war ein Satz, der zu jeder Ursache gleich
+        // gut passte und aus dem sich deshalb keine einzige Handlung ableiten liess.
+        case PadRejection::NothingHere:
+            text = _("Nothing fits on this spot - not even a flag. Move on a field or two.");
+            break;
+        case PadRejection::Unexplored:
+            text = _("You have never seen this place. Send out a scout from one of your flags.");
+            break;
+        case PadRejection::NoMansLand:
+            text = _("This ground belongs to nobody. Build a guard post towards it and your border will "
+                     "grow over it.");
+            break;
+        case PadRejection::ForeignTerritory: text = _("This land belongs to another player."); break;
     }
     messenger.AddMessage(worldViewer.GetWorld().GetPlayer(view.GetPlayerId()).name,
                          worldViewer.GetWorld().GetPlayer(view.GetPlayerId()).color, ChatDestination::System, text,
@@ -1808,7 +2040,7 @@ void dskGameInterface::OnPadButton(const unsigned slot, const PadButton button, 
                 PadExtendRoad(view);
             else if(!PadOpenWindow(view) && !PadStartRoad(view, /*waterRoad*/ false)
                     && !PadOpenActionWindow(view))
-                PadReject(view, PadRejection::NothingHere);
+                PadReject(view, NothingHereReason(view));
             break;
         // X setzt eine Flagge, bewusst als Ausnahme von der Regel darueber und bewusst NICHT
         // auf A: die Flagge ist das einzige Primitiv ohne Kosten - sie laesst sich im eigenen
@@ -1884,7 +2116,7 @@ void dskGameInterface::OnPadButton(const unsigned slot, const PadButton button, 
         // bei A, X und B auch.
         case PadButton::RightShoulder:
             if(!inRoadMode && !PadOpenActionWindow(view))
-                PadReject(view, PadRejection::NothingHere);
+                PadReject(view, NothingHereReason(view));
             break;
         // Der Wasserweg bekommt einen eigenen Knopf statt einer zweiten Bedeutung von A.
         // Grund: an einer Wasserflagge bietet iwAction BEIDE Wege an (iwAction.cpp, Knopf 1 und

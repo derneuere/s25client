@@ -88,6 +88,20 @@ struct MenuPadAcceptanceFixture : rttr::test::LocalGameFixture, rttr::test::Menu
 /// Das ist LESEN, keine Eingabe: der Test schaut auf den Bildschirm, um zu wissen, wie oft er
 /// nach unten druecken muss - genau das, was ein Mensch auch tut. Die Auswahl selbst entsteht
 /// danach ausschliesslich aus Padereignissen.
+///
+/// DIE SPIELERZAHL STEHT NICHT IMMER VORN. Die Spalte ist ein UEBERSETZTER Satz: dskSelectMap
+/// baut sie als boost::format(_("%d Player")) (dskSelectMap.cpp:442), und wo in diesem Satz die
+/// Zahl steht, entscheidet der Katalog. Frueher las dieser Helfer players[0]; das gilt fuer
+/// Englisch und Deutsch und nicht fuer Polnisch. Gemessen an derselben Binaerdatei:
+///
+///     LC_ALL=pl_PL.UTF-8 ./Test_splitscreen.exe --run_test="MenuPadAcceptanceTests/*"
+///     testMenuPadAcceptance.cpp(160): fatal error: critical check !!targetRow has failed
+///     *** 2 failures are detected
+///
+/// Der Helfer fand dort keine einzige taugliche Karte, und beide Abnahmefaelle dieser Datei -
+/// das Abnahmekriterium der Phase - brachen ab. Gesucht wird deshalb die erste Ziffernfolge,
+/// wo immer sie steht, und sie wird als ZAHL gelesen (nicht als erstes Zeichen: "12 Player"
+/// waere sonst zu wenig Spieler).
 std::optional<unsigned> findSplitscreenCapableRow(const ctrlTable& table)
 {
     for(unsigned short row = 0; row < table.GetNumRows(); ++row)
@@ -96,7 +110,13 @@ std::optional<unsigned> findSplitscreenCapableRow(const ctrlTable& table)
         if(name.find("(*)") != std::string::npos)
             continue; // Karte mit Lua-Skript
         const std::string& players = table.GetItemText(row, 2);
-        if(!players.empty() && players[0] >= '2' && players[0] <= '9')
+        const size_t begin = players.find_first_of("0123456789");
+        if(begin == std::string::npos)
+            continue;
+        unsigned numPlayers = 0;
+        for(size_t i = begin; i < players.size() && players[i] >= '0' && players[i] <= '9'; ++i)
+            numPlayers = numPlayers * 10u + static_cast<unsigned>(players[i] - '0');
+        if(numPlayers >= 2)
             return static_cast<unsigned>(row);
     }
     return std::nullopt;

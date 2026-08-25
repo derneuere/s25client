@@ -11,6 +11,7 @@
 #include "desktops/dskGameInterface.h"
 #include "driver/PadEvent.h"
 #include "drivers/VideoDriverWrapper.h"
+#include "NWFInfo.h"
 #include "network/GameClient.h"
 #include "nodeObjs/noFlag.h"
 #include "input/PadRouter.h"
@@ -330,16 +331,33 @@ void padSteerTo(PadFeeder& pads, dskGameInterface& dsk, const GameWorldBase& wor
 
 /// Legt die im Produktivcode geschuetzten Eingabepfade offen.
 ///
-/// Msg_PaintBefore/-After sind bewusst leer: sie rufen Run(), und Run() zeichnet ueber
+/// Msg_PaintBefore/-After sind VOREINGESTELLT still: sie rufen Run(), und Run() zeichnet ueber
 /// GameWorldView::Draw -> TerrainRenderer::Draw, das ohne geladene S2-Texturen nicht arbeitet.
 /// Genau deshalb liegt die gesamte Eingabelogik in dskGameInterface::UpdateInput, das oeffentlich
 /// und GL-frei ist (das ist die Erledigung von P1).
+///
+/// Voreingestellt still heisst aber nicht unerreichbar: `paintForReal` schaltet auf die ECHTEN
+/// Ruempfe der Basis um. Das ist die Antwort auf den Befund, dass die VERDRAHTUNG des
+/// Zeichenwegs sonst in der ganzen Suite unbewacht bliebe - kein Testfall belegte, dass
+/// Msg_PaintBefore wirklich zu UpdateInput fuehrt und Msg_PaintAfter wirklich zu DrawBrief. Wer
+/// den Schalter umlegt, uebernimmt die Verantwortung fuer die geladenen Bilder; die Dummy-GUI-
+/// und -Kartendateien reichen (uiHelper::initGUITests, LOADER.LoadDummyMapFiles), der
+/// Renderer ist ohnehin der DummyRenderer.
 struct TestableGameInterface : dskGameInterface
 {
     using dskGameInterface::dskGameInterface;
 
-    void Msg_PaintBefore() override {}
-    void Msg_PaintAfter() override {}
+    bool paintForReal = false;
+    void Msg_PaintBefore() override
+    {
+        if(paintForReal)
+            dskGameInterface::Msg_PaintBefore();
+    }
+    void Msg_PaintAfter() override
+    {
+        if(paintForReal)
+            dskGameInterface::Msg_PaintAfter();
+    }
 
     using dskGameInterface::ContextClick;
     using dskGameInterface::Msg_KeyDown;
@@ -353,6 +371,18 @@ struct TestableGameInterface : dskGameInterface
     using dskGameInterface::Msg_WindowClosed;
     using dskGameInterface::PadPlaceFlag;
 };
+
+/// Eine LEERE, aber vorhandene NWF-Auskunft fuer die Fixtures ohne laufende Partie.
+///
+/// Frueher stand dort ein Nullzeiger. Das fiel nie auf, weil die einzige Lesestelle in
+/// dskGameInterface::Msg_PaintAfter liegt (die Schnecken der laggenden Spieler) und
+/// Msg_PaintAfter in Tests still war. Genau diese Stille soll jetzt aufhoerbar sein - also
+/// braucht es hier ein Objekt statt eines Nullzeigers. Ohne Spieler darin laeuft die Schleife
+/// null Mal; am Verhalten aller uebrigen Faelle aendert sich damit nichts.
+inline std::shared_ptr<const NWFInfo> emptyNwfInfo()
+{
+    return std::make_shared<const NWFInfo>();
+}
 
 /// Ein echtes dskGameInterface mit N Ansichten auf einer Welt OHNE laufende Partie.
 ///
@@ -393,7 +423,7 @@ struct PadViewFixture : uiHelper::Fixture
             additional.push_back(i);
         GAMECLIENT.SetAdditionalLocalPlayers(additional);
 
-        dsk = std::make_unique<TestableGameInterface>(worldFixture.game, std::shared_ptr<const NWFInfo>(), 0u,
+        dsk = std::make_unique<TestableGameInterface>(worldFixture.game, emptyNwfInfo(), 0u,
                                                       /*initOGL*/ false);
         BOOST_TEST_REQUIRE(dsk->GetNumViews() == T_numViews);
     }
@@ -418,7 +448,7 @@ struct PadViewFixture : uiHelper::Fixture
     {
         dsk.reset();
         worldFixture.world.SetGameInterface(nullptr);
-        dsk = std::make_unique<TestableGameInterface>(worldFixture.game, std::shared_ptr<const NWFInfo>(), 0u,
+        dsk = std::make_unique<TestableGameInterface>(worldFixture.game, emptyNwfInfo(), 0u,
                                                       /*initOGL*/ false);
         BOOST_TEST_REQUIRE(dsk->GetNumViews() == T_numViews);
     }

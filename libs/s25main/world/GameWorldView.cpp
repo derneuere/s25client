@@ -263,7 +263,7 @@ void GameWorldView::Draw(const RoadBuildState& rb, const MapPoint selected, bool
                 DrawMovingFiguresFromBelow(terrainRenderer, Position(x, y), objsBetweenRows);
                 DrawFigures(curPt, curPos, objsBetweenRows);
 
-                if(show_bq)
+                if(IsShowingBQ())
                     DrawConstructionAid(curPt, curPos);
                 if(resourceRevealMode != Cheats::ResourceRevealMode::Nothing)
                     DrawResource(curPt, curPos, resourceRevealMode);
@@ -688,8 +688,21 @@ void GameWorldView::DrawResource(const MapPoint& pt, DrawPoint curPos, const Che
 
 void GameWorldView::ToggleShowBQ()
 {
-    show_bq = !show_bq;
+    // Gegen den SICHTBAREN Zustand gekippt, nicht gegen das gespeicherte Feld: sieht der Mensch
+    // die Bauhilfe (weil sie erzwungen ist) und drueckt auf "aus", muss sie ausgehen. Der Zwang
+    // faellt dabei weg - ein ausdruecklicher Wille schlaegt eine Bequemlichkeitsvorgabe.
+    show_bq = !IsShowingBQ();
+    forcedShowBQ_ = false;
     SaveIngameSettingsValues();
+    onHudSettingsChanged();
+}
+
+void GameWorldView::ForceShowBQ()
+{
+    if(forcedShowBQ_)
+        return;
+    forcedShowBQ_ = true;
+    // BEWUSST OHNE SaveIngameSettingsValues() - siehe die Begruendung an der Deklaration.
     onHudSettingsChanged();
 }
 
@@ -719,7 +732,11 @@ void GameWorldView::ToggleShowNamesAndProductivity()
 
 void GameWorldView::CopyHudSettingsTo(GameWorldView& other, bool copyBQ) const
 {
+    // Beide Bauhilfe-Felder gehen denselben Weg, sonst koennte der Zwang ueber eine Kopie in
+    // eine Ansicht sickern, deren SaveIngameSettingsValues ihn dann doch in die ini schriebe.
+    // Der einzige Aufrufer (iwObservate) uebergibt copyBQ == false, dort ist beides aus.
     other.show_bq = (copyBQ ? show_bq : false);
+    other.forcedShowBQ_ = (copyBQ ? forcedShowBQ_ : false);
     other.show_names = show_names;
     other.show_productivity = show_productivity;
 }

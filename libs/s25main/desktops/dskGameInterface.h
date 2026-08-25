@@ -40,6 +40,7 @@ struct KeyEvent;
 class NWFInfo;
 class GameWorldBase;
 class GameCommandFactory;
+class nobBaseWarehouse;
 
 class dskGameInterface :
     public Desktop,
@@ -187,9 +188,17 @@ public:
     {
         iwAction::Tabs tabs;
         bool enableMilitaryBuildings = false;
-        /// Statt eines Aktionsfensters wurde bereits ein ANDERES gezeigt (das Handelsfenster
-        /// am verbuendeten Lagerhaus). Der Aufrufer ist dann fertig.
-        bool handled = false;
+        /// Verbuendetes Lagerhaus unter dem Zeiger: dort gibt es statt eines Aktionsfensters
+        /// das HANDELSfenster.
+        ///
+        /// Frueher hiess dieses Feld `handled` und ComputeActionOptions zeigte das Fenster
+        /// selbst. Das ging, solange die Funktion ausschliesslich aus einem KLICK heraus lief.
+        /// Seit der Klartext je Frame und Ansicht ausgerechnet wird (RefreshBrief), laeuft sie
+        /// einmal pro Bild - und eine Funktion, die dabei ein Fenster oeffnet, oeffnet es
+        /// sechzig Mal in der Sekunde. Das Zeigen gehoert deshalb zum Aufrufer, der als
+        /// einziger weiss, dass gerade wirklich gedrueckt wurde; die Rechnung selbst ist jetzt
+        /// nebenwirkungsfrei und darf beliebig oft laufen.
+        const nobBaseWarehouse* tradeWarehouse = nullptr;
         /// Bietet dieses Fenster ueberhaupt eine HANDLUNG an - also mehr als den Reiter
         /// "Anzeigeoptionen", den ContextClick unbedingt setzt?
         ///
@@ -199,8 +208,17 @@ public:
         /// aus wie ein totes Pad.
         bool hasAction() const;
     };
-    /// Berechnet obiges fuer DIESE Ansicht. Nicht const: der Handelsfall zeigt ein Fenster.
+    /// Berechnet obiges fuer DIESE Ansicht. NEBENWIRKUNGSFREI - siehe tradeWarehouse.
     ActionOptions ComputeActionOptions(PlayerView& view, MapPoint cSel);
+
+    /// Was dieser Knoten fuer DIESE Ansicht hergibt, als benannter Grund statt als bool.
+    ///
+    /// Alles, was das Aktionsfenster anbieten koennte, ist aus ComputeActionOptions abgeleitet
+    /// und NICHT unabhaengig gerechnet: sonst koennte der Klartext etwas anderes behaupten, als
+    /// das Fenster gleich anbietet. Die vier Faelle, in denen es NICHTS anzubieten gibt
+    /// (Nebel, Niemandsland, fremdes Gebiet, eigenes Gebaeude), rechnet diese Funktion selbst -
+    /// ComputeActionOptions unterscheidet sie nicht. Naeheres am Rumpf und an brief::NodeVerdict.
+    brief::NodeVerdict JudgeNode(PlayerView& view, MapPoint pt);
 
     const GameWorldView& GetView() const { return gwv; }
 
@@ -353,6 +371,20 @@ public:
     bool EnterTopMostWindow(PlayerView& view);
     /// Fokus dieser Ansicht aufloesen und den Rahmen am uebergebenen Wurzelfenster abmelden.
     void ClearFocusRing(PlayerView& view, Window* root);
+
+    /// Rechnet den Klartext DIESER Ansicht neu. Im Produktivcode die einzige Schreibstelle von
+    /// PlayerView::SetBrief, gerufen einmal je Frame und Ansicht am Ende von UpdateInput -
+    /// also nachdem der Fokus dieses Frames feststeht.
+    void RefreshBrief(PlayerView& view);
+    /// ... und die einzige Lesestelle.
+    ///
+    /// Was ein Nachweis in PlayerView::GetBrief() liest, ist damit die QUELLE dessen, was hier
+    /// gezeichnet wird - nicht Zeichen fuer Zeichen dasselbe. Dazwischen liegt der Umbruch
+    /// (glFont::GetWrapInfo auf die Kastenbreite), und bei leerem Block wird gar nichts
+    /// gezeichnet. Ein Nachweis ueber GetBrief() belegt also den TEXT, nicht die Pixel; was
+    /// wirklich am Fernseher steht, kann keiner der Faelle sehen (der DummyRenderer verwirft
+    /// jeden Zeichenaufruf).
+    void DrawBrief(const PlayerView& view) const;
     /// Dasselbe fuer die AKTUELLE Wurzel dieser Ansicht. Nach dem Aufruf steht dieser Spieler
     /// wieder in der Welt.
     void ReleaseFocus(PlayerView& view);
@@ -523,6 +555,9 @@ protected:
     /// Postfach (eine Nachricht mit Umschlag und Taube fuer "nochmal druecken" waere aus jedem
     /// Verhaeltnis).
     void PadReject(PlayerView& view, PadRejection reason);
+    /// Warum ein A auf dem Knoten unter dem Zeiger nichts bewirkt hat - der Grund statt des
+    /// Sammelsatzes "Nothing can be done here.".
+    PadRejection NothingHereReason(PlayerView& view);
 
     /// Setzt das globale Zeigerbild nach dem Strassenbauzustand DIESER Ansicht - aber nur,
     /// wenn sie die Hauptansicht ist. Es gibt genau EINEN Mauszeiger; ein Padspieler in
