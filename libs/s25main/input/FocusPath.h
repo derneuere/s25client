@@ -71,8 +71,11 @@ public:
     /// Fensterliste, ohne Msg_WindowClosed zu rufen).
     void OnRootDestroyed(const Window* wnd)
     {
+        // Bewusst NICHT Clear(): das benachrichtigt das fokussierte Control
+        // (Window::OnFocusLost) und muesste dafuer die Kette durch eine Wurzel aufloesen, die
+        // gerade zerfaellt.
         if(root_ == wnd)
-            Clear();
+            ClearSilently();
     }
 
     /// Aufgeloestes Blatt oder nullptr, wenn die Kette gerissen ist.
@@ -83,7 +86,13 @@ public:
     bool FocusCtrl(Window* ctrl);
     /// Erstes fokussierbares Control der Wurzel.
     bool FocusFirst();
+    /// Fokus aufloesen und dem Blatt Bescheid geben (Window::OnFocusLost). Nur benutzen,
+    /// solange die Wurzel noch LEBT.
     void Clear();
+    /// Wurzel und Pfad vergessen, OHNE das Blatt anzufassen. Genau dafuer, wenn die Wurzel
+    /// schon zerfallen ist: WindowManager::DoDesktopSwitch raeumt die Fensterliste, bevor er
+    /// die Padnavigation abmeldet - ein Clear() wuerde dort in eine geloeschte Wurzel greifen.
+    void ClearSilently();
 
     /// Alle fokussierbaren Controls unterhalb der Wurzel, in ID-Reihenfolge, mit Abstieg in
     /// Container, die selbst nicht fokussierbar sind (ctrlGroup, ctrlOptionGroup, ctrlTab).
@@ -98,6 +107,12 @@ public:
 
     /// A-Knopf: Window::Activate() auf dem Blatt. false, wenn nichts fokussiert ist.
     bool Activate();
+
+    /// B-Knopf, ERSTE Frage: hat das fokussierte Control eine begonnene Eingabe, die es selbst
+    /// verwerfen will (Window::CancelInput)? true = verbraucht, der Aufrufer macht mit B nichts
+    /// weiter. Ohne diese Frage waere B ueber einer aufgeklappten Liste "Fenster zu", und die
+    /// halb getroffene Auswahl stuende ungefragt.
+    bool Cancel();
 
     /// Stickweg dieses Spielers in View-Pixeln. Sammelt bis zur Rasterweite und schiebt dann
     /// GENAU EINEN Schritt, danach mit Wiederholrate.
@@ -116,6 +131,9 @@ private:
     /// Schritt als Wertaenderung verbraucht (Fortschrittsbalken, Scrollleiste, Liste), sonst
     /// wandert der Fokus.
     bool Step(const Position& dir);
+
+    /// Neues Blatt setzen und dem alten Bescheid geben, dass es den Fokus verliert.
+    void SetPath(std::vector<unsigned> newPath);
 
     Window* root_ = nullptr;
     std::vector<unsigned> path_;

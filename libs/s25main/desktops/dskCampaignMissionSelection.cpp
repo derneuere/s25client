@@ -110,6 +110,23 @@ dskCampaignMissionSelection::dskCampaignMissionSelection(CreateServerInfo csi, c
     }
 }
 
+bool dskCampaignMissionSelection::Msg_PadCommand(unsigned, const PadButton button)
+{
+    if(button != PadButton::B)
+        return false;
+    WINDOWMANAGER.Switch(std::make_unique<dskCampaignSelection>(csi_));
+    return true;
+}
+
+Window* dskCampaignMissionSelection::GetPadEntryCtrl(unsigned)
+{
+    if(campaign_->selectionMapData)
+        return GetCtrl<ctrlMapSelection>(ID_MapSelection);
+    if(auto* group = GetCtrl<ctrlGroup>(ID_FirstPageGrp + currentPage_))
+        return group->GetCtrl<Window>(0);
+    return nullptr;
+}
+
 void dskCampaignMissionSelection::UpdateMissionPage()
 {
     // Hide all groups

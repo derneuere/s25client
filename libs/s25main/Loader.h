@@ -92,6 +92,16 @@ public:
     /// (es dereferenziert das Suchergebnis ungeprueft) und mit ihm jeder Bildschirm, der eine
     /// Sprachliste zeigt - dskOptions.
     void LoadDummyLanguageFiles();
+    /// Ersatzbilder fuer ctrlMapSelection unter der Ressource "selmap": Hintergrund, Karte,
+    /// Missionsmaske, Marke und Erobert-Symbol, alle gleich gross und leer.
+    ///
+    /// Die echten Bilder einer Auswahlkarte (WORLD.LBM, WORLDMSK.LBM, SETUP990.LBM) liegen in
+    /// den ORIGINALEN S2-Daten und nicht im Repository. Ohne diesen Ersatz waere die
+    /// Fokusnavigation auf der Weltkarte einer Kampagne auf keinem Rechner ohne
+    /// S2-Installation pruefbar - und genau dort lag die Sackgasse, die diese Phase behebt.
+    /// Die Maske bleibt bewusst einfarbig: ctrlMapSelection::StepValue liest sie nicht, es
+    /// rechnet ausschliesslich mit den Ankerpositionen der Missionen.
+    void LoadDummyMapSelectionFiles();
     /// Load a file and save it into the loader repo
     bool Load(const boost::filesystem::path& path, const libsiedler2::ArchivItem_Palette* palette = nullptr);
     bool Load(const ResourceId& resId, const libsiedler2::ArchivItem_Palette* palette = nullptr);

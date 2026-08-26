@@ -77,6 +77,12 @@ public:
     /// dskSelectMap/dskLAN/dskLobby muessen fuer den Maus-und-Tastatur-Spieler unveraendert
     /// funktionieren.
     bool CanFocus() const override { return GetNumRows() > 0 && IsVisible(); }
+    /// Eine LEERE Tabelle nimmt keinen Fokus an (CanFocus verlangt Zeilen) - ohne diese Zeile
+    /// stiege die Fokussammlung dann in sie hinein und machte ihre SORTIERKOEPFE zu
+    /// Fokusstationen. In dskCampaignSelection ist eine dieser Spalten 0 breit; der Fokus
+    /// verschwaende dort fuer den Spieler sichtbar im Nichts, weil FocusPath::DrawRing bei
+    /// leerem Rechteck nichts zeichnet.
+    bool IsFocusLeaf() const override { return true; }
     bool Activate() override;
     bool StepValue(const Position& dir) override;
     std::optional<ValueRange> GetValueRange() const override;

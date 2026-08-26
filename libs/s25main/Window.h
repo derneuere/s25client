@@ -116,6 +116,29 @@ public:
     /// Kann dieses Control den Fokus eines Eingabegeraets annehmen?
     virtual bool CanFocus() const { return false; }
 
+    /// Steigt die Fokussammlung in die KINDER dieses Controls ab, solange es selbst keinen
+    /// Fokus annehmen kann? Vorgabe: ja - genau daran haengen ctrlGroup, ctrlOptionGroup und
+    /// ctrlTab, die selbst nie fokussierbar sind.
+    ///
+    /// false heisst "Blatt, auch wenn gerade nicht fokussierbar". Eine LEERE Tabelle braucht
+    /// das: sie kann selbst keinen Fokus annehmen (CanFocus verlangt Zeilen), und ohne diese
+    /// Bremse wuerden ihre SORTIERKOEPFE zu Fokusstationen - darunter in dskCampaignSelection
+    /// eine Spalte der Breite 0, um die kein Rahmen zu sehen ist (FocusPath::DrawRing steigt
+    /// bei leerem Rechteck aus). Der Fokus verschwaende dort sichtbar im Nichts.
+    virtual bool IsFocusLeaf() const { return CanFocus(); }
+
+    /// B-Knopf auf dem FOKUSSIERTEN Control: eine begonnene, noch nicht bestaetigte Eingabe
+    /// verwerfen - eine aufgeklappte Liste zuklappen und den alten Wert stehen lassen.
+    /// true = verbraucht; der Aufrufer schliesst dann NICHT das Fenster (MenuPadInput).
+    /// Die Vorgabe tut nichts, also bleibt B ueberall sonst genau das, was es war.
+    virtual bool CancelInput() { return false; }
+
+    /// Der Fokus VERLAESST dieses Control. Ein Ereignis, kein Zustand: das Control merkt sich
+    /// nichts ueber den Fokus und weiss weiterhin nicht, wer ihn hatte. Gebraucht wird es von
+    /// Controls, die waehrend der Bedienung etwas AUFGEKLAPPT haben - laeuft der Fokus weiter,
+    /// muss das wieder zu, sonst bleibt eine offene Liste samt gesperrter Region stehen.
+    virtual void OnFocusLost() {}
+
     /// "Benutzen" - genau die Wirkung, die heute der Mausklick hat, aber OHNE Mausposition.
     /// Bewusst nicht ueber Msg_LeftUp: das prueft IsMouseOver(mc) (controls/ctrlButton.cpp) und
     /// liest damit den globalen Maus-Singleton, von dem es nur einen gibt.

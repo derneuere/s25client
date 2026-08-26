@@ -72,6 +72,12 @@ public:
     /// meldet es beim Desktopwechsel und beim Schliessen eines Fensters.
     void OnRootDestroyed(const Window* wnd);
     /// Fokus aller Slots loeschen (der Geraetebestand bleibt).
+    ///
+    /// STILL, ohne Window::OnFocusLost: der einzige Aufrufer im Spiel ist
+    /// WindowManager::DoDesktopSwitch, und der raeumt die Fensterliste BEVOR er hier
+    /// hereinkommt. Die Wurzel eines Slots kann also bereits geloescht sein. Wer ein Control
+    /// beim Fokusverlust benachrichtigen will, macht das ueber FocusPath::Clear - dort lebt
+    /// die Wurzel noch.
     void ClearFocus();
     /// Alles vergessen, auch den Geraetebestand. Nur fuer WindowManager::CleanUp und fuer
     /// Tests, die einen frischen Prozesszustand brauchen.
@@ -96,6 +102,16 @@ private:
     /// Bewusst frameweit und nicht knopfweit: die Uebernahme kann auch durch einen Stick
     /// geschehen, und dann darf kein gleichzeitig gedrueckter Knopf durchrutschen.
     std::array<bool, MaxSlots> swallowFrame_{};
+    /// Hat der Spieler seit dem letzten ResetFocus SELBST navigiert?
+    ///
+    /// Solange nicht, darf der Einstiegspunkt der Wurzel (Window::GetPadEntryCtrl) noch
+    /// nachziehen. dskCampaignSelection braucht das: seine Tabelle entsteht erst aus einem
+    /// 1ms-Timer (dskCampaignSelection.cpp), also NACH dem Wurzelwechsel. Waere der Einstieg
+    /// einmalig, saesse der Fokus fuer immer auf "Zurueck" - und weil "Zurueck" die groesste
+    /// Id des Bildschirms hat, fuehrte von dort nicht einmal die Schultertaste vorwaerts zur
+    /// Tabelle. Sobald der Spieler einen Knopf drueckt oder den Stick bewegt, ist Schluss
+    /// damit: ab dann steht der Fokus, wo er ihn hingestellt hat.
+    std::array<bool, MaxSlots> focusUntouched_{};
 
     Window* root_ = nullptr;
     Desktop* desktop_ = nullptr;

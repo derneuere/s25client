@@ -141,6 +141,81 @@ bool ctrlMapSelection::Msg_LeftUp(const MouseCoords& mc)
     return false;
 }
 
+bool ctrlMapSelection::StepValue(const Position& dir)
+{
+    if(preview || dir == Position(0, 0) || inputData.missionSelectionInfos.empty())
+        return false;
+
+    const auto isPlayable = [this](size_t idx) {
+        return idx < missionStatus.size() && missionStatus[idx].playable;
+    };
+
+    const auto current = getSelection();
+    int best = -1;
+    if(!current)
+    {
+        // Noch keine Marke auf der Karte: der erste Schritt setzt sie auf die erste spielbare
+        // Mission, statt ins Leere zu laufen. Erst danach wird geometrisch navigiert.
+        for(size_t i = 0; i < inputData.missionSelectionInfos.size(); ++i)
+        {
+            if(isPlayable(i))
+            {
+                best = static_cast<int>(i);
+                break;
+            }
+        }
+    } else
+    {
+        // Dieselbe Kostenfunktion wie FocusPath::Move: naechster Anker im gewuenschten
+        // Halbraum, Querabweichung wiegt dreifach. Damit fuehlt sich die Karte an wie jede
+        // andere Fokusbewegung, obwohl die Marken nicht auf einem Raster liegen.
+        const Position from = inputData.missionSelectionInfos[*current].ankerPos;
+        long bestCost = 0;
+        for(size_t i = 0; i < inputData.missionSelectionInfos.size(); ++i)
+        {
+            if(i == *current || !isPlayable(i))
+                continue;
+            const Position to = inputData.missionSelectionInfos[i].ankerPos;
+            long along;
+            long across;
+            if(dir.x < 0)
+            {
+                along = from.x - to.x;
+                across = to.y - from.y;
+            } else if(dir.x > 0)
+            {
+                along = to.x - from.x;
+                across = to.y - from.y;
+            } else if(dir.y < 0)
+            {
+                along = from.y - to.y;
+                across = to.x - from.x;
+            } else
+            {
+                along = to.y - from.y;
+                across = to.x - from.x;
+            }
+            if(along <= 0)
+                continue; // nicht im gewuenschten Halbraum
+            const long cost = along + 3 * std::abs(across);
+            if(best < 0 || cost < bestCost)
+            {
+                best = static_cast<int>(i);
+                bestCost = cost;
+            }
+        }
+    }
+
+    if(best < 0)
+        return false; // in dieser Richtung liegt nichts - der Fokus wandert normal weiter
+
+    setSelection(static_cast<size_t>(best));
+    // Dieselbe Meldung wie im Mauspfad (Msg_LeftUp). Ohne sie zieht
+    // dskCampaignMissionSelection den Startknopf nicht scharf.
+    GetParent()->Msg_ButtonClick(GetID());
+    return true;
+}
+
 bool ctrlMapSelection::Activate()
 {
     if(!IsVisible() || !GetParent() || !getSelection())

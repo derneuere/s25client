@@ -34,8 +34,22 @@ public:
 
     bool Msg_LeftUp(const MouseCoords& mc) override;
 
-    bool CanFocus() const override { return IsVisible() && getSelection().has_value(); }
+    /// Fokusnavigation.
+    ///
+    /// CanFocus haengt AUSDRUECKLICH NICHT an einer bestehenden Auswahl. Genau das war die
+    /// Sackgasse der Weltkampagne: eine Auswahl entstand nur aus Msg_LeftUp (Pixelfarbe unter
+    /// dem Mauszeiger), also konnte ein Pad die Karte nie fokussieren, und ohne Auswahl blieb
+    /// auch "Start" deaktiviert und damit ebenfalls unfokussierbar. Der Bildschirm hatte fuer
+    /// ein Pad genau eine Station: "Zurueck".
+    ///
+    /// Die VORSCHAU (dskCampaignSelection) bleibt aussen vor - dort ist die Karte ein Bild und
+    /// kein Bedienelement, sie nimmt auch mit der Maus keine Auswahl an.
+    bool CanFocus() const override
+    {
+        return IsVisible() && !preview && !inputData.missionSelectionInfos.empty();
+    }
     bool Activate() override;
+    bool StepValue(const Position& dir) override;
 
 protected:
     void Draw_() override;

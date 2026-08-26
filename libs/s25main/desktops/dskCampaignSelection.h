@@ -17,6 +17,18 @@ public:
     dskCampaignSelection(CreateServerInfo csi);
     ~dskCampaignSelection() noexcept;
 
+    /// Die Kampagnenauswahl liegt mitten auf dem Weg in eine Partie und war bisher der einzige
+    /// Bildschirm dieses Weges, den der WindowManager gar nicht erst mit Padereignissen
+    /// versorgte (WindowManager::PumpPadInput fragt WantsPadInput). Wer mit dem Pad hierher
+    /// kam, kam mit dem Pad nicht mehr weiter.
+    bool WantsPadInput() const override { return true; }
+    /// B ist derselbe Zweig wie der Knopf "Zurueck".
+    bool Msg_PadCommand(unsigned slot, PadButton button) override;
+    /// Ein Pad faengt auf der Kampagnentabelle an und nicht auf "Zurueck". Die Tabelle
+    /// entsteht erst aus dem Timer unten, deshalb darf der Einstieg nachziehen
+    /// (MenuPadInput::focusUntouched_).
+    Window* GetPadEntryCtrl(unsigned slot) override;
+
 protected:
     void Draw_() override;
 

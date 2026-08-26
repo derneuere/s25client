@@ -47,6 +47,20 @@ void MenuPadInput::Pump(const std::vector<PadEvent>& events, const unsigned elap
             ResetFocus(slot);
     }
 
+    // Der Einstiegspunkt zieht nach, solange der Spieler noch nicht selbst navigiert hat -
+    // siehe focusUntouched_ in MenuPadInput.h.
+    if(root_)
+    {
+        for(unsigned slot = 0; slot < MaxSlots; ++slot)
+        {
+            if(!hasDevice_[slot] || !focusUntouched_[slot])
+                continue;
+            Window* entry = root_->GetPadEntryCtrl(slot);
+            if(entry && focus_[slot].GetFocused() != entry)
+                focus_[slot].FocusCtrl(entry);
+        }
+    }
+
     stepMs_ = elapsedMs;
     // Erst Zuordnung und Bewegung, dann die Knopfflanken - genau die Reihenfolge, die
     // PadRouter zusichert und die dskGameInterface fuer den Weltzeiger braucht.
@@ -58,6 +72,7 @@ void MenuPadInput::Pump(const std::vector<PadEvent>& events, const unsigned elap
 void MenuPadInput::ResetFocus(const unsigned slot)
 {
     FocusPath& focus = focus_[slot];
+    focusUntouched_[slot] = true;
     focus.SetRoot(root_);
     // Die Wurzel darf sagen, wo ein Pad anfangen soll. Die Lobby setzt damit den Fokus eines
     // neu hinzukommenden Spielers auf die erste freie Sitzkarte - er sieht seinen Beitritt
@@ -85,8 +100,11 @@ void MenuPadInput::OnPadAssigned(const unsigned slot, const bool assigned)
 
 void MenuPadInput::OnPadMove(const unsigned slot, const Position& delta)
 {
-    if(slot < MaxSlots)
-        focus_[slot].OnPadMove(delta, stepMs_);
+    if(slot >= MaxSlots)
+        return;
+    if(delta != Position(0, 0))
+        focusUntouched_[slot] = false;
+    focus_[slot].OnPadMove(delta, stepMs_);
 }
 
 void MenuPadInput::OnPadCamera(unsigned /*slot*/, const Position& /*delta*/)
@@ -108,15 +126,23 @@ void MenuPadInput::OnPadButton(const unsigned slot, const PadButton button, cons
     if(!down)
         return;
 
+    focusUntouched_[slot] = false;
     actingSlot_ = slot;
-    // B und Start erreichen die Fokusnavigation bewusst NICHT:
+    // B und Start erreichen FocusPath::OnPadButton bewusst NICHT:
     //  - FocusPath::OnPadButton macht aus B ein Clear(), also "raus aus dem Fenster". Ingame ist
     //    das richtig (dahinter liegt die Welt), im Menue waere es eine Sackgasse: dahinter liegt
-    //    nichts, und der Spieler haette keinen Weg zurueck.
+    //    nichts, und der Spieler haette keinen Weg zurueck. GEFRAGT wird das fokussierte Control
+    //    trotzdem, aber nur nach dem einen: hast du eine offene Eingabe zu verwerfen?
     //  - Start ist ingame der Knopf, mit dem ein Spieler sein Pad in die Hand nimmt, und dort
     //    bewusst wirkungslos. Im Menue ist er die Vorgabeaktion des Bildschirms.
     // Beides beantwortet der Desktop; sagt er nichts dazu, passiert nichts.
-    if(button == PadButton::B && rootWnd_)
+    if(button == PadButton::B && focus_[slot].Cancel())
+    {
+        // Das fokussierte Control hatte eine offene, noch nicht bestaetigte Eingabe (eine
+        // aufgeklappte Liste) und hat sie verworfen. B ist damit verbraucht - es waere sonst
+        // "Fenster zu", und der Spieler verloere den ganzen Bildschirm, weil er ein
+        // Aufklappmenue wieder loswerden wollte.
+    } else if(button == PadButton::B && rootWnd_)
     {
         // Steht der Spieler in einem Fenster, ist B das Fenster zu - dieselbe Wirkung, die die
         // Tastatur mit ESC hat, samt derselben Ausnahmen (WindowManager::RelayKeyboardMessage).
@@ -158,7 +184,7 @@ void MenuPadInput::OnRootDestroyed(const Window* wnd)
 void MenuPadInput::ClearFocus()
 {
     for(auto& focus : focus_)
-        focus.Clear();
+        focus.ClearSilently();
     root_ = nullptr;
     rootWnd_ = nullptr;
 }
@@ -169,5 +195,6 @@ void MenuPadInput::Reset()
     router_.Clear();
     hasDevice_.fill(false);
     swallowFrame_.fill(false);
+    focusUntouched_.fill(false);
     desktop_ = nullptr;
 }

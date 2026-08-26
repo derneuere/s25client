@@ -97,6 +97,20 @@ dskCampaignSelection::dskCampaignSelection(CreateServerInfo csi)
 
 dskCampaignSelection::~dskCampaignSelection() noexcept = default;
 
+bool dskCampaignSelection::Msg_PadCommand(unsigned, const PadButton button)
+{
+    if(button != PadButton::B)
+        return false;
+    WINDOWMANAGER.Switch(std::make_unique<dskSinglePlayer>());
+    return true;
+}
+
+Window* dskCampaignSelection::GetPadEntryCtrl(unsigned)
+{
+    auto* table = GetCtrl<ctrlTable>(ID_Table);
+    return (table && table->CanFocus()) ? table : nullptr;
+}
+
 void dskCampaignSelection::Msg_TableChooseItem(const unsigned ctrl_id, const unsigned)
 {
     if(ctrl_id == ID_Table)

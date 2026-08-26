@@ -461,6 +461,21 @@ void Loader::LoadDummySoundFiles()
     }
 }
 
+void Loader::LoadDummyMapSelectionFiles()
+{
+    libsiedler2::Archiv& archive = files_["selmap"].archive;
+    if(!archive.empty())
+        return;
+    archive.alloc(5);
+    for(const auto i : helpers::range(5u))
+    {
+        auto bmp = std::make_unique<glArchivItem_Bitmap_Raw>();
+        libsiedler2::PixelBufferBGRA buffer(16, 16);
+        bmp->create(buffer);
+        archive.set(i, std::move(bmp));
+    }
+}
+
 void Loader::LoadDummyLanguageFiles()
 {
     libsiedler2::Archiv& archive = files_["languages"].archive;

@@ -59,19 +59,27 @@ bool ctrlList::StepValue(const Position& dir)
     if(!selection_ || static_cast<int>(*selection_) != next)
     {
         SetSelection(static_cast<unsigned>(next));
-        // Die Auswahl kann aus dem Sichtbereich laufen - die Scrollleiste muss mit. Bewusst
-        // SetScrollPos und nicht Scroll: die Liste liest die Position selbst beim Zeichnen,
-        // eine Meldung nach oben gibt es beim Mauspfad an dieser Stelle auch nicht.
-        if(auto* scrollbar = GetCtrl<ctrlScrollBar>(0))
-        {
-            const int pos = scrollbar->GetScrollPos();
-            if(next < pos)
-                scrollbar->SetScrollPos(static_cast<unsigned short>(next));
-            else if(pagesize > 0 && next >= pos + static_cast<int>(pagesize))
-                scrollbar->SetScrollPos(static_cast<unsigned short>(next - static_cast<int>(pagesize) + 1));
-        }
+        // Die Auswahl kann aus dem Sichtbereich laufen - die Scrollleiste muss mit.
+        ScrollToSelection();
     }
     return true; // verbraucht, auch am Rand: der Fokus soll nicht aus der Liste springen
+}
+
+void ctrlList::ScrollToSelection()
+{
+    if(!selection_ || *selection_ >= lines.size() || pagesize == 0)
+        return;
+    auto* scrollbar = GetCtrl<ctrlScrollBar>(0);
+    if(!scrollbar)
+        return;
+    // Bewusst SetScrollPos und nicht Scroll: die Liste liest die Position selbst beim Zeichnen,
+    // eine Meldung nach oben gibt es beim Mauspfad an dieser Stelle auch nicht.
+    const int sel = static_cast<int>(*selection_);
+    const int pos = scrollbar->GetScrollPos();
+    if(sel < pos)
+        scrollbar->SetScrollPos(static_cast<unsigned short>(sel));
+    else if(sel >= pos + static_cast<int>(pagesize))
+        scrollbar->SetScrollPos(static_cast<unsigned short>(sel - static_cast<int>(pagesize) + 1));
 }
 
 bool ctrlList::Msg_MouseMove(const MouseCoords& mc)

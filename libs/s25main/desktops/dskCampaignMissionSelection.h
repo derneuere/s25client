@@ -15,6 +15,15 @@ class dskCampaignMissionSelection : public Desktop
 public:
     dskCampaignMissionSelection(CreateServerInfo csi, const CampaignDescription& campaign);
 
+    /// Siehe dskCampaignSelection: ohne das holt der WindowManager hier keine Padereignisse ab.
+    bool WantsPadInput() const override { return true; }
+    /// B ist derselbe Zweig wie der Knopf "Zurueck".
+    bool Msg_PadCommand(unsigned slot, PadButton button) override;
+    /// Ein Pad faengt dort an, wo die MISSION gewaehlt wird - auf der Weltkarte bzw. auf dem
+    /// ersten Missionsknopf der aktuellen Seite. "Zurueck" hat die kleinste Id und gewaenne
+    /// sonst; bei zehn Missionsknoepfen waere das eine lange Reise in die falsche Richtung.
+    Window* GetPadEntryCtrl(unsigned slot) override;
+
 private:
     void UpdateMissionPage();
     void Msg_ButtonClick(unsigned ctrl_id) override;

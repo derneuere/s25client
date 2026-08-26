@@ -12,7 +12,9 @@
 namespace {
 /// Sammelt rekursiv. Fokussierbare Controls sind Blaetter - in sie wird NICHT abgestiegen,
 /// sonst waeren die Kopfknoepfe einer Tabelle und die +/- Knoepfe eines Fortschrittsbalkens
-/// eigene Fokusstationen.
+/// eigene Fokusstationen. Window::IsFocusLeaf haelt den Abstieg auch dann auf, wenn das
+/// Control gerade selbst keinen Fokus annehmen kann - eine LEERE Tabelle ist so weder
+/// Fokusstation noch ein Tor zu ihren Sortierkoepfen.
 void collectFrom(Window& wnd, std::vector<unsigned>& cur, std::vector<FocusPath::Candidate>& out)
 {
     for(Window* child : wnd.GetCtrls<Window>())
@@ -22,7 +24,7 @@ void collectFrom(Window& wnd, std::vector<unsigned>& cur, std::vector<FocusPath:
         cur.push_back(child->GetID());
         if(child->CanFocus())
             out.push_back(FocusPath::Candidate{child, cur});
-        else
+        else if(!child->IsFocusLeaf())
             collectFrom(*child, cur, out);
         cur.pop_back();
     }
@@ -51,11 +53,29 @@ bool FocusPath::SetRoot(Window* root)
 
 void FocusPath::Clear()
 {
+    if(Window* old = GetFocused())
+        old->OnFocusLost();
+    ClearSilently();
+}
+
+void FocusPath::ClearSilently()
+{
     root_ = nullptr;
     path_.clear();
     travel_ = PointF(0.f, 0.f);
     cooldownMs_ = 0;
     repeating_ = false;
+}
+
+void FocusPath::SetPath(std::vector<unsigned> newPath)
+{
+    if(newPath == path_)
+        return;
+    // Das alte Blatt zuerst - erst danach zeigt path_ woandershin. Ein Control, das etwas
+    // aufgeklappt hat, klappt hier zu.
+    if(Window* old = GetFocused())
+        old->OnFocusLost();
+    path_ = std::move(newPath);
 }
 
 Window* FocusPath::GetFocused() const
@@ -87,10 +107,10 @@ bool FocusPath::FocusFirst()
     const auto candidates = Collect();
     if(candidates.empty())
     {
-        path_.clear();
+        SetPath({});
         return false;
     }
-    path_ = candidates.front().path;
+    SetPath(candidates.front().path);
     return true;
 }
 
@@ -102,7 +122,7 @@ bool FocusPath::FocusCtrl(Window* ctrl)
     {
         if(c.ctrl == ctrl)
         {
-            path_ = c.path;
+            SetPath(c.path);
             return true;
         }
     }
@@ -116,7 +136,7 @@ bool FocusPath::Move(const Dir dir)
     const auto candidates = Collect();
     if(candidates.empty())
     {
-        path_.clear();
+        SetPath({});
         return false;
     }
     const Window* focused = GetFocused();
@@ -124,7 +144,7 @@ bool FocusPath::Move(const Dir dir)
     {
         // Die Kette ist gerissen (Control geloescht, Reiter gewechselt). Statt den Fokus zu
         // verlieren, faengt der Spieler vorne an.
-        path_ = candidates.front().path;
+        SetPath(candidates.front().path);
         return true;
     }
 
@@ -134,14 +154,14 @@ bool FocusPath::Move(const Dir dir)
                                      [focused](const Candidate& c) { return c.ctrl == focused; });
         if(it == candidates.end())
         {
-            path_ = candidates.front().path;
+            SetPath(candidates.front().path);
             return true;
         }
         const auto idx = static_cast<std::ptrdiff_t>(it - candidates.begin());
         const auto next = idx + (dir == Dir::Next ? 1 : -1);
         if(next < 0 || next >= static_cast<std::ptrdiff_t>(candidates.size()))
             return false; // kein Umlauf: der Fokus bleibt stehen
-        path_ = candidates[next].path;
+        SetPath(candidates[next].path);
         return true;
     }
 
@@ -189,7 +209,7 @@ bool FocusPath::Move(const Dir dir)
     }
     if(!best)
         return false;
-    path_ = best->path;
+    SetPath(best->path);
     return true;
 }
 
@@ -197,6 +217,12 @@ bool FocusPath::Activate()
 {
     Window* focused = GetFocused();
     return focused && focused->Activate();
+}
+
+bool FocusPath::Cancel()
+{
+    Window* focused = GetFocused();
+    return focused && focused->CancelInput();
 }
 
 bool FocusPath::Step(const Position& dir)
@@ -282,7 +308,12 @@ bool FocusPath::OnPadButton(const PadButton button, const bool down)
     switch(button)
     {
         case PadButton::A: Activate(); break;
-        case PadButton::B: Clear(); break;
+        // Erst fragen, ob das Blatt eine offene Eingabe hat (aufgeklappte Liste). Nur wenn
+        // nicht, heisst B "raus aus dem Fenster".
+        case PadButton::B:
+            if(!Cancel())
+                Clear();
+            break;
         case PadButton::DpadLeft: Step(Position(-1, 0)); break;
         case PadButton::DpadRight: Step(Position(1, 0)); break;
         case PadButton::DpadUp: Step(Position(0, -1)); break;
