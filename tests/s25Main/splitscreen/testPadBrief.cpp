@@ -332,8 +332,9 @@ BOOST_AUTO_TEST_CASE(WoodcutterAndQuarryReadDifferently)
 /// Fall verlangte von ihm 39 Uebersetzungen, die dort niemand versprochen hat. Jetzt sagt er,
 /// welchen Katalog er meint, und dieser Katalog ist Pflicht (GermanCatalog).
 ///
-/// HINWEIS: external/languages ist ein SUBMODUL. Die Uebersetzungen sind dort eingetragen,
-/// werden aber nicht mit diesem Zweig committet.
+/// HINWEIS: Die Kataloge liegen unter data/RTTR/languages im Hauptprojekt, nicht mehr im
+/// Submodul external/languages. Damit ist dieser Fall die Zusicherung, dass die deutschen
+/// Uebersetzungen mit dem Branch mitkommen: wer ihn auscheckt und baut, muss sie haben.
 BOOST_FIXTURE_TEST_CASE(TheGermanCatalogCarriesEverySentenceOfThePanel, PadViewFixture<1>)
 {
     const GermanCatalog catalog;

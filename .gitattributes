@@ -22,6 +22,11 @@
 *.def text
 *.depend text
 INSTALL text
+# Sprachkataloge: msgmerge --update schreibt beim Bau in diese Dateien zurueck und immer mit
+# LF. Ohne eol=lf holt sich ein Arbeitsplatz mit core.autocrlf=true CRLF ins Arbeitsverzeichnis
+# und jeder Bau macht daraus wieder LF - der Baum waere dauerhaft schmutzig.
+*.po text eol=lf
+*.pot text eol=lf
 # Compiled Object files
 *.slo binary
 *.lo binary

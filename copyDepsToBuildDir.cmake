@@ -37,7 +37,11 @@ file(COPY "${RTTR_TRANSLATION_OUTPUT}/"
     DESTINATION "${RTTR_OUTPUT_PATH}/RTTR/languages"
     FILES_MATCHING PATTERN "*.mo"
 )
-file(COPY "${PROJECT_SOURCE_DIR}/data/RTTR" DESTINATION "${RTTR_OUTPUT_PATH}")
+# "languages" enthaelt die .po/.pot, also Baueingaben, keine Spieldaten. Die daraus erzeugten
+# .mo sind gerade eben aus RTTR_TRANSLATION_OUTPUT kopiert worden; die Quellen bleiben draussen.
+file(COPY "${PROJECT_SOURCE_DIR}/data/RTTR" DESTINATION "${RTTR_OUTPUT_PATH}"
+    PATTERN "languages" EXCLUDE
+)
 
 set(S2_GAME_PATHS ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/S2)
 get_filename_component(GAME_OUTPUT_PATH "${RTTR_GAMEDIR}" ABSOLUTE BASE_DIR "${CUR_OUTPUT_DIR}")

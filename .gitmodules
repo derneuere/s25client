@@ -20,9 +20,6 @@
 [submodule "s25update"]
 	url = https://github.com/Return-To-The-Roots/s25update.git
 	path = external/s25update
-[submodule "RTTR/languages"]
-	url = https://github.com/Return-To-The-Roots/languages.git
-	path = external/languages
 [submodule "contrib/kaguya"]
 	path = external/kaguya
 	url = https://github.com/Return-To-The-Roots/kaguya.git

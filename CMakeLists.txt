@@ -330,9 +330,12 @@ add_subdirectory(libs)
 add_subdirectory(extras)
 
 find_package(Gettext REQUIRED)
-file(GLOB RTTR_PO_FILES CONFIGURE_DEPENDS external/languages/*.po)
+# Die Kataloge liegen im Hauptprojekt, nicht in einem Submodul: ein Auschecken dieses Branches
+# bringt die Uebersetzungen mit. Siehe data/RTTR/languages/README.md.
+# Achtung: gettext_create_translations laesst msgmerge --update in diese Quelldateien schreiben.
+file(GLOB RTTR_PO_FILES CONFIGURE_DEPENDS data/RTTR/languages/*.po)
 set(RTTR_TRANSLATION_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/gen/languages) # Used by copyDepsToBuildDir
-gettext_create_translations(external/languages/rttr.pot ALL
+gettext_create_translations(data/RTTR/languages/rttr.pot ALL
     DESTINATION ${RTTR_TRANSLATION_OUTPUT}
     INSTALL_DESTINATION ${RTTR_DATADIR}/RTTR/languages
     FILES ${RTTR_PO_FILES}
@@ -359,9 +362,12 @@ endif()
 # Install
 ################################################################################
 
-# RTTR directory, but exclude language input files
+# RTTR directory, but exclude language input files: data/RTTR/languages haelt die .po/.pot,
+# also Baueingaben. Ausgeliefert werden nur die daraus erzeugten .mo, und die installiert
+# gettext_create_translations(INSTALL_DESTINATION ...) weiter oben separat.
 install(DIRECTORY "data/RTTR" DESTINATION "${RTTR_DATADIR}"
         PATTERN ".*" EXCLUDE
+        PATTERN "languages" EXCLUDE
 )
 
 # Documentation. TODO: Avoid recursive entries?

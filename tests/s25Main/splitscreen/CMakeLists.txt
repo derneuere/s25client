@@ -11,3 +11,7 @@ add_testcase(NAME splitscreen
     LIBS s25Main testHelpers testConfig testUIHelper testWorldFixtures rttr::vld
     COST 30
 )
+# testPadBrief liest die ausgelieferten .mo aus dem Ausgabeverzeichnis (shippedCatalogs()).
+# Gefuellt wird das erst vom POST_BUILD-Schritt des Ziels "translations". Ohne diese Abhaengigkeit
+# haengt das nur daran, dass "translations" ein ALL-Ziel ist - Glueck statt Zusicherung.
+add_dependencies(Test_splitscreen translations)
