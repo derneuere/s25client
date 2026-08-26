@@ -1070,6 +1070,14 @@ msgstr ""
 msgid "Construction aid only"
 msgstr ""
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Construction aid: off"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Construction aid: on"
+msgstr ""
+
 #: libs/s25main/addons/AddonMilitaryAid.h:21
 msgid "Construction and attack aid"
 msgstr ""
@@ -1350,6 +1358,10 @@ msgstr ""
 #: libs/s25main/ingameWindows/iwMusicPlayer.cpp:108
 msgid "Downwards"
 msgstr "Daal"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Draws a symbol on every spot: what fits there - a flag, a hut, a house, a castle or a mine."
+msgstr ""
 
 #: libs/s25main/gameData/BuildingBriefs.cpp:103
 msgid "Draws water for the bakery, the brewery, the pig farm and the donkey breeder."
@@ -2660,6 +2672,10 @@ msgstr ""
 msgid "Melts iron for the armory and the metalworks."
 msgstr ""
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Menu"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwMerchandiseStatistics.cpp:35
 #: libs/s25main/ingameWindows/iwStatistics.cpp:139
 #: libs/s25main/ingameWindows/iwStatistics.cpp:228
@@ -2848,6 +2864,14 @@ msgstr "Naam"
 #: libs/s25main/desktops/dskOptions.cpp:177
 msgid "Name in Game:"
 msgstr "Naam in Spöl:"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Names and output: off"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Names and output: on"
+msgstr ""
 
 #: libs/s25main/addons/AddonCatapultGraphics.h:19
 msgid "Nation-specific catapult graphics"
@@ -3922,6 +3946,10 @@ msgstr ""
 msgid "Show coordinates"
 msgstr ""
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Shows the whole map in small. Useful to see where your land ends."
+msgstr ""
+
 #: libs/s25main/desktops/dskMainMenu.cpp:39
 msgid "Singleplayer"
 msgstr "Enkeld Spöler"
@@ -4090,6 +4118,10 @@ msgstr ""
 
 #: libs/s25main/ingameWindows/iwSettings.cpp:91
 msgid "Statistics Scale"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Statistics, goods, tools, military - and saving, giving up and leaving the game."
 msgstr ""
 
 #: libs/s25main/ingameWindows/iwInventory.cpp:11
@@ -4899,6 +4931,10 @@ msgstr "Holzfäller"
 msgid "World was put together and glued..."
 msgstr "Welt mitnanner maken und verkliestern..."
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Writes the name and the output of every building onto the map."
+msgstr ""
+
 #: libs/s25main/network/ClientError.cpp:14
 msgid "Wrong Password!"
 msgstr ""
@@ -5025,6 +5061,10 @@ msgstr "Gebäude"
 #, fuzzy
 msgid "Your flag"
 msgstr "Fahne setzen"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Your messages: why a mine stopped, where ore was found, who is attacking - and the diary of the campaign."
+msgstr ""
 
 #: libs/s25main/input/PlayerBrief.cpp:177
 #, fuzzy

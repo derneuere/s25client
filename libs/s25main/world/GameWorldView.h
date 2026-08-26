@@ -160,6 +160,10 @@ public:
     void ToggleShowProductivity();
     /// Toggle names and productivity completely on or off
     void ToggleShowNamesAndProductivity();
+    /// Zeigt diese Ansicht Namen UND Auslastung? Genau die Frage, die
+    /// ToggleShowNamesAndProductivity beantwortet - der Schalter kippt beide zusammen, also ist
+    /// "beide an" der einzige Zustand, den ein Umschalter als "an" beschriften darf.
+    bool IsShowingNamesAndProductivity() const { return show_names && show_productivity; }
 
     /// Copy visibility of HUD elements from this view to another
     void CopyHudSettingsTo(GameWorldView& other, bool copyBQ) const;

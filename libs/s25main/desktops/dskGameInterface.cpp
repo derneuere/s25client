@@ -54,6 +54,7 @@
 #include "ingameWindows/iwMinimap.h"
 #include "ingameWindows/iwMusicPlayer.h"
 #include "ingameWindows/iwOptionsWindow.h"
+#include "ingameWindows/iwPadSystemMenu.h"
 #include "ingameWindows/iwPostWindow.h"
 #include "ingameWindows/iwRoadWindow.h"
 #include "ingameWindows/iwSave.h"
@@ -374,6 +375,15 @@ void dskGameInterface::InitPlayer()
             }
         }
     });
+    // Ein Postfach fuer JEDE dargestellte Ansicht, nicht nur fuer die Hauptansicht. Ohne das
+    // wird die Post der Spieler 2 bis 4 gar nicht erst aufgehoben (siehe GetPostBoxFor), und
+    // das Padmenue oeffnete ein leeres Fenster, in dem nie etwas ankommen kann.
+    forEachView([this](PlayerView& view) { GetPostBox(view); });
+    // Beobachtet wird nur das Fach des HAUPTspielers: daran haengen das Taubensymbol, der
+    // Zaehler und der Ton, und die sitzen alle drei an der EINEN Knopfleiste ueber die volle
+    // Bildbreite. Eine Anzeige je Ansicht ist ein eigener Schritt (sie braucht einen Ort im
+    // Viewport); bis dahin waere ein Zaehler, der die Nachrichten von vier Spielern addiert,
+    // eine Luege.
     PostBox& postBox = GetPostBox();
     postBox.ObserveNewMsg([this](const auto& msg, auto msgCt) { this->NewPostMessage(msg, msgCt); });
     postBox.ObserveDeletedMsg([this](auto msgCt) { this->PostMessageDeleted(msgCt); });
@@ -404,9 +414,30 @@ GameCommandFactory& dskGameInterface::gcFactoryFor(const PlayerView& view)
 
 PostBox& dskGameInterface::GetPostBox()
 {
-    PostBox* postBox = worldViewer.GetWorld().GetPostMgr().GetPostBox(worldViewer.GetPlayerId());
+    return GetPostBoxFor(worldViewer.GetPlayerId());
+}
+
+PostBox& dskGameInterface::GetPostBox(const PlayerView& view)
+{
+    return GetPostBoxFor(view.GetPlayerId());
+}
+
+PostBox& dskGameInterface::GetPostBoxFor(const unsigned playerId)
+{
+    // BEFUND DIESER PHASE, gemessen: es gab genau EIN Postfach, das des Hauptspielers.
+    // PostManager haelt zwar MAX_PLAYERS Faecher, aber AddPostBox hatte im ganzen Baum genau
+    // einen Aufrufer - diesen hier -, und der nahm worldViewer.GetPlayerId(). PostManager::
+    // SendMsg gibt bei fehlendem Fach STILL auf (postSystem/PostManager.cpp). Jede Meldung an
+    // die Spieler 2 bis 4 - "Wir werden angegriffen!", "Das Bergwerk ist erschoepft",
+    // "Eisenerz gefunden" - wurde damit spurlos verworfen.
+    //
+    // Ein Fach anzulegen beruehrt den Determinismus NICHT: PostManager und PostBox stehen in
+    // keiner Serialize-Funktion und in keiner Pruefsumme, und die Simulation liest sie nirgends
+    // (die einzigen Zugriffe sind SendMsg/SetMissionGoal aus der Simulation heraus und die
+    // Fenster darueber). Es aendert sich allein, WAS AUFGEHOBEN WIRD.
+    PostBox* postBox = worldViewer.GetWorld().GetPostMgr().GetPostBox(playerId);
     if(!postBox)
-        postBox = &worldViewer.GetWorldNonConst().GetPostMgr().AddPostBox(worldViewer.GetPlayerId());
+        postBox = &worldViewer.GetWorldNonConst().GetPostMgr().AddPostBox(playerId);
     RTTR_Assert(postBox != nullptr);
     return *postBox;
 }
@@ -597,21 +628,98 @@ void dskGameInterface::Msg_ButtonClick(const unsigned ctrl_id)
     const ViewScope ownerScope(view.GetIndex());
     switch(ctrl_id)
     {
-        case ID_btMap:
-            WINDOWMANAGER.ToggleWindow(std::make_unique<iwMinimap>(view.GetMinimap(), view.GetView()));
-            break;
-        case ID_btOptions:
-            WINDOWMANAGER.ToggleWindow(std::make_unique<iwMainMenu>(view.GetView(), gcFactoryFor(view)));
-            break;
+        case ID_btMap: OpenMinimapFor(view); break;
+        case ID_btOptions: OpenMainMenuFor(view); break;
         case ID_btConstructionAid:
+            // Die Desktoppruefung bleibt AUSDRUECKLICH hier und wandert NICHT in
+            // ToggleConstructionAidFor: sie ist eine Eigenart des MAUSknopfes (solange
+            // irgendein Ingamefenster aktiv ist, ist der Desktop deaktiviert und der Knopf tut
+            // nichts). Der Padspieler drueckt seinen Schalter IN einem Fenster - genau dann
+            // waere die Bedingung immer falsch und der Schalter dauerhaft tot. Die Bedingung
+            // gehoert also zum Aufrufer, nicht zur Handlung; so bleibt der Mauspfad Bit fuer
+            // Bit der alte.
             if(WINDOWMANAGER.IsDesktopActive())
-                view.GetView().ToggleShowBQ();
+                ToggleConstructionAidFor(view);
             break;
-        case ID_btPost:
-            WINDOWMANAGER.ToggleWindow(std::make_unique<iwPostWindow>(view.GetView(), GetPostBox()));
-            UpdatePostIcon(GetPostBox().GetNumMsgs(), false);
-            break;
+        case ID_btPost: OpenPostOfficeFor(view); break;
     }
+}
+
+/// --- Die vier Handlungen der Knopfleiste, benannt und auf GENAU EINE Ansicht bezogen --------
+///
+/// Herausgezogen aus Msg_ButtonClick, weil sie seit dieser Phase ZWEI Aufrufer haben: den
+/// Mausknopf der einen Leiste (immer primary()) und das Padmenue des jeweiligen Sitzplatzes
+/// (iwPadSystemMenu). Dasselbe Muster wie Phase 4f mit OpenObjectWindow, und aus demselben
+/// Grund: fuer dieselbe Handlung darf es nicht zwei Regelwerke geben, die beim naechsten Zusatz
+/// auseinanderlaufen.
+///
+/// Die Besitzklammer setzt hier KEINE der vier - beide Aufrufer haben sie bereits offen
+/// (Msg_ButtonClick fuer die Maus, OnPadButton fuer das Pad). Zwei Klammern uebereinander waeren
+/// wirkungsgleich, verschleierten aber, woher der Besitzer kommt.
+
+IngameWindow* dskGameInterface::OpenMinimapFor(PlayerView& view)
+{
+    return WINDOWMANAGER.ToggleWindow(std::make_unique<iwMinimap>(view.GetMinimap(), view.GetView()));
+}
+
+IngameWindow* dskGameInterface::OpenMainMenuFor(PlayerView& view)
+{
+    return WINDOWMANAGER.ToggleWindow(std::make_unique<iwMainMenu>(view.GetView(), gcFactoryFor(view)));
+}
+
+void dskGameInterface::ToggleConstructionAidFor(PlayerView& view)
+{
+    // REINE ANZEIGE, und das ist nachgeprueft und keine Annahme: GameWorldView::show_bq wird
+    // ausschliesslich in GameWorldView::Draw gelesen (DrawConstructionAid) und sonst nirgends.
+    // Es entsteht kein GameCommand, es wird nichts an den Server geschickt, und die Simulation
+    // sieht den Wert nie - der Determinismus des Lockstep ist nicht beruehrt. Genau deshalb
+    // darf dieser Schalter ueberhaupt am Fensterknopf haengen und braucht keinen Kommandopfad.
+    view.GetView().ToggleShowBQ();
+}
+
+void dskGameInterface::ToggleNamesAndProductivityFor(PlayerView& view)
+{
+    // Ebenfalls reine Anzeige (show_names/show_productivity, gelesen nur in
+    // GameWorldView::DrawNameProductivityOverlay). Derselbe Aufruf, den der Reiter
+    // "Anzeigeoptionen" des Aktionsfensters schon macht (iwAction.cpp).
+    view.GetView().ToggleShowNamesAndProductivity();
+}
+
+IngameWindow* dskGameInterface::OpenPostOfficeFor(PlayerView& view)
+{
+    // Das Postfach DIESER Ansicht, nicht das des Hauptspielers. Vorher stand hier GetPostBox()
+    // ohne Argument - ein Padspieler in Ansicht 1 haette die Post von Spieler 0 gelesen und
+    // dessen Nachrichten geloescht.
+    PostBox& box = GetPostBox(view);
+    IngameWindow* const wnd = WINDOWMANAGER.ToggleWindow(std::make_unique<iwPostWindow>(view.GetView(), box));
+    // Das Taubensymbol und der Zaehler sitzen an der EINEN Knopfleiste und gehoeren damit der
+    // Hauptansicht. Sie werden deshalb nur dann zurueckgesetzt, wenn auch wirklich der
+    // Hauptspieler seine Post geoeffnet hat.
+    if(&view == &primary())
+        UpdatePostIcon(box.GetNumMsgs(), false);
+    return wnd;
+}
+
+void dskGameInterface::PadMenuLeaveTo(PlayerView& view, IngameWindow* const opened)
+{
+    // Ein Menue verschwindet, wenn man einen Punkt daraus gewaehlt hat, und der Spieler steht
+    // danach IN dem, was er gewaehlt hat. Alles andere waere die Sackgasse, an der der
+    // Auftraggeber beim Tagebuch haengengeblieben ist: ein Fenster liegt sichtbar obenauf, und
+    // der Knopf, der es betreten wuerde (Y), wird vom Fokus im Menue geschluckt.
+    //
+    // Die beiden ANZEIGESCHALTER rufen das bewusst NICHT - sie lassen das Menue stehen, damit
+    // der Spieler die Beschriftung umspringen sieht und gleich noch den zweiten Schalter legen
+    // kann.
+    if(auto* menu = WINDOWMANAGER.FindNonModalWindow(CGI_PADMENU, view.GetIndex()))
+    {
+        if(view.GetFocus().GetRoot() == menu)
+            ReleaseFocus(view);
+        menu->Close();
+    }
+    // `opened` ist nullptr, wenn ToggleWindow ein bereits offenes Fenster ZUGEMACHT hat. Dann
+    // gibt es nichts zu betreten, und der Spieler steht danach wieder in der Welt - das ist die
+    // richtige Antwort auf "Postfenster" bei schon offenem Postfenster.
+    EnterWindow(view, opened);
 }
 
 void dskGameInterface::Msg_PaintBefore()
@@ -1989,6 +2097,44 @@ void dskGameInterface::OnPadButton(const unsigned slot, const PadButton button, 
     // gehoert es ihm. Ein einziger Wert, aus dem beides faellt - der handelnde Spieler kann
     // gar nicht mehr vom Fensterbesitz abweichen.
     const ViewScope ownerScope(slot);
+    // --- ZWEI Knoepfe werden VOR dem Fokus abgefragt ----------------------------------------
+    //
+    // Die Regel darunter lautet sonst: steht der Spieler in einem Fenster, sieht die Welt seine
+    // Flanken nicht (FocusPath::OnPadButton gibt fuer JEDEN Knopf true zurueck). Fuer A, B, das
+    // Steuerkreuz und die Schultern ist das richtig - sie haben im Fenster eine eigene
+    // Bedeutung. Fuer diese beiden hier ist es eine SACKGASSE, und beide Sackgassen sind in
+    // dieser Phase gemessen worden:
+    //
+    //  - BACK oeffnet das Systemmenue. Betritt der Spieler es (das tut er automatisch), ist
+    //    Back von da an verbraucht und das Menue mit demselben Knopf nicht mehr zu schliessen.
+    //    Ein Menueknopf, der nur in eine Richtung wirkt, ist keiner.
+    //  - Y betritt das oberste eigene Fenster. Oeffnet ein Knopf IN einem Fenster ein ZWEITES
+    //    (Postfenster -> Tagebuch, Hauptauswahl -> Statistik), lag das neue Fenster bisher
+    //    unerreichbar obenauf: Y wurde vom Fokus im alten geschluckt. Genau das ist der Befund
+    //    des Auftraggebers zum Tagebuch.
+    //
+    // Beide sind rein ADDITIV: FocusPath hat fuer Back und Y keinen Fall (default: break), sie
+    // waren dort also wirkungslos. Y faellt ausserdem nur dann heraus, wenn das oberste eigene
+    // Fenster ein ANDERES ist als das, in dem der Spieler schon steht - sonst bliebe es beim
+    // alten Verhalten, und ein Y im eigenen Fenster wuerde den Fokus zurueck auf das erste
+    // Control werfen.
+    if(button == PadButton::Back && view.GetRoad().mode == RoadBuildMode::Disabled)
+    {
+        // Im Baumodus bleibt Back wirkungslos, wie LB und RB auch: dort ist der Modus die
+        // Bedeutung, und ein Menue mitten in einer halb gelegten Strasse waere eine Falle.
+        if(down)
+            PadOpenSystemMenu(view);
+        return;
+    }
+    if(down && button == PadButton::Y)
+    {
+        IngameWindow* const top = WINDOWMANAGER.GetTopMostWindow(view.GetIndex());
+        if(top && top != view.GetFocus().GetRoot())
+        {
+            EnterWindow(view, top);
+            return;
+        }
+    }
     // Erst der Fokus dieses Spielers. Verbraucht er die Flanke, sieht die Welt sie nie - ein
     // A-Druck auf einem Knopf legt keine Fahne.
     Window* const rootBefore = view.GetFocus().GetRoot();
@@ -2108,9 +2254,19 @@ void dskGameInterface::OnPadButton(const unsigned slot, const PadButton button, 
         // Warum die RECHTE Schulter: LB traegt schon den Wasserweg, RB war in der Welt als
         // einziger Knopf neben Back/Guide/Sticks ueberhaupt noch frei. Innerhalb eines Fensters
         // verbraucht FocusPath beide Schultern (Move Prev/Next), aber dort laeuft dieser Zweig
-        // gar nicht erst - der Fokus verbraucht die Flanke vorher. Back und Guide sind bewusst
-        // nicht genommen: Back ist auf vielen Geraeten unbeschriftet, Guide fangen manche
-        // Treiber selbst ab.
+        // gar nicht erst - der Fokus verbraucht die Flanke vorher.
+        //
+        // GUIDE bleibt unbelegt, und der Grund gilt unveraendert: manche Treiber fangen ihn
+        // selbst ab, ein Spiel kann sich also nicht auf ihn verlassen.
+        //
+        // BACK dagegen ist seit dieser Phase belegt - er oeffnet das Systemmenue (siehe die
+        // Vorabfrage oben in dieser Funktion und PadOpenSystemMenu). Frueher stand hier, er sei
+        // "bewusst nicht genommen, weil auf vielen Geraeten unbeschriftet"; das galt fuer eine
+        // WELTHANDLUNG, die man blind treffen muss. Fuer den Weg zu einem beschrifteten Menue
+        // gilt es nicht: das Menue nennt sich selbst, ein Fehldruck kostet einen zweiten Druck
+        // auf denselben Knopf, und ein Menue braucht den Knopf, den ein Spieler an dieser Stelle
+        // sucht. Fuer den GEGENSTAND dieses Zweiges - das Aktionsfenster unter dem Zeiger -
+        // bleibt die alte Wahl richtig, und deshalb bleibt sie hier stehen.
         //
         // Im Baumodus bleibt die Schulter wirkungslos - dort ist der Modus die Bedeutung, wie
         // bei A, X und B auch.
@@ -2170,7 +2326,15 @@ bool dskGameInterface::EnterTopMostWindow(PlayerView& view)
     // keiner Ansicht gehoeren (Nachrichtenboxen, Systemfenster - die sieht jeder). Ohne den
     // Besitzerbezug betraete Spieler 2 mit Y das Fenster von Spieler 1 und verstellte es
     // anschliessend in seinem eigenen Namen.
-    IngameWindow* wnd = WINDOWMANAGER.GetTopMostWindow(view.GetIndex());
+    return EnterWindow(view, WINDOWMANAGER.GetTopMostWindow(view.GetIndex()));
+}
+
+bool dskGameInterface::EnterWindow(PlayerView& view, IngameWindow* const wnd)
+{
+    // Herausgezogen aus EnterTopMostWindow, weil das Padmenue ein BESTIMMTES Fenster betreten
+    // muss - naemlich das, das es gerade selbst geoeffnet hat. Ueber "das oberste" ginge das
+    // nicht sicher: liegt ein modales Fenster im Stapel, wird ein neues Fenster DAVOR
+    // eingefuegt (WindowManager::DoShow) und ist gar nicht oben.
     if(!wnd || wnd->IsMinimized())
         return false;
     // Erst den alten Rahmen abmelden: SetRoot() vergisst die bisherige Wurzel, und ein dort
@@ -2180,6 +2344,86 @@ bool dskGameInterface::EnterTopMostWindow(PlayerView& view)
     if(!view.GetFocus().SetRoot(wnd))
         return false; // in diesem Fenster gibt es nichts zu bedienen
     wnd->AddFocusRing(view.GetFocus(), view.GetViewer().GetPlayer().color);
+    return true;
+}
+
+/// DER BACK-KNOPF, und warum er es ist und nicht Start:
+///
+///  - CONTROLLER-UX.md 2.2 legt genau diesen Inhalt auf `Select` (= Back): "Reich-Radial
+///    (Inventar, Gebaeudestatistik, Verteilung, Werkzeuge, Transport, Militaer, Post-Archiv,
+///    Ansicht)". Start ist dort mit Absicht anders belegt (getippt die eigene Hilfe, gehalten
+///    das GLOBALE Pausenmenue), und die Begruendung steht in der Spezifikation daneben: Start
+///    ist der Reflexknopf des Anfaengers und darf nicht drei Mitspielern das Spiel anhalten.
+///  - Start ist seit Phase 3 der Knopf, mit dem ein Spieler sein Pad in die Hand nimmt. Die
+///    Uebernahmeflanke wird INGAME nicht geschluckt (PadRouter::OnEvent reiht sie nach der
+///    Zuordnung ein, anders als MenuPadInput::swallowFrame_ im Menue) - Start mit einer
+///    Weltbedeutung zu belegen hiesse, dass jeder Aufnahmedruck sofort ein Menue aufreisst.
+///
+/// Was der Spieler durch die Belegung verliert: nichts. Back war in der Welt gemessen
+/// wirkungslos, und in FocusPath hat er keinen Fall.
+bool dskGameInterface::PadOpenSystemMenu(PlayerView& view)
+{
+    // Die Besitzklammer ist hier bereits offen (OnPadButton): das Menue gehoert DIESEM
+    // Sitzplatz, und jeder Knopf darin wirkt auf SEINE Ansicht und bucht auf SEINEN Spieler.
+    //
+    // Zweiter Druck schliesst wieder - ToggleWindow sucht nach (GUI_ID, Besitzer), das Menue
+    // eines Nachbarn bleibt dabei unangetastet.
+    if(auto* old = WINDOWMANAGER.FindNonModalWindow(CGI_PADMENU, view.GetIndex()))
+    {
+        // Steht der Fokus dieses Spielers noch im Menue, muss er MIT verschwinden - sonst
+        // bliebe eine Wurzel stehen, deren Fenster gleich zerfaellt.
+        if(view.GetFocus().GetRoot() == old)
+            ReleaseFocus(view);
+        old->Close();
+        return true;
+    }
+    // Solange DIESER Sitzplatz ein MODALES Fenster vor sich hat, geht sein Menue NICHT auf.
+    //
+    // Der Grund bleibt derselbe: WindowManager::DoShow fuegt jedes neue Fenster VOR dem ersten
+    // modalen ein - das Menue laege also HINTER dem modalen und waere unsichtbar, waehrend der
+    // Fokus dieses Spielers hineinspringt. Er navigierte dann blind. Der Fall ist kein Randfall:
+    // das Tagebuch selbst ist modal (iwMissionStatement, IngameWindow(..., modal = true)).
+    //
+    // BESITZERBEZOGEN, und das ist nachgemessen und keine Annahme. Vorher stand hier
+    // GetTopMostWindow() OHNE Besitzer, und damit sperrte das Tagebuch von Sitzplatz 1 das Menue
+    // der Sitzplaetze 0, 2 und 3 mit. Drei Gruende, warum die besitzerlose Form falsch war:
+    //
+    //  1. Der PADPFAD kennt Modalitaet ueberhaupt nicht. IsModal() wird im ganzen Baum nur an
+    //     drei Stellen gelesen: WindowManager (Maus/Tastatur/Einsortierung), IngameWindow
+    //     (Minimieren) und dskGameInterface::SetActive (Mausscrollen). FocusPath, PadRouter und
+    //     jeder andere Padzweig lesen es NIE. Ein fremdes Modales hindert diesen Spieler also
+    //     weder am Strassenbau noch am Aktionsfenster (RB) noch am Schliessen (B) - nur das
+    //     Menue war gesperrt. Das war die Ausnahme, nicht die Regel.
+    //  2. Es war eine SACKGASSE ohne Ausweg. Ein Modales eines fremden Sitzplatzes kann dieser
+    //     Spieler nicht wegraeumen: GetTopMostWindow(view.GetIndex()) liefert es nicht, also
+    //     betritt Y es nicht und schliesst B es nicht. Er musste warten, bis der Nachbar handelt.
+    //     Beim EIGENEN (oder besitzerlosen) Modalen ist genau das anders - er kommt mit Y hinein
+    //     und mit A auf "Weiter" wieder heraus, und danach geht sein Menue auf. Die Sperre bleibt
+    //     dort also eine Reihenfolge und wird nirgends zur Falle.
+    //  3. Der Rest des Padpfades fragt schon lange besitzerbezogen: EnterTopMostWindow und
+    //     PadCloseTopMostWindow benutzen beide GetTopMostWindow(view.GetIndex()). Diese eine
+    //     Stelle war der Ausreisser.
+    //
+    // Die Ueberladung genuegt fuer die Frage "hat DIESER Sitzplatz ein Modales vor sich":
+    // GetTopMostWindow(owner) laeuft von hinten und nimmt das erste eigene oder besitzerlose
+    // Fenster, und weil Nicht-Modale immer VOR dem ersten Modalen einsortiert werden, ist dieses
+    // Fenster genau dann modal, wenn es ein eigenes oder besitzerloses Modales gibt.
+    if(const IngameWindow* top = WINDOWMANAGER.GetTopMostWindow(view.GetIndex()); top && top->IsModal())
+        return false;
+    // Am ZEIGER DIESES SPIELERS, also in seinem Viewport - dieselbe Rechnung wie beim
+    // Aktionsfenster (PadOpenActionWindow). IngameWindow::MoveToCenter zentriert weiterhin auf
+    // die volle Renderflaeche; ein Menue dort waere im Splitscreen im Bild des Nachbarn.
+    const DrawPoint wndPos = view.HasPadCursor() ? DrawPoint(view.GetPadCursor()) : DrawPoint(view.GetViewCenter());
+    auto& wnd = WINDOWMANAGER.Show(std::make_unique<iwPadSystemMenu>(*this, view, wndPos));
+    // BEWUSST sofort betreten, anders als bei jedem anderen Fenster (dort braucht es Y).
+    //
+    // Ein Menue ist kein Weltfenster: es hat keinen Bezug zu einem Knoten, der Spieler hat es
+    // gerade ausdruecklich aufgerufen, und der einzige Grund, es offen zu haben, ist, darin
+    // etwas auszuwaehlen. Ihn danach erst noch Y druecken zu lassen waere genau die
+    // unausgesprochene Regel, an der der Auftraggeber beim Tagebuch gescheitert ist ("ich
+    // druecke B und es passiert nichts").
+    EnterWindow(view, &wnd);
+    view.ClearRejection();
     return true;
 }
 

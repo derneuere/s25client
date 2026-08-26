@@ -1093,6 +1093,16 @@ msgstr "Stavební režim"
 msgid "Construction aid only"
 msgstr "Pouze stavební pomoc"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+#, fuzzy
+msgid "Construction aid: off"
+msgstr "Stavební režim"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+#, fuzzy
+msgid "Construction aid: on"
+msgstr "Pouze stavební pomoc"
+
 #: libs/s25main/addons/AddonMilitaryAid.h:21
 msgid "Construction and attack aid"
 msgstr "Stavební a útočná pomoc"
@@ -1381,6 +1391,10 @@ msgstr "Dolů"
 #: libs/s25main/ingameWindows/iwMusicPlayer.cpp:108
 msgid "Downwards"
 msgstr "Dolů"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Draws a symbol on every spot: what fits there - a flag, a hut, a house, a castle or a mine."
+msgstr ""
 
 #: libs/s25main/gameData/BuildingBriefs.cpp:103
 #, fuzzy
@@ -2716,6 +2730,10 @@ msgstr "Střednědobý"
 msgid "Melts iron for the armory and the metalworks."
 msgstr ""
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Menu"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwMerchandiseStatistics.cpp:35
 #: libs/s25main/ingameWindows/iwStatistics.cpp:139
 #: libs/s25main/ingameWindows/iwStatistics.cpp:228
@@ -2904,6 +2922,14 @@ msgstr "Jméno"
 #: libs/s25main/desktops/dskOptions.cpp:177
 msgid "Name in Game:"
 msgstr "Jméno ve hře"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Names and output: off"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Names and output: on"
+msgstr ""
 
 #: libs/s25main/addons/AddonCatapultGraphics.h:19
 msgid "Nation-specific catapult graphics"
@@ -3991,6 +4017,10 @@ msgstr "Zobrazit GameFrame informace:"
 msgid "Show coordinates"
 msgstr "Zobrazit souřadnice"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Shows the whole map in small. Useful to see where your land ends."
+msgstr ""
+
 #: libs/s25main/desktops/dskMainMenu.cpp:39
 msgid "Singleplayer"
 msgstr "Hra jednoho hráče"
@@ -4163,6 +4193,10 @@ msgstr "Statistiky"
 #: libs/s25main/ingameWindows/iwSettings.cpp:91
 msgid "Statistics Scale"
 msgstr "Měřítko statistik"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Statistics, goods, tools, military - and saving, giving up and leaving the game."
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwInventory.cpp:11
 #: libs/s25main/ingameWindows/iwMainMenu.cpp:56
@@ -4979,6 +5013,10 @@ msgstr "Dřevorubec"
 msgid "World was put together and glued..."
 msgstr "Svět byl poskládán a slepen dohromady..."
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Writes the name and the output of every building onto the map."
+msgstr ""
+
 #: libs/s25main/network/ClientError.cpp:14
 msgid "Wrong Password!"
 msgstr "Neplatné heslo!"
@@ -5115,6 +5153,10 @@ msgstr "Přístaviště"
 #, fuzzy
 msgid "Your flag"
 msgstr "Vztyčit vlajku"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Your messages: why a mine stopped, where ore was found, who is attacking - and the diary of the campaign."
+msgstr ""
 
 #: libs/s25main/input/PlayerBrief.cpp:177
 #, fuzzy

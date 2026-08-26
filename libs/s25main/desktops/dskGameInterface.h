@@ -369,6 +369,38 @@ public:
     /// Diese Ansicht betritt das oberste Fenster und bedient es ab jetzt mit dem Pad.
     /// false, wenn es kein Fenster gibt oder darin nichts zu bedienen ist.
     bool EnterTopMostWindow(PlayerView& view);
+    /// Dasselbe fuer ein BESTIMMTES Fenster. Gebraucht vom Padmenue, das genau das Fenster
+    /// betreten muss, das es soeben geoeffnet hat - "das oberste" waere hinter einem modalen
+    /// Fenster das falsche (WindowManager::DoShow fuegt vor dem ersten modalen ein).
+    bool EnterWindow(PlayerView& view, IngameWindow* wnd);
+
+    /// --- Die vier Handlungen der Knopfleiste, auf GENAU EINE Ansicht bezogen ---------------
+    ///
+    /// Zwei Aufrufer: der Mausknopf der einen Leiste (Msg_ButtonClick, immer primary()) und das
+    /// Padmenue des jeweiligen Sitzplatzes (iwPadSystemMenu). Genau dafuer sind sie benannt und
+    /// nicht mehr inline - fuer dieselbe Handlung darf es nicht zwei Regelwerke geben.
+    ///
+    /// KEINE von ihnen setzt die Besitzklammer; beide Aufrufer haben sie offen.
+    /// Die drei fensteroeffnenden liefern das ENTSTANDENE Fenster - oder nullptr, wenn
+    /// ToggleWindow ein bereits offenes zugemacht hat. Das Padmenue braucht den Zeiger, um den
+    /// Fokus hineinzugeben (PadMenuLeaveTo); der Mauspfad wirft ihn wie bisher weg.
+    IngameWindow* OpenMinimapFor(PlayerView& view);
+    IngameWindow* OpenMainMenuFor(PlayerView& view);
+    /// Bauhilfe (BQ-Symbole) dieser Ansicht an/aus. REINE ANZEIGE - kein GameCommand, kein
+    /// Netzverkehr, kein Simulationszustand; die Begruendung steht an der Umsetzung.
+    void ToggleConstructionAidFor(PlayerView& view);
+    /// Gebaeudenamen und Auslastung dieser Ansicht an/aus. Ebenfalls reine Anzeige.
+    void ToggleNamesAndProductivityFor(PlayerView& view);
+    /// Postfenster DIESER Ansicht, mit IHREM Postfach.
+    IngameWindow* OpenPostOfficeFor(PlayerView& view);
+    /// Das Padmenue dieser Ansicht schliessen und den Fokus in das gerade geoeffnete Fenster
+    /// geben. Gerufen aus iwPadSystemMenu, sobald ein Punkt gewaehlt wurde, der ein Fenster
+    /// oeffnet.
+    void PadMenuLeaveTo(PlayerView& view, IngameWindow* opened);
+
+    /// Der Back-Knopf: oeffnet (oder schliesst) das Systemmenue DIESER Ansicht und betritt es
+    /// sofort mit dem Fokus. Ersatz fuer die Knopfleiste, die ein Padspieler nicht erreicht.
+    bool PadOpenSystemMenu(PlayerView& view);
     /// Fokus dieser Ansicht aufloesen und den Rahmen am uebergebenen Wurzelfenster abmelden.
     void ClearFocusRing(PlayerView& view, Window* root);
 
@@ -592,6 +624,11 @@ protected:
     void ShowPersistentWindowsAfterSwitch();
 
     PostBox& GetPostBox();
+    /// Das Postfach DIESER Ansicht - legt es an, falls es noch keins gibt.
+    PostBox& GetPostBox(const PlayerView& view);
+    /// Der gemeinsame Rumpf der beiden darueber. Bewusst ueber die SPIELERnummer und nicht die
+    /// Ansichtsnummer: PostManager fuehrt seine Faecher je Spieler.
+    PostBox& GetPostBoxFor(unsigned playerId);
 
     /// Baut die Liste der lokalen Ansichten: erst der Hauptspieler, dann die zusaetzlichen
     /// lokalen Spieler aus GameClient::GetAdditionalLocalPlayers(). Statisch, weil das Ergebnis

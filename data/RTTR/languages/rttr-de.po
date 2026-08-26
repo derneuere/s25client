@@ -1089,6 +1089,14 @@ msgstr "Bauhilfsmodus"
 msgid "Construction aid only"
 msgstr "Nur Konstruktionshilfe"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Construction aid: off"
+msgstr "Bauhilfe: aus"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Construction aid: on"
+msgstr "Bauhilfe: an"
+
 #: libs/s25main/addons/AddonMilitaryAid.h:21
 msgid "Construction and attack aid"
 msgstr "Konstruktions- und Angriffshilfe"
@@ -1377,6 +1385,10 @@ msgstr "Ab"
 #: libs/s25main/ingameWindows/iwMusicPlayer.cpp:108
 msgid "Downwards"
 msgstr "Nach unten"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Draws a symbol on every spot: what fits there - a flag, a hut, a house, a castle or a mine."
+msgstr "Malt auf jeden Platz ein Zeichen: was dort hinpasst - eine Flagge, eine Hütte, ein Haus, eine Burg oder ein Bergwerk."
 
 #: libs/s25main/gameData/BuildingBriefs.cpp:103
 msgid "Draws water for the bakery, the brewery, the pig farm and the donkey breeder."
@@ -2717,6 +2729,10 @@ msgstr "Mittelfristig"
 msgid "Melts iron for the armory and the metalworks."
 msgstr "Schmilzt Eisen für Schmiede und Schlosserei."
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Menu"
+msgstr "Menü"
+
 #: libs/s25main/ingameWindows/iwMerchandiseStatistics.cpp:35
 #: libs/s25main/ingameWindows/iwStatistics.cpp:139
 #: libs/s25main/ingameWindows/iwStatistics.cpp:228
@@ -2905,6 +2921,14 @@ msgstr "Name"
 #: libs/s25main/desktops/dskOptions.cpp:177
 msgid "Name in Game:"
 msgstr "Name im Spiel:"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Names and output: off"
+msgstr "Namen und Auslastung: aus"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Names and output: on"
+msgstr "Namen und Auslastung: an"
 
 #: libs/s25main/addons/AddonCatapultGraphics.h:19
 msgid "Nation-specific catapult graphics"
@@ -3979,6 +4003,10 @@ msgstr "Zeige GameFrame Info"
 msgid "Show coordinates"
 msgstr "Zeige Koordinaten"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Shows the whole map in small. Useful to see where your land ends."
+msgstr "Zeigt die ganze Karte in klein. Gut, um zu sehen, wo dein Land aufhört."
+
 #: libs/s25main/desktops/dskMainMenu.cpp:39
 msgid "Singleplayer"
 msgstr "Einzelspieler"
@@ -4151,6 +4179,10 @@ msgstr "Statistik"
 #: libs/s25main/ingameWindows/iwSettings.cpp:91
 msgid "Statistics Scale"
 msgstr "Statistikskalierung"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Statistics, goods, tools, military - and saving, giving up and leaving the game."
+msgstr "Statistik, Waren, Werkzeuge, Militär - und Speichern, Aufgeben und Spiel verlassen."
 
 #: libs/s25main/ingameWindows/iwInventory.cpp:11
 #: libs/s25main/ingameWindows/iwMainMenu.cpp:56
@@ -4967,6 +4999,10 @@ msgstr "Holzfäller"
 msgid "World was put together and glued..."
 msgstr "Welt zusammengesteckt und verklebt..."
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Writes the name and the output of every building onto the map."
+msgstr "Schreibt Namen und Auslastung jedes Gebäudes auf die Karte."
+
 #: libs/s25main/network/ClientError.cpp:14
 msgid "Wrong Password!"
 msgstr "Ungültiges Passwort!"
@@ -5102,6 +5138,10 @@ msgstr "Dein Gebäude"
 #: libs/s25main/input/PlayerBrief.cpp:167
 msgid "Your flag"
 msgstr "Deine Flagge"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Your messages: why a mine stopped, where ore was found, who is attacking - and the diary of the campaign."
+msgstr "Deine Meldungen: warum ein Bergwerk steht, wo Erz gefunden wurde, wer angreift - und das Tagebuch der Kampagne."
 
 #: libs/s25main/input/PlayerBrief.cpp:177
 msgid "Your road"

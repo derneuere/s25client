@@ -5337,3 +5337,44 @@ msgstr ""
 #: libs/s25main/gameData/BuildingConsts.cpp:25
 msgid "Leatherworks"
 msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Menu"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Construction aid: on"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Construction aid: off"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Names and output: on"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Names and output: off"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Shows the whole map in small. Useful to see where your land ends."
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Your messages: why a mine stopped, where ore was found, who is attacking - and the diary of the campaign."
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Draws a symbol on every spot: what fits there - a flag, a hut, a house, a castle or a mine."
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Writes the name and the output of every building onto the map."
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Statistics, goods, tools, military - and saving, giving up and leaving the game."
+msgstr ""
+

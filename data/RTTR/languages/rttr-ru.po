@@ -1091,6 +1091,16 @@ msgstr "Режим помощи в строительстве"
 msgid "Construction aid only"
 msgstr "Только помощь в строительстве"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+#, fuzzy
+msgid "Construction aid: off"
+msgstr "Режим помощи в строительстве"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+#, fuzzy
+msgid "Construction aid: on"
+msgstr "Только помощь в строительстве"
+
 #: libs/s25main/addons/AddonMilitaryAid.h:21
 msgid "Construction and attack aid"
 msgstr "Помощь в строительстве и атаке"
@@ -1382,6 +1392,10 @@ msgstr "Вниз"
 #: libs/s25main/ingameWindows/iwMusicPlayer.cpp:108
 msgid "Downwards"
 msgstr "Вниз"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Draws a symbol on every spot: what fits there - a flag, a hut, a house, a castle or a mine."
+msgstr ""
 
 #: libs/s25main/gameData/BuildingBriefs.cpp:103
 #, fuzzy
@@ -2716,6 +2730,10 @@ msgstr "Средний промежуток времени"
 msgid "Melts iron for the armory and the metalworks."
 msgstr ""
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Menu"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwMerchandiseStatistics.cpp:35
 #: libs/s25main/ingameWindows/iwStatistics.cpp:139
 #: libs/s25main/ingameWindows/iwStatistics.cpp:228
@@ -2904,6 +2922,14 @@ msgstr "Имя"
 #: libs/s25main/desktops/dskOptions.cpp:177
 msgid "Name in Game:"
 msgstr "Имя в игре:"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Names and output: off"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Names and output: on"
+msgstr ""
 
 #: libs/s25main/addons/AddonCatapultGraphics.h:19
 msgid "Nation-specific catapult graphics"
@@ -3984,6 +4010,10 @@ msgstr "Показать GameFrame:"
 msgid "Show coordinates"
 msgstr "Показывать координаты"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Shows the whole map in small. Useful to see where your land ends."
+msgstr ""
+
 #: libs/s25main/desktops/dskMainMenu.cpp:39
 msgid "Singleplayer"
 msgstr "Одиночная игра"
@@ -4156,6 +4186,10 @@ msgstr "Статистика"
 #: libs/s25main/ingameWindows/iwSettings.cpp:91
 msgid "Statistics Scale"
 msgstr "Шкала статистики"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Statistics, goods, tools, military - and saving, giving up and leaving the game."
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwInventory.cpp:11
 #: libs/s25main/ingameWindows/iwMainMenu.cpp:56
@@ -4968,6 +5002,10 @@ msgstr "Лесоповал"
 msgid "World was put together and glued..."
 msgstr "Мир собран и склеен..."
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Writes the name and the output of every building onto the map."
+msgstr ""
+
 #: libs/s25main/network/ClientError.cpp:14
 msgid "Wrong Password!"
 msgstr "Неверный пароль!"
@@ -5104,6 +5142,10 @@ msgstr "Строительство порта"
 #, fuzzy
 msgid "Your flag"
 msgstr "Установить флаг"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Your messages: why a mine stopped, where ore was found, who is attacking - and the diary of the campaign."
+msgstr ""
 
 #: libs/s25main/input/PlayerBrief.cpp:177
 #, fuzzy

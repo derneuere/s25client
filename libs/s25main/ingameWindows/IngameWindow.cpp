@@ -53,8 +53,29 @@ IngameWindow::IngameWindow(unsigned id, const DrawPoint& pos, const Extent& size
     contentOffsetEnd.x = LOADER.GetImageN("resource", 39)->getWidth();  // right border
     contentOffsetEnd.y = LOADER.GetImageN("resource", 40)->getHeight(); // bottom bar
 
+    // Die gemerkten Fenstereinstellungen (Position, minimiert, angepinnt, "war offen") sind
+    // allein nach GUI_ID geschluesselt (Settings.h). Zwei Fenster derselben Art mit
+    // VERSCHIEDENEN Besitzern teilen sich damit EIN Objekt - PLAN.md fuehrt das als offenen
+    // Punkt aus Phase 4f mit dem Zusatz "Heute unerreichbar".
+    //
+    // Diese Phase macht ihn erreichbar: das Padmenue oeffnet Uebersichtskarte, Postfenster und
+    // Hauptauswahl fuer JEDEN Sitzplatz, und drei davon stehen in Settings.cpp/persistentWindows.
+    // Ohne die Klemme hier verschoeben sich zwei Spieler gegenseitig ihr Postfenster, und
+    // minimierte einer seins, kaeme das des anderen minimiert auf die Welt - ein Padspieler
+    // koennte es dann nicht einmal betreten (ValidateFocus loest den Fokus in minimierten
+    // Fenstern auf).
+    //
+    // Die ehrliche Form, solange es nur EINEN gemerkten Satz gibt: er gehoert dem Sitzplatz,
+    // dem auch die Maus, die Tastatur und die Knopfleiste gehoeren - der Hauptansicht. Fenster
+    // ohne Besitzer (SHARED_WINDOW_OWNER: Nachrichtenboxen, Systemfenster, alles ausserhalb
+    // einer Besitzklammer) behalten ihn ebenfalls, denn das ist der Einzelspielerfall und dort
+    // aendert sich damit KEIN Bit. Nur die Sitzplaetze 1 bis 3 bekommen keinen - ihre Fenster
+    // merken sich nichts und schreiben nichts. Ein Satz je Sitzplatz ist ein eigener Schritt
+    // (er muesste durch Settings::Save/Load).
+    const bool mayUsePersistentSettings = (ownerIdx_ == SHARED_WINDOW_OWNER || ownerIdx_ == 0);
     const auto it = SETTINGS.windows.persistentSettings.find(GetGUIID());
-    windowSettings_ = (it == SETTINGS.windows.persistentSettings.cend() ? nullptr : &it->second);
+    windowSettings_ =
+      (!mayUsePersistentSettings || it == SETTINGS.windows.persistentSettings.cend()) ? nullptr : &it->second;
 
     // For compatibility we treat the given height as the window height, not the content height
     // First we have to make sure the size is not to small

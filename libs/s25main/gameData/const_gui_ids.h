@@ -41,6 +41,10 @@ enum GUI_ID : unsigned
     CGI_MUSICPLAYER,
     CGI_OBSERVATION,
     CGI_OPTIONSWINDOW,
+    /// Das Systemmenue EINES Padspielers (iwPadSystemMenu). Bewusst NICHT in
+    /// Settings.cpp/persistentWindows: es erscheint am Zeiger seines Besitzers und darf sich
+    /// weder eine Position noch einen "war offen"-Zustand ueber Partien hinweg merken.
+    CGI_PADMENU,
     CGI_PLAYREPLAY,
     CGI_PLEASEWAIT,
     CGI_POSTOFFICE,

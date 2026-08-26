@@ -138,7 +138,35 @@ iwOptionsWindow::iwOptionsWindow(SoundManager& soundManager)
     curPos.y += optionSizeBig.y + generalSpacing;
     AddTextButton(ID_btSurrender, curPos, optionSizeBig, TextureColor::Red1, _("Surrender"), NormalFont);
     curPos.y += optionSizeBig.y + generalSpacing;
-    AddTextButton(ID_btEndGame, curPos, optionSizeBig, TextureColor::Red1, _("End game"), NormalFont);
+
+    // "Spiel beenden" gibt es NUR fuer den Hauptsitzplatz.
+    //
+    // Der Unterschied zu "Aufgeben" darueber ist kein gradueller: iwSurrender erzeugt ein
+    // GameCommand, und das bucht auf den Spieler, in dessen Namen gerade verarbeitet wird
+    // (GameClient::AddGC ueber den Fensterbesitz) - ein Sitzplatz gibt also SEIN Volk auf, die
+    // Partie laeuft weiter. iwEndgame ruft GAMEMANAGER.ShowMenu() und wirft damit die PARTIE
+    // weg, fuer alle vier Menschen vor dem Fernseher, ohne Spielerbezug und ohne Rueckweg.
+    //
+    // Bis zu dieser Phase war das fuer die Sitzplaetze 1 bis 3 unerreichbar - sie kamen an die
+    // Knopfleiste gar nicht heran. Mit dem Padmenue sind es drei Knopfdruecke von JEDEM Pad aus
+    // (Back -> Hauptauswahl -> Einstellungen), und der Bestaetigungsdialog gehoert absichtlich
+    // dem BILDSCHIRM (iwEndgame: SetOwner(SHARED_WINDOW_OWNER)), liegt also fuer jeden obenauf.
+    // Vier Kinder am Fernseher, eines findet den Knopf - die Partie ist weg.
+    //
+    // Die Regel ist dieselbe wie bei den gemerkten Fenstereinstellungen (IngameWindow.cpp): was
+    // den BILDSCHIRM betrifft und nicht einen Sitzplatz, gehoert dem Sitzplatz, dem auch Maus,
+    // Tastatur und Knopfleiste gehoeren - der Hauptansicht. Besitzerlose Fenster
+    // Der heutige Einzelspieler und der Tastaturweg sind BEIDE Besitzer 0 und behalten den Knopf
+    // deshalb ueber die zweite Bedingung: Msg_KeyDown oeffnet in seiner ersten Zeile
+    // ViewScope(primary().GetIndex()). Fuer sie aendert sich KEIN Bit. Der
+    // SHARED_WINDOW_OWNER-Zweig ist im heutigen Baum unerreichbar - iwOptionsWindow entsteht nur
+    // in dskGameInterface (unter ViewScope(primary())) und in iwMainMenu (unter der Klammer des
+    // Hauptauswahlfensters, das nie besitzerlos ist) - und steht hier als Vorsicht.
+    //
+    // Was der Hauptspieler dadurch NICHT verliert: ALT+Q oeffnet denselben Dialog weiterhin
+    // direkt (dskGameInterface::Msg_KeyDown), und der Siegdialog (iwVictory) ebenso.
+    if(GetOwner() == SHARED_WINDOW_OWNER || GetOwner() == 0)
+        AddTextButton(ID_btEndGame, curPos, optionSizeBig, TextureColor::Red1, _("End game"), NormalFont);
 }
 
 void iwOptionsWindow::Msg_ButtonClick(const unsigned ctrl_id)
