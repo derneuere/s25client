@@ -272,6 +272,9 @@ msgstr "Katapult tulistab meie suunas!"
 msgid "A flag costs nothing and you can tear it down again. Press X to put one here."
 msgstr ""
 
+msgid "A flag costs nothing and you can tear it down again. Roads start and end at flags, and wares are handed over there."
+msgstr ""
+
 #: libs/s25main/gameData/BuildingConsts.cpp:161
 msgid "A gold mine allows you to prospect for valuable gold deposits. For this, it is necessary to ensure that the miners are provided with plenty of food."
 msgstr "Kullakaevandus lubab sul omada väljavaadet  väärtuslikele kulladeposiitidele . Selleks on vajalik kindlustada, et kaevurid oleks varustatud piisava söögiga."
@@ -350,6 +353,9 @@ msgstr "TI silumise aken"
 #: libs/s25main/ingameWindows/iwMusicPlayer.cpp:65
 msgid "Abort"
 msgstr "Katkesta"
+
+msgid "Actions"
+msgstr ""
 
 #: libs/s25main/addons/AddonDemolitionProhibition.h:22
 msgid "Active if attacked"
@@ -440,6 +446,9 @@ msgid ""
 "Adds troop controls to military buildings.\n"
 "Minimal: Adds the 'send home' button which will send all soldiers of the highest available rank to a warehouse.\n"
 "Full: Allows players to control in each military building how many soldiers of each rank should be stationed there."
+msgstr ""
+
+msgid "Adjust"
 msgstr ""
 
 #: libs/s25main/addons/AddonAdjustMilitaryStrength.h:29
@@ -591,12 +600,18 @@ msgstr ""
 msgid "Async logs received completely.\n"
 msgstr ""
 
+msgid "At THIS flag there is no geologist and no scout - its menu only builds roads. For those two you need an ordinary flag out in your land."
+msgstr ""
+
 #: libs/s25main/network/GameClient.cpp:1912
 msgid "At most %1% local players are supported, %2% were requested"
 msgstr ""
 
 #: libs/s25main/gameData/BuildingConsts.cpp:117
 msgid "At the winery, grapes are stomped in a vat to produce wine. The vintner's wine is of high quality, worthy of sacrifice at the temple."
+msgstr ""
+
+msgid "Attack menu"
 msgstr ""
 
 #: libs/s25main/ingameWindows/iwAction.cpp:365
@@ -681,6 +696,12 @@ msgstr ""
 #: libs/s25main/ingameWindows/iwPlayReplay.cpp:61
 msgid "Back"
 msgstr "Tagasi"
+
+msgid "Back out"
+msgstr ""
+
+msgid "Back to here"
+msgstr ""
 
 #: libs/s25main/gameData/JobConsts.cpp:28
 msgid "Baker"
@@ -767,11 +788,20 @@ msgstr ""
 msgid "Brutus"
 msgstr ""
 
+msgid "Build a road"
+msgstr ""
+
+msgid "Build a waterway"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwAction.cpp:302
 #: libs/s25main/ingameWindows/iwAction.cpp:304
 #, fuzzy
 msgid "Build headquarters"
 msgstr "Peakorter"
+
+msgid "Build menu"
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwAction.cpp:204
 #: libs/s25main/ingameWindows/iwAction.cpp:216
@@ -798,6 +828,9 @@ msgstr "Ehita tee"
 msgid "Building a waterway"
 msgstr "Ehita veetee"
 
+msgid "Building names and workload"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwBuildOrder.cpp:38
 #: libs/s25main/ingameWindows/iwMainMenu.cpp:71
 msgid "Building sequence"
@@ -820,6 +853,9 @@ msgstr "Lihunik"
 
 #: libs/s25main/ingameWindows/iwStatistics.cpp:47
 msgid "COMP"
+msgstr ""
+
+msgid "Call in a geologist"
 msgstr ""
 
 #: libs/s25main/ingameWindows/iwAction.cpp:208
@@ -873,6 +909,9 @@ msgstr ""
 
 #: libs/s25main/Replay.cpp:207
 msgid "Cannot play replay created with a more recent version (Current: %1%, Replay: %2%)"
+msgstr ""
+
+msgid "Careful: if a building stands right above this flag, this button asks whether to tear down THAT BUILDING instead."
 msgstr ""
 
 #: libs/s25main/gameData/JobConsts.cpp:23
@@ -957,6 +996,9 @@ msgstr "Kontrollin kaarti ..."
 msgid "Checking Password..."
 msgstr "Kontrollin parooli..."
 
+msgid "Choose"
+msgstr ""
+
 #: libs/s25main/desktops/dskCampaignMissionSelection.cpp:82
 msgid "Choose mission"
 msgstr ""
@@ -982,6 +1024,9 @@ msgstr "Suletud"
 #: libs/s25main/ingameWindows/iwAddons.cpp:47
 msgid "Close Without Saving"
 msgstr "Sulge Salvestamata"
+
+msgid "Close it"
+msgstr ""
 
 #: libs/s25main/desktops/dskGameLobby.cpp:424
 msgid "Closed"
@@ -1266,6 +1311,9 @@ msgstr ""
 msgid "Dig up road"
 msgstr "Kaeva tee ülesse"
 
+msgid "Dig up this road"
+msgstr ""
+
 #: libs/s25main/gameData/BuildingBriefs.cpp:43
 msgid "Digs coal. The iron smelter, the armory and the mint all burn it."
 msgstr ""
@@ -1316,6 +1364,9 @@ msgstr "Väljas"
 msgid "Disallow change"
 msgstr "Keela muudatus"
 
+msgid "Discard"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwAction.cpp:307
 msgid "Display options"
 msgstr "Ekraani seaded"
@@ -1358,6 +1409,9 @@ msgstr "Eeslikasvataja"
 #: libs/s25main/gameData/BuildingConsts.cpp:48
 msgid "Donkey breeding"
 msgstr "Eesli kasvatus"
+
+msgid "Donkeys carry the wares on this road instead of your carriers, which makes it faster."
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwBuildOrder.cpp:53
 #: libs/s25main/ingameWindows/iwTransport.cpp:33
@@ -1583,6 +1637,9 @@ msgstr ""
 msgid "Every GF"
 msgstr "Kõik"
 
+msgid "Every ware of yours goes in and out through this flag. Press A to start your first road here."
+msgstr ""
+
 #: libs/s25main/addons/AddonStatisticsVisibility.h:22
 msgid "Everyone"
 msgstr "Kõik"
@@ -1610,6 +1667,9 @@ msgstr "Avastamis ekspeditsioon"
 #: libs/s25main/desktops/dskGameLobby.cpp:233
 msgid "Exploration:"
 msgstr "Avastamine:"
+
+msgid "Extend"
+msgstr ""
 
 #: libs/s25main/desktops/dskSelectMap.cpp:407
 msgid ""
@@ -1750,6 +1810,9 @@ msgstr "Faili nimi"
 msgid "Finances"
 msgstr ""
 
+msgid "Finish"
+msgstr ""
+
 #: libs/s25main/gameData/BuildingBriefs.cpp:55
 msgid "Fires at enemy military buildings in range. Useless until you share a border with an enemy."
 msgstr ""
@@ -1765,6 +1828,15 @@ msgstr "Kalur"
 #: libs/s25main/gameData/BuildingConsts.cpp:28
 msgid "Fishery"
 msgstr "Kaluri hütt"
+
+msgid "Flag"
+msgstr ""
+
+msgid "Flag menu"
+msgstr ""
+
+msgid "Flags are the junctions of your road network."
+msgstr ""
 
 #: libs/s25main/input/PlayerBrief.cpp:129
 msgid "Flags are the junctions of your road network. Wares are handed over from flag to flag, so a long road needs many of them."
@@ -1955,6 +2027,9 @@ msgstr ""
 msgid "Go to place"
 msgstr "Mine"
 
+msgid "Go to the headquarters"
+msgstr ""
+
 #: libs/s25main/desktops/dskGameLobby.cpp:249
 msgid "Goals:"
 msgstr "Eesmärgid:"
@@ -2059,6 +2134,15 @@ msgstr "Haamer"
 #: libs/s25main/ingameWindows/iwHarborBuilding.cpp:16
 msgid "Harbor building"
 msgstr "Sadam"
+
+msgid "He comes out of a warehouse, so this flag needs a road to one. Without that road nothing happens at all - and nothing tells you so."
+msgstr ""
+
+msgid "He walks out from THIS flag and digs around it for iron, gold, coal, granite and water. He puts up 15 signs and reports each kind of find once."
+msgstr ""
+
+msgid "He walks out from THIS flag, wanders about a hundred steps through the fog and then comes home. What he walks past stays uncovered."
+msgstr ""
 
 #: libs/s25main/gameData/BuildingConsts.cpp:10
 #: libs/s25main/ingameWindows/iwHQ.cpp:15
@@ -2194,6 +2278,9 @@ msgstr "Interneti ooteruum"
 #: libs/s25main/ingameWindows/iwRoadWindow.cpp:20
 msgid "Interrupt road building"
 msgstr "Katkesta tee ehitamine"
+
+msgid "Into the window"
+msgstr ""
 
 #: libs/s25main/desktops/dskMainMenu.cpp:44
 msgid "Intro"
@@ -2362,6 +2449,12 @@ msgstr "Vähem kordusi"
 
 #: libs/s25main/gameData/BuildingBriefs.cpp:50
 msgid "Lifts the fog from a wide circle. It produces nothing - build it to see, not to earn."
+msgstr ""
+
+msgid "Like a road, but across the water. It only starts at a flag that stands on the shore."
+msgstr ""
+
+msgid "Like the geologist he comes out of a warehouse, so this flag needs a road to one."
 msgstr ""
 
 #: libs/s25main/desktops/dskOptions.cpp:340
@@ -2852,8 +2945,14 @@ msgstr "Rohkem kordusi"
 msgid "More trees spawn animals"
 msgstr ""
 
+msgid "Move"
+msgstr ""
+
 #: libs/s25main/input/PlayerBrief.cpp:205
 msgid "Move the pointer and press A to lay the next piece."
+msgstr ""
+
+msgid "Moves your view back to your headquarters."
 msgstr ""
 
 #: libs/s25main/desktops/dskMainMenu.cpp:41
@@ -2954,6 +3053,9 @@ msgstr "Uued kaardid"
 #: libs/s25main/buildings/nobStorehouse.cpp:20
 msgid "New storehouse finished"
 msgstr "Uus ladu valmis"
+
+msgid "Next"
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwWares.cpp:189
 msgid "Next page"
@@ -3074,6 +3176,9 @@ msgstr ""
 msgid "Nothing fits on this spot - not even a flag. Move on a field or two."
 msgstr ""
 
+msgid "Nothing to do here: not one of your soldiers can reach this building. This tab carries no button at all, only the notice that an attack is not possible."
+msgstr ""
+
 #: libs/s25main/network/GameClientGF_Replay.cpp:97
 #, c-format
 msgid "Notice: Overall asynchronous frame count: %u"
@@ -3166,6 +3271,9 @@ msgstr ""
 msgid "On"
 msgstr "Sees"
 
+msgid "One back"
+msgstr ""
+
 #: libs/s25main/desktops/dskGameInterface.cpp:178
 msgid "Only %1% local views are supported, ignoring the additional local player(s) starting at slot %2%\n"
 msgstr ""
@@ -3198,12 +3306,18 @@ msgstr ""
 msgid "Open"
 msgstr "Vaba"
 
+msgid "Open it"
+msgstr ""
+
 #: libs/s25main/drivers/VideoDriverWrapper.cpp:373
 msgid "OpenGL %1% %2%.%3% is not supported. Try updating your GPU drivers or hardware!"
 msgstr ""
 
 #: libs/s25main/drivers/VideoDriverWrapper.cpp:370
 msgid "OpenGL %1%.%2% supported\n"
+msgstr ""
+
+msgid "Opens a small second window that keeps watching this spot while you work somewhere else."
 msgstr ""
 
 #: libs/s25main/desktops/dskOptions.cpp:367
@@ -3369,6 +3483,9 @@ msgstr "Palun sisesta nimi mängu jaoks"
 msgid "Please wait..."
 msgstr "Palun oota..."
 
+msgid "Point your allies here"
+msgstr ""
+
 #: libs/s25main/desktops/dskOptions.cpp:188
 msgid "Portrait:"
 msgstr ""
@@ -3400,6 +3517,9 @@ msgstr ""
 
 #: libs/s25main/gameData/BuildingBriefs.cpp:32
 msgid "Presses wine, which only the temple uses."
+msgstr ""
+
+msgid "Previous"
 msgstr ""
 
 #: libs/s25main/gameData/JobConsts.cpp:40
@@ -3471,6 +3591,15 @@ msgstr "Tüüp:"
 #: libs/s25main/ingameWindows/iwAction.cpp:220
 msgid "Pull down flag"
 msgstr "Murra lipp maha"
+
+msgid "Pull down this flag"
+msgstr ""
+
+msgid "Put up a flag"
+msgstr ""
+
+msgid "Put up a flag here"
+msgstr ""
 
 #: libs/s25main/desktops/dskCredits.cpp:57
 #: libs/s25main/desktops/dskCredits.cpp:62
@@ -3652,6 +3781,12 @@ msgstr "Mine sadamasse tagasi"
 msgid "Rivers:"
 msgstr ""
 
+msgid "Road"
+msgstr ""
+
+msgid "Road menu"
+msgstr ""
+
 #: libs/s25main/input/PlayerBrief.cpp:168
 msgid "Roads start and end at flags."
 msgstr ""
@@ -3827,6 +3962,9 @@ msgstr "Saada"
 
 #: libs/s25main/ingameWindows/iwMilitaryBuilding.cpp:73
 msgid "Send max rank soldiers to a warehouse"
+msgstr ""
+
+msgid "Send out a scout"
 msgstr ""
 
 #: libs/s25main/ingameWindows/iwAction.cpp:210
@@ -4054,6 +4192,9 @@ msgstr ""
 msgid "Socks v4"
 msgstr "Socks V4"
 
+msgid "Soldiers only march out from your own military buildings nearby. Build one closer and come back."
+msgstr ""
+
 #: libs/s25main/addons/AddonBattlefieldPromotion.h:17
 msgid "Soldiers winning a fight increase in rank."
 msgstr ""
@@ -4132,6 +4273,9 @@ msgstr "Mängu alustamine, palun oota"
 
 #: libs/s25main/Loader.cpp:267
 msgid "Starting sound conversion: "
+msgstr ""
+
+msgid "Starts a road at this flag. Move the pointer and press A for each piece, X finishes it."
 msgstr ""
 
 #: libs/s25main/ingameWindows/iwStatistics.cpp:78
@@ -4308,6 +4452,9 @@ msgstr "Pruulija valmistab suurepärast õlu viljast ja veest. See jook on vajal
 msgid "The building statistics window gives you an insight into the number of buildings you have, by type. The number on the left is the total number of this type of building completed, the number on the right shows how many are currently under construction."
 msgstr ""
 
+msgid "The buildings that fit on this spot. Move onto one and this box tells you what it does and what it costs."
+msgstr ""
+
 #: libs/s25main/gameData/BuildingConsts.cpp:199
 msgid "The butcher processes the livestock delivered into nutritious ham on which you miners are fed."
 msgstr "Lihunik töötleb saabunud elusloomad toitvaks singiks, millest sinu kaevurid toituvad."
@@ -4351,6 +4498,12 @@ msgstr ""
 #: libs/s25main/gameData/BuildingConsts.cpp:184
 msgid "The fish man is responsible for finding water rich in fish. His fish feed a great many miners."
 msgstr "Kalamees vastutab kalarikaste vete leidmise eest. Tema püütud kalad toidavad paljusid kaevureid."
+
+msgid "The flag goes away and with it the roads that end here."
+msgstr ""
+
+msgid "The flag of your headquarters"
+msgstr ""
 
 #: libs/s25main/gameData/BuildingConsts.cpp:260
 msgid "The flour produced at the windmill can be combined with water in the bakery to make oven-fresh bread. It's your miners' favorite!"
@@ -4410,6 +4563,9 @@ msgstr ""
 msgid "The quarrying of stone in a granite mine guarantees the supply of stone for buildings. However, even a granite mine has to feed its workers."
 msgstr "Kivi kaevandamine graniidi kaevanduses kindlustab ehitiste kividega varustamise. Siiski peab ka graniidi kaevandus oma töölisi toitma."
 
+msgid "The road disappears. Flags that then hang on nothing stay where they are."
+msgstr ""
+
 #: libs/s25main/desktops/dskGameInterface.cpp:1633
 msgid "The road is too short - extend it first."
 msgstr ""
@@ -4424,6 +4580,9 @@ msgstr ""
 
 #: libs/s25main/ingameWindows/iwShip.cpp:131
 msgid "The ship register contains all the ships in your fleet. Here you can monitor the loading and destinations of individual ships. Ships on an expedition are controlled from here as well."
+msgstr ""
+
+msgid "The sign is only a mark: a mine digs what lies in the ground within two steps of itself, sign or no sign. Build it right next to a sign - the signs fade away after a while, what lies underneath does not."
 msgstr ""
 
 #: libs/s25main/gameData/BuildingBriefs.cpp:19
@@ -4483,6 +4642,12 @@ msgstr ""
 
 #: libs/s25main/network/GameServer.cpp:1519
 msgid "There are %1% identical async log entries.\n"
+msgstr ""
+
+msgid "There is no geologist and no scout at THIS flag. For those two you need an ordinary flag out in your land - one that you put up yourself."
+msgstr ""
+
+msgid "There is nothing to do at this flag."
 msgstr ""
 
 #: libs/s25main/ingameWindows/iwTools.cpp:185
@@ -4724,6 +4889,9 @@ msgstr "Lõputu mäng"
 msgid "Up"
 msgstr "Ülespoole"
 
+msgid "Upgrade to a donkey road"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwAction.cpp:344
 msgid "Upgrade to donkey road"
 msgstr "Uuenda eesliga teeks"
@@ -4811,6 +4979,9 @@ msgstr ""
 msgid "View Settings..."
 msgstr "Vaata seadeid..."
 
+msgid "View menu"
+msgstr ""
+
 #: libs/s25main/gameData/NationConsts.h:13
 msgid "Vikings"
 msgstr "Vikingid"
@@ -4855,10 +5026,19 @@ msgstr "Kaup millega soovid kaubelda"
 msgid "Wares"
 msgstr "Kaubad"
 
+msgid "Wares are carried from flag to flag, so a building without a road to your warehouse gets nothing and delivers nothing."
+msgstr ""
+
 #: libs/s25main/network/GameClientGF_Replay.cpp:48
 #, c-format
 msgid "Warning: The played replay is not in sync with the original match. (GF: %u)"
 msgstr "Hoiatus: Tagasimäng ei ole sünkroonis esialgse mänguga. (GF: %u)"
+
+msgid "Watch window"
+msgstr ""
+
+msgid "Watch window, building names, jump to your headquarters, point your allies here. None of these change anything in the world."
+msgstr ""
 
 #: libs/s25main/gameData/BuildingConsts.cpp:14
 msgid "Watchtower"
@@ -4870,6 +5050,9 @@ msgstr "Vahitorn"
 #: libs/s25main/ingameWindows/iwMerchandiseStatistics.cpp:54
 msgid "Water"
 msgstr "Vesi"
+
+msgid "Waterway"
+msgstr ""
 
 #: libs/s25main/figures/nofAttacker.cpp:465
 msgid "We are under attack!"
@@ -4909,6 +5092,15 @@ msgstr "Kaev"
 
 #: libs/s25main/ingameWindows/iwHelp.cpp:17
 msgid "What is this?"
+msgstr ""
+
+msgid "What you can do at this flag:"
+msgstr ""
+
+msgid "What you can do in this tab:"
+msgstr ""
+
+msgid "What you can do with the road under the pointer."
 msgstr ""
 
 #: libs/s25main/desktops/dskOptions.cpp:298
@@ -4955,6 +5147,9 @@ msgstr "Maailm kokku pandud ja liimitud..."
 
 #: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
 msgid "Writes the name and the output of every building onto the map."
+msgstr ""
+
+msgid "Writes the name and the workload above every building. The workload tells you which of your works stand idle."
 msgstr ""
 
 #: libs/s25main/network/ClientError.cpp:14
@@ -5068,6 +5263,9 @@ msgstr "Sa pead restartima oma mängu, et muuta video või audio draiverit!"
 msgid "You win"
 msgstr ""
 
+msgid "Your allies get a message with this spot in it. Without an ally nothing happens."
+msgstr ""
+
 #: libs/s25main/GamePlayer.cpp:1666
 msgid "Your ally wishes to notify you of this location"
 msgstr ""
@@ -5112,10 +5310,19 @@ msgstr ""
 msgid "all developers who contributed via Github"
 msgstr ""
 
+msgid "build a road from it"
+msgstr ""
+
+msgid "build a waterway from it"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwSkipGFs.cpp:57
 #, fuzzy
 msgid "by GameFrames:"
 msgstr "Mängu kaadrini:"
+
+msgid "call in a geologist"
+msgstr ""
 
 #: libs/s25main/network/GameClient.cpp:1652
 #, c-format
@@ -5168,6 +5375,21 @@ msgstr ""
 
 #: libs/libGamedata/gameData/CampaignDescription.cpp:30
 msgid "medium"
+msgstr ""
+
+msgid "send out a scout"
+msgstr ""
+
+msgid "send the strong ones or the weak ones"
+msgstr ""
+
+msgid "set how many soldiers march out"
+msgstr ""
+
+msgid "start the attack"
+msgstr ""
+
+msgid "tear it down"
 msgstr ""
 
 #: libs/s25main/ingameWindows/iwSkipGFs.cpp:48

@@ -49,7 +49,14 @@ public:
         return IsVisible() && !preview && !inputData.missionSelectionInfos.empty();
     }
     bool Activate() override;
-    bool StepValue(const Position& dir) override;
+    /// Dieselbe Vorbedingung, die Activate() prueft - siehe ctrlButton::CanActivate.
+    bool CanActivate() const override { return IsVisible() && GetParent() && getSelection(); }
+    /// BEFUND N8, gemessen: dieses Control verbraucht das Steuerkreuz, hat aber gar keinen
+    /// Wertebereich (GetValueRange liefert nullopt). Wer die Leiste an GetValueRange haengt,
+    /// schweigt hier ueber einen Knopf, der wirkt. Deshalb ist CanStepValue die Frage - und
+    /// sie rechnet dieselbe Suche wie der Schritt selbst.
+    bool CanStepValue(const Position& dir) const override { return findStepTarget(dir) >= 0; }
+    void DoStepValue(const Position& dir) override;
 
 protected:
     void Draw_() override;
@@ -81,6 +88,13 @@ protected:
         glArchivItem_Bitmap* enabledMask;
         std::unique_ptr<libsiedler2::baseArchivItem_Bitmap> enabledMaskMemory;
     };
+
+    /// Die Marke, auf die ein Rasterschritt in diese Richtung fuehrt, oder -1.
+    ///
+    /// EINE Rechnung, zwei Aufrufer (CanStepValue und DoStepValue) - genau die Bauform, mit
+    /// der FocusPath::Move und FocusPath::CanMove sich ihr Ziel teilen. Ohne sie koennte die
+    /// Frage "wirkt das Steuerkreuz hier" etwas anderes sagen als der Schritt tut.
+    int findStepTarget(const Position& dir) const;
 
     const MapImages mapImages;
     SelectionMapInputData inputData;

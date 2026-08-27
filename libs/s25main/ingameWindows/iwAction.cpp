@@ -12,6 +12,7 @@
 #include "addons/const_addons.h"
 #include "buildings/nobMilitary.h"
 #include "controls/ctrlBuildingIcon.h"
+#include "controls/ctrlButton.h"
 #include "controls/ctrlGroup.h"
 #include "controls/ctrlOptionGroup.h"
 #include "controls/ctrlTab.h"
@@ -621,6 +622,163 @@ void iwAction::Msg_ButtonClick_TabSeaAttack(const unsigned ctrl_id)
         }
         break;
     }
+}
+
+/// DIE ZUORDNUNG KNOPF -> KLARTEXT.
+///
+/// Sie steht in DIESER Uebersetzungseinheit, weil hier auch die Knopfnummern stehen (der
+/// Kommentarblock im Konstruktor und die Msg_ButtonClick_Tab*-Rumpfe daneben). Eine Tabelle
+/// anderswo waere eine zweite Beschriftung neben der ersten und ginge beim naechsten neuen Knopf
+/// still auseinander. Der TEXT selbst steht in brief::ForAction - ohne Fenster pruefbar.
+///
+/// Was hier NICHT auftaucht, ist Absicht: Gebaeudeicons bekommen ihren vollen Block schon von
+/// brief::ForControl (Phase 9), und ein leerer Rueckgabewert faellt dort genau darauf zurueck.
+namespace {
+/// Welche der fuenf Knoepfe des Flaggenreiters wirklich angelegt worden sind.
+///
+/// Liest die Reitergruppe und nicht die Flaggenart - siehe die Begruendung an der Aufrufstelle
+/// und an brief::FlagMenuButtons (Befund N6).
+brief::FlagMenuButtons ReadFlagMenuButtons(const ctrlTab& mainTab)
+{
+    brief::FlagMenuButtons out;
+    const ctrlGroup* const group = mainTab.GetGroup(TAB_FLAG);
+    if(!group)
+        return out;
+    const auto has = [group](const unsigned id) { return group->GetCtrl<ctrlButton>(id) != nullptr; };
+    out.road = has(1);
+    out.waterway = has(2);
+    out.pullDown = has(3);
+    out.geologist = has(4);
+    out.scout = has(5);
+    return out;
+}
+
+/// Welche Knoepfe der ANGRIFFSREITER wirklich traegt - Befund P4.
+///
+/// Liest die Reitergruppe und nicht available_soldiers_count, aus demselben Grund wie oben
+/// (siehe brief::AttackMenuButtons). Die Knopfnummern sind die des Kopfkommentars dieser Datei
+/// und die von AddAttackControls; Land- und Seeangriff laufen durch dieselbe Funktion, deshalb
+/// reicht hier die Kennung des Reiters.
+brief::AttackMenuButtons ReadAttackMenuButtons(const ctrlTab& mainTab, const unsigned tabId)
+{
+    brief::AttackMenuButtons out;
+    const ctrlGroup* const group = mainTab.GetGroup(tabId);
+    if(!group)
+        return out;
+    // ctrlButton und nicht Window: bei null Soldaten steht unter der Kennung 1 ein ctrlText, und
+    // GetCtrl<ctrlButton> liefert dafuer nullptr (dynamic_cast). Genau dieser Fall ist der Befund.
+    const auto has = [group](const unsigned id) { return group->GetCtrl<ctrlButton>(id) != nullptr; };
+    out.fewer = has(1);
+    out.more = has(2);
+    // Die Staerkewahl ist eine ctrlOptionGroup und kein ctrlButton - sie muss eigens gefragt
+    // werden, sonst faellt sie stillschweigend aus dem Text.
+    out.strength = group->GetCtrl<ctrlOptionGroup>(3) != nullptr;
+    out.attack = has(4);
+    for(unsigned i = 0; i < 4u; ++i)
+    {
+        if(has(10 + i))
+            ++out.quickPicks;
+    }
+    return out;
+}
+} // namespace
+
+brief::Brief iwAction::GetPadBrief(const Window* const focused) const
+{
+    using brief::ActionBrief;
+    const brief::Brief none;
+    if(!focused)
+        return none;
+    const auto* const mainTab = GetCtrl<ctrlTab>(0);
+    const Window* const parent = focused->GetParent();
+    if(!mainTab || !parent)
+        return none;
+
+    // (a) Ein REITERKOPF. Die Knoepfe von ctrlTab tragen als ID ihre Position (ctrlTab::AddTab:
+    //     AddImageButton(tab_count, ...)); welche Reiterkennung dahintersteht, weiss nur ctrlTab.
+    //     Der Kopf ist die erste Fokusstation nach Y - gemessen -, und beim Flaggenreiter traegt
+    //     er woertlich dieselbe Zeichenkette wie der Reiter, der eine Flagge SETZT.
+    if(parent == mainTab)
+    {
+        const auto idx = static_cast<unsigned short>(focused->GetID());
+        if(idx >= mainTab->GetNumTabs())
+            return none;
+        switch(mainTab->GetTabIdAt(idx))
+        {
+            case TAB_BUILD: return brief::ForAction(ActionBrief::BuildMenuTab);
+            case TAB_SETFLAG: return brief::ForAction(ActionBrief::SetFlagTab);
+            case TAB_WATCH: return brief::ForAction(ActionBrief::WatchTab);
+            // BEFUND N6: hier stand ein KONSTANTER Satz ("... sie abreissen, einen Geologen
+            // rufen, einen Spaeher aussenden"), und der Reiterkopf ist die ERSTE Fokusstation
+            // nach Y. An der HQ-Flagge traegt der Reiter aber GENAU EINEN Knopf, an einer
+            // Wasserflagge einen zusaetzlichen. Der Spieler las also einen Knopfdruck nach dem
+            // richtigen Knotentext ("An DIESER Flagge gibt es keinen Geologen") dessen Gegenteil.
+            //
+            // Gefragt wird jetzt die REITERGRUPPE selbst und NICHT get<FlagType>(params): die
+            // Knoepfe sind das, was der Spieler vor sich sieht, und eine zweite
+            // Fallunterscheidung nach der Flaggenart koennte neben dem Konstruktor veralten.
+            // Die Kennungen sind die des Kopfkommentars dieser Datei (TAB_FLAG 1..5).
+            case TAB_FLAG: return brief::ForFlagMenu(ReadFlagMenuButtons(*mainTab));
+            case TAB_CUTROAD: return brief::ForAction(ActionBrief::CutRoadTab);
+            // BEFUND P4, dieselbe Bauform wie N6 eine Zeile darueber: bei null erreichbaren
+            // Soldaten traegt dieser Reiter GAR KEINEN Knopf (AddAttackControls legt dann nur
+            // einen ctrlText an), der Kopftext versprach aber eine Soldatenwahl. Gefragt wird
+            // deshalb die Reitergruppe und nicht available_soldiers_count.
+            case TAB_ATTACK:
+            case TAB_SEAATTACK: return brief::ForAttackMenu(ReadAttackMenuButtons(*mainTab, mainTab->GetTabIdAt(idx)));
+            default: return none;
+        }
+    }
+
+    // (b) Ein Knopf INNERHALB einer Reitergruppe. Verglichen wird der Zeiger auf die Gruppe und
+    //     nicht ihre ID: die ID ist eine Rechnung im Inneren von ctrlTab (tabs.size() + 1 + id)
+    //     und geht niemanden sonst etwas an.
+    const unsigned btId = focused->GetID();
+    if(parent == mainTab->GetGroup(TAB_FLAG))
+    {
+        switch(btId)
+        {
+            case 1: return brief::ForAction(ActionBrief::BuildRoad);
+            case 2: return brief::ForAction(ActionBrief::BuildWaterway);
+            // Derselbe Knopf reisst je nach Nachbarschaft die FLAGGE oder das HAUS ab
+            // (Msg_ButtonClick_TabFlag, case 3) - und heisst dabei immer "Fahne abreissen".
+            // Genau das sagt der Text.
+            case 3: return brief::ForAction(ActionBrief::PullDownFlag);
+            case 4: return brief::ForAction(ActionBrief::CallGeologist);
+            case 5: return brief::ForAction(ActionBrief::SendScout);
+            default: return none;
+        }
+    }
+    if(parent == mainTab->GetGroup(TAB_SETFLAG))
+    {
+        switch(btId)
+        {
+            case 1: return brief::ForAction(ActionBrief::ErectFlag);
+            case 2: return brief::ForAction(ActionBrief::UpgradeRoad);
+            default: return none;
+        }
+    }
+    if(parent == mainTab->GetGroup(TAB_CUTROAD))
+    {
+        switch(btId)
+        {
+            case 1: return brief::ForAction(ActionBrief::DigUpRoad);
+            case 2: return brief::ForAction(ActionBrief::UpgradeRoad);
+            default: return none;
+        }
+    }
+    if(parent == mainTab->GetGroup(TAB_WATCH))
+    {
+        switch(btId)
+        {
+            case 1: return brief::ForAction(ActionBrief::Observe);
+            case 2: return brief::ForAction(ActionBrief::ToggleNames);
+            case 3: return brief::ForAction(ActionBrief::GoToHQ);
+            case 4: return brief::ForAction(ActionBrief::NotifyAllies);
+            default: return none;
+        }
+    }
+    return none;
 }
 
 void iwAction::Msg_ButtonClick_TabFlag(const unsigned ctrl_id)

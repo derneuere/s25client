@@ -116,6 +116,11 @@ ctrlGroup* ctrlTab::GetGroup(const unsigned tab_id)
     return GetCtrl<ctrlGroup>(tabs.size() + 1 + tab_id);
 }
 
+const ctrlGroup* ctrlTab::GetGroup(const unsigned tab_id) const
+{
+    return GetCtrl<ctrlGroup>(tabs.size() + 1 + tab_id);
+}
+
 /**
  *  Zeichenmethode
  *

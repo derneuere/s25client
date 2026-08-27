@@ -26,6 +26,7 @@
 #include "gameTypes/RoadBuildState.h"
 #include "liblobby/LobbyInterface.h"
 #include <array>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -220,6 +221,25 @@ public:
     /// ComputeActionOptions unterscheidet sie nicht. Naeheres am Rumpf und an brief::NodeVerdict.
     brief::NodeVerdict JudgeNode(PlayerView& view, MapPoint pt);
 
+    /// Wuerde A unter dem Zeiger ein Objektfenster oeffnen?
+    ///
+    /// WOERTLICH die drei Bedingungen, an denen OpenObjectWindow der Reihe nach entscheidet
+    /// (Schiff, eigenes Gebaeude, eigene Baustelle) - nur ohne das Fenster zu zeigen. Gebraucht
+    /// wird die Frage von der Tastenhinweisleiste, die vor dem Druck sagen muss, was A tut.
+    ///
+    /// Dass es zwei Rechnungen sind, ist ein benanntes Risiko und kein Versehen:
+    /// OpenObjectWindow ist ein Kommando und laesst sich nicht folgenlos fragen. Es gibt deshalb
+    /// einen Nachweis, der beide gegeneinander haelt, indem er A wirklich drueckt
+    /// (testPadKeyHints.cpp, TheOpenHintAppearsExactlyWhereAReallyOpensAWindow).
+    bool CanOpenObjectWindow(PlayerView& view, MapPoint pt) const;
+    /// Wuerde Back jetzt etwas tun? Der Knopf schaltet um; er ist nur dann wirkungslos, wenn
+    /// noch kein Menue offen ist UND ein eigenes modales Fenster davorliegt (PadOpenSystemMenu).
+    bool CanOpenSystemMenu(PlayerView& view) const;
+    /// WUERDE EnterWindow den Fokus wirklich in dieses Fenster setzen? Reine Frage.
+    /// EINE Bedingung, zwei Aufrufer: der Knopf (EnterWindow) und die Leiste (RefreshBrief).
+    /// Siehe Befund N5 am Rumpf.
+    static bool CanEnterWindow(IngameWindow* wnd);
+
     const GameWorldView& GetView() const { return gwv; }
 
     void OnChatCommand(const std::string& cmd) override;
@@ -408,15 +428,66 @@ public:
     /// PlayerView::SetBrief, gerufen einmal je Frame und Ansicht am Ende von UpdateInput -
     /// also nachdem der Fokus dieses Frames feststeht.
     void RefreshBrief(PlayerView& view);
+    /// Eine Zeile des Klartextkastens, so wie sie gezeichnet wird: Text und Farbe.
+    struct BriefLine
+    {
+        std::string text;
+        unsigned color;
+    };
+    /// ALLES, was DrawBrief zeichnet - und zwar genau das, Zeile fuer Zeile.
+    ///
+    /// Eine leere Zeilenliste heisst "es wird gar kein Kasten gezeichnet".
+    struct BriefLayout
+    {
+        Rect panel;
+        DrawPoint textOrigin;
+        unsigned lineHeight = 0;
+        /// Titelzeile (gelb), umgebrochener Fliesstext (weiss), Tastenhinweisleiste (grau) -
+        /// in Zeichenreihenfolge und ohne Kennzeichen, welche Zeile welche ist. Genau deshalb
+        /// gibt es hier keine Kennzeichen: DrawBrief soll nicht entscheiden koennen, eine Sorte
+        /// wegzulassen.
+        std::vector<BriefLine> lines;
+    };
+    /// Die Farbe der Tastenhinweisleiste. Oeffentlich, weil ein Nachweis sie braucht, um IHRE
+    /// Zeilen im Ergebnis von LayoutBrief zu finden (Befund B4).
+    static constexpr unsigned keyLineColor = 0xFFC0C8D0;
+
+    /// Der Umbruch und die Lage des Kastens DIESER Ansicht - rein, ohne einen Zeichenaufruf.
+    ///
+    /// Herausgezogen aus DrawBrief wegen Befund B4: solange die Tastenzeile ein eigener Zweig im
+    /// Zeichner war, konnte sie dort ersatzlos verschwinden, ohne dass ein einziger von 306
+    /// Faellen rot wurde. Jetzt entstehen ALLE Zeilen hier, und der Zeichner kennt den
+    /// Unterschied zwischen ihnen gar nicht mehr.
+    BriefLayout LayoutBrief(const PlayerView& view) const;
+
     /// ... und die einzige Lesestelle.
     ///
-    /// Was ein Nachweis in PlayerView::GetBrief() liest, ist damit die QUELLE dessen, was hier
+    /// Was ein Nachweis in PlayerView::GetBrief() liest, ist die QUELLE dessen, was hier
     /// gezeichnet wird - nicht Zeichen fuer Zeichen dasselbe. Dazwischen liegt der Umbruch
     /// (glFont::GetWrapInfo auf die Kastenbreite), und bei leerem Block wird gar nichts
-    /// gezeichnet. Ein Nachweis ueber GetBrief() belegt also den TEXT, nicht die Pixel; was
-    /// wirklich am Fernseher steht, kann keiner der Faelle sehen (der DummyRenderer verwirft
+    /// gezeichnet. Wer die gezeichneten Zeilen selbst braucht, nimmt LayoutBrief; was wirklich
+    /// am Fernseher steht, kann weiterhin keiner der Faelle sehen (der DummyRenderer verwirft
     /// jeden Zeichenaufruf).
     void DrawBrief(const PlayerView& view) const;
+
+    /// DIE SCHLEIFE, DIE WIRKLICH ZEICHNET - herausgezogen wegen Befund N7.
+    ///
+    /// Der Befund: Pruefer 3 hat zwei Sabotagen gefahren. (A) Tastenzeile aus LayoutBrief
+    /// entfernt -> rot, der Waechter aus B4 hat Zaehne. (B) LayoutBrief unangetastet, in
+    /// DrawBrief die LETZTE Zeile nicht mehr gezeichnet -> gruen, kein einziger von 316 Faellen
+    /// sah es. Die Behauptung "die Zeile kann nicht mehr aus dem Zeichenweg fallen" galt also
+    /// nur fuer LayoutBrief; die Schleife selbst war ungedeckt, weil der DummyRenderer jeden
+    /// Zeichenaufruf verwirft und ein Nachweis nichts zu messen hatte.
+    ///
+    /// Jetzt hat er etwas zu messen: er reicht seinen EIGENEN Ausgeber herein und zaehlt, was
+    /// hindurchlaeuft - durch dieselbe Schleife, die im Spiel den Zeichenaufruf ausloest.
+    /// DrawBrief hat danach keine Zeilenlogik mehr; sein Ausgeber ist ein einziger Aufruf ohne
+    /// Verzweigung, und DAS ist der ehrliche Rest, den diese Umgebung nicht messen kann.
+    ///
+    /// Statisch und ohne Ansicht: die Schleife braucht nur, was LayoutBrief geliefert hat.
+    static void EmitBriefLines(const BriefLayout& layout,
+                               const std::function<void(const DrawPoint&, const BriefLine&)>& emit);
+
     /// Dasselbe fuer die AKTUELLE Wurzel dieser Ansicht. Nach dem Aufruf steht dieser Spieler
     /// wieder in der Welt.
     void ReleaseFocus(PlayerView& view);
@@ -507,6 +578,46 @@ protected:
 
     /// A ausserhalb des Baumodus: Strassenbau auf der eigenen Flagge unter dem Zeiger starten.
     bool PadStartRoad(PlayerView& view, bool waterRoad);
+    /// WAS A IM BAUMODUS JETZT TUT - als PLAN, bevor er ausgefuehrt wird.
+    ///
+    /// BEFUND P1, gemessen: die Leiste zeigte "A Verlaengern" im Baumoduszweig BEDINGUNGSLOS.
+    /// Am Wegende - also im ERSTEN Augenblick jedes Strassenbaus, wenn der Zeiger noch auf der
+    /// Startflagge steht - tut A gar nichts: kein Schritt, keine Ablehnungsmeldung, der Zustand
+    /// bleibt Zeichen fuer Zeichen derselbe. Das ist der haeufigste Weg eines Anfaengers
+    /// ueberhaupt (A auf der eigenen Flagge, dann A), und die Leiste log genau dort.
+    ///
+    /// BEFUND P1b, in derselben Messung gefunden: zeigt der Spieler auf ein Stueck, das er
+    /// selbst schon gelegt hat, BAUT A ZURUECK statt zu verlaengern (DemolishRoad, dieselbe
+    /// Entscheidung wie ContextClick). "A Verlaengern" war auch dort falsch.
+    ///
+    /// DESHALB EIN PLAN UND KEIN ZWEITES `bool`: PadExtendRoad steigt mit genau diesem Aufruf
+    /// ein und fuehrt aus, was hier steht - dieselbe Bauform, mit der FocusPath::PeekStep und
+    /// FocusPath::Step denselben PlanStep lesen (Befund N8). Eine Bedingung, die neben der
+    /// ersten veralten koennte, gibt es damit nicht.
+    ///
+    /// WAS DER PLAN NICHT VORWEGNIMMT, und das steht hier, statt es zu verschweigen: die drei
+    /// Ablehnungen von Extend (RoadOutsideTerritory, RoadNoWay, RoadAtLengthLimit). Zwei davon
+    /// kosten einen vollen FindPathForRoad, und RefreshBrief laeuft je Frame und Ansicht. Sie
+    /// bleiben deshalb im Rumpf von PadExtendRoad - und sie sind der Grund, warum "Verlaengern"
+    /// dort keine Luege ist: jede von ihnen sagt dem Spieler ausdruecklich Bescheid
+    /// (PadReject), waehrend die beiden Faelle oben SCHWEIGEN.
+    struct RoadStepPlan
+    {
+        enum class Effect
+        {
+            /// A tut nichts und sagt auch nichts.
+            None,
+            /// A haengt ein Stueck bis zum Zeiger an (oder lehnt mit einer Meldung ab).
+            Extend,
+            /// A baut die eigene Vorschau bis zum Zeiger zurueck.
+            ShortenTo
+        };
+        Effect effect = Effect::None;
+        /// Nur bei ShortenTo: der Index in der laufenden Strecke (GetIdInCurBuildRoad).
+        unsigned idOnRoad = 0;
+    };
+    /// Der Plan fuer A im Baumodus. Rein - er aendert nichts.
+    RoadStepPlan PlanRoadStep(const PlayerView& view) const;
     /// A im Baumodus: bis zum Zeigerpunkt verlaengern. Erzeugt NIE ein GameCommand.
     bool PadExtendRoad(PlayerView& view);
     /// X im Baumodus: den Weg festschreiben. Genau hier - und nur hier - entsteht das Kommando.

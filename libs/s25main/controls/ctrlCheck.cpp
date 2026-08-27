@@ -31,7 +31,7 @@ bool ctrlCheck::Msg_LeftDown(const MouseCoords& mc)
 
 bool ctrlCheck::Activate()
 {
-    if(readonly || !IsVisible() || !GetParent())
+    if(!CanActivate())
         return false;
     // Exakt der Rumpf von Msg_LeftDown, nur ohne die Ortspruefung.
     check = !check;

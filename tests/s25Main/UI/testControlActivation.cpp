@@ -533,4 +533,106 @@ BOOST_AUTO_TEST_CASE(ScrollBarIsVerticalValue)
     BOOST_TEST(wnd.scrollChanges.back() == 9);
 }
 
+
+// --------------------------------------------------------------------------------------------
+// BEFUND N8 - DIE STEUERKREUZFRAGE UND DER STEUERKREUZSCHRITT KOENNEN NICHT MEHR AUSEINANDER
+//
+// DER BEFUND, gemessen vom Nachpruefer der zweiten Runde: die Tastenhinweisleiste fragte
+// Window::GetValueRange(), gewirkt hat aber Window::StepValue() - zwei Funktionen ohne
+// gemeinsame Bedingung. Seine zwei Belege:
+//
+//   - ctrlMapSelection hat StepValue, aber KEIN GetValueRange: das Steuerkreuz wirkt, die
+//     Leiste haette geschwiegen.
+//   - ctrlComboBox mit readonly hat einen Wertebereich, StepValue steigt aber sofort aus: die
+//     Leiste haette "Einstellen" versprochen, der Druck haette nichts getan.
+//
+// DIE ANTWORT IST KEINE ZWEITE ABSCHRIFT, sondern eine Bauform: Window::StepValue ist NICHT
+// MEHR VIRTUELL und liefert woertlich das Ergebnis von CanStepValue (Window.h). Eine Klasse
+// sagt in CanStepValue, WANN sie den Schritt annimmt, und in DoStepValue, WAS dann geschieht.
+// Damit ist die Gleichheit keine Zusicherung mehr, sondern eine Zeile Quelltext.
+//
+// Dieser Fall haelt sie trotzdem fest - und zwar an jedem Control des Baums, das den Schritt
+// ueberhaupt annimmt. Er ist die Wache fuer den Tag, an dem jemand StepValue wieder virtuell
+// macht: dann kann er hier auseinanderlaufen, und dann wird er hier rot.
+// --------------------------------------------------------------------------------------------
+
+/// Fragt beide Seiten fuer alle vier Richtungen und vergleicht sie.
+///
+/// GEDRUECKT WIRD WIRKLICH: StepValue veraendert das Control. Genau deshalb wird CanStepValue
+/// unmittelbar VOR jedem Schritt gelesen - beide sehen denselben Zustand.
+template<class T_Ctrl>
+void checkStepQuestionMatchesTheStep(T_Ctrl& ctrl, const char* what)
+{
+    for(const Position dir : {Position(-1, 0), Position(1, 0), Position(0, -1), Position(0, 1)})
+    {
+        const bool asked = ctrl.CanStepValue(dir);
+        const bool done = ctrl.StepValue(dir);
+        BOOST_TEST_CONTEXT(what << " dir=(" << dir.x << "," << dir.y << ")")
+        BOOST_TEST(asked == done);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(TheDpadQuestionAndTheDpadStepAreTheSameCondition)
+{
+    RecordingWnd wnd;
+    putMouseFarAway();
+
+    // (1) Der Schieberegler: waagerecht ja, senkrecht nein.
+    auto* prog = wnd.AddProgress(1, DrawPoint(0, 0), Extent(120, 20), TextureColor::Green1, 0, 0, 10);
+    prog->SetPosition(5);
+    checkStepQuestionMatchesTheStep(*prog, "ctrlProgress");
+    BOOST_TEST(prog->CanStepValue(Position(1, 0)));
+    BOOST_TEST(!prog->CanStepValue(Position(0, 1)));
+
+    // (2) Die Bildlaufleiste: senkrecht ja, waagerecht nein.
+    auto* bar = wnd.AddScrollBar(2, DrawPoint(0, 30), Extent(20, 100), 20, TextureColor::Green1, 5);
+    bar->SetRange(20);
+    checkStepQuestionMatchesTheStep(*bar, "ctrlScrollBar");
+    BOOST_TEST(bar->CanStepValue(Position(0, 1)));
+    BOOST_TEST(!bar->CanStepValue(Position(1, 0)));
+
+    // (3) Die LEERE Liste: nirgends. Und die gefuellte: senkrecht.
+    auto* empty = wnd.AddList(3, DrawPoint(0, 140), Extent(100, 60), TextureColor::Green1, NormalFont);
+    checkStepQuestionMatchesTheStep(*empty, "ctrlList (leer)");
+    BOOST_TEST(!empty->CanStepValue(Position(0, 1)));
+    auto* list = wnd.AddList(4, DrawPoint(0, 210), Extent(100, 60), TextureColor::Green1, NormalFont);
+    for(int i = 0; i < 4; i++)
+        list->AddItem("Zeile " + std::to_string(i));
+    checkStepQuestionMatchesTheStep(*list, "ctrlList");
+    BOOST_TEST(list->CanStepValue(Position(0, 1)));
+
+    // (4) Die Tabelle, leer und gefuellt.
+    const std::vector<TableColumn> cols{TableColumn{"A", 100, TableSortType::String}};
+    auto* table = wnd.AddTable(5, DrawPoint(120, 0), Extent(200, 100), TextureColor::Green1, NormalFont, cols);
+    checkStepQuestionMatchesTheStep(*table, "ctrlTable (leer)");
+    BOOST_TEST(!table->CanStepValue(Position(0, 1)));
+    table->AddRow({"eins"});
+    table->AddRow({"zwei"});
+    checkStepQuestionMatchesTheStep(*table, "ctrlTable");
+    BOOST_TEST(table->CanStepValue(Position(0, 1)));
+
+    // (5) DIE AUSWAHLLISTE - der erste Beleg des Befunds. Sie hat einen Wertebereich, auch
+    //     schreibgeschuetzt; das Steuerkreuz wirkt dort aber nicht.
+    auto* combo = wnd.AddComboBox(6, DrawPoint(120, 120), Extent(80, 20), TextureColor::Green1, NormalFont, 60, false);
+    for(int i = 0; i < 4; i++)
+        combo->AddItem("Wahl " + std::to_string(i));
+    checkStepQuestionMatchesTheStep(*combo, "ctrlComboBox");
+    // ... auch AUFGEKLAPPT, wo sie sogar waagerecht verbraucht.
+    BOOST_TEST_REQUIRE(combo->Activate());
+    BOOST_TEST_REQUIRE(combo->GetCtrl<ctrlList>(0)->IsVisible());
+    checkStepQuestionMatchesTheStep(*combo, "ctrlComboBox (offen)");
+    BOOST_TEST(combo->CanStepValue(Position(1, 0)));
+    BOOST_TEST(combo->Activate()); // wieder zu
+
+    auto* ro = wnd.AddComboBox(7, DrawPoint(120, 150), Extent(80, 20), TextureColor::Green1, NormalFont, 60, true);
+    ro->AddItem("x");
+    ro->AddItem("y");
+    // DER BELEG: der Wertebereich sagt "hier gibt es einen Wert" ...
+    BOOST_TEST(ro->GetValueRange().has_value());
+    // ... und das Steuerkreuz tut trotzdem nichts. Genau deshalb ist GetValueRange nicht die
+    // Frage, an der die Leiste haengen darf.
+    BOOST_TEST(!ro->CanStepValue(Position(0, 1)));
+    checkStepQuestionMatchesTheStep(*ro, "ctrlComboBox (readonly)");
+}
+
 BOOST_AUTO_TEST_SUITE_END()

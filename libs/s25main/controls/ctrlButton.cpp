@@ -81,7 +81,7 @@ bool ctrlButton::CanFocus() const
 
 bool ctrlButton::Activate()
 {
-    if(!isEnabled || !IsVisible() || !GetParent())
+    if(!CanActivate())
         return false;
     // `state` wird NICHT angefasst. Es ist der Zustand DER MAUS auf diesem Knopf und traegt
     // deren halben Klick zwischen Msg_LeftDown und Msg_LeftUp. Wer ihn hier setzt, verschluckt

@@ -97,6 +97,22 @@ public:
     /// Gibt zurück, auf welchen Punkt es sich bezieht
     const MapPoint& GetSelectedPt() const { return selectedPt; }
 
+    /// KLARTEXT ZU EINEM KNOPF DIESES FENSTERS - der Befund von Phase 12.
+    ///
+    /// GEMESSEN: jeder Knopf in diesem Fenster traegt einen Tooltip, und bei allen ausser den
+    /// Gebaeudeicons ist er ein reiner Name von einem bis vier Woertern ("Straße bauen",
+    /// "Gelehrten rufen"). Kein einziger sagt, was die Handlung bewirkt oder was sie
+    /// voraussetzt. Der Padspieler bekommt genau diesen Tooltip als Klartext (brief::ForControl)
+    /// und weiss danach so viel wie vorher.
+    ///
+    /// Die Zuordnung Knopf -> Text steht HIER, weil hier auch die Knopfnummern stehen: die
+    /// Reiterkennungen und die IDs 1..5 des Flaggenreiters sind eine Sache dieser
+    /// Uebersetzungseinheit. Der TEXT selbst steht in brief::ForAction und ist damit ohne
+    /// Fenster, ohne Partie und ohne Grafik pruefbar.
+    ///
+    /// Reine Anzeige - kein Zustand, kein GameCommand.
+    brief::Brief GetPadBrief(const Window* focused) const override;
+
 private:
     void Msg_Group_ButtonClick(unsigned group_id, unsigned ctrl_id) override;
     void Msg_TabChange(unsigned ctrl_id, unsigned short tab_id) override;

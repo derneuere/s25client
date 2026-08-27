@@ -270,6 +270,9 @@ msgstr "Egy katapult lő ránk!"
 msgid "A flag costs nothing and you can tear it down again. Press X to put one here."
 msgstr ""
 
+msgid "A flag costs nothing and you can tear it down again. Roads start and end at flags, and wares are handed over there."
+msgstr ""
+
 #: libs/s25main/gameData/BuildingConsts.cpp:161
 msgid "A gold mine allows you to prospect for valuable gold deposits. For this, it is necessary to ensure that the miners are provided with plenty of food."
 msgstr "Az aranybánya lehetővé teszi az értékes aranylelőhelyek feltárását. Ehhez azonban gondoskodni kell róla, hogy a bányászok bőséges élelemmel legyenek ellátva."
@@ -348,6 +351,9 @@ msgstr "MI hibakereső ablak"
 #: libs/s25main/ingameWindows/iwMusicPlayer.cpp:65
 msgid "Abort"
 msgstr "Mégse"
+
+msgid "Actions"
+msgstr ""
 
 #: libs/s25main/addons/AddonDemolitionProhibition.h:22
 msgid "Active if attacked"
@@ -442,6 +448,9 @@ msgstr ""
 "Katonai irányítási funkciókat ad a katonai épületekhez.  \n"
 "Minimális: Hozzáadja a 'Hazaküldés' gombot, amely az összes legmagasabb elérhető rangú katonát egy raktárba küldi.\n"
 "Teljes: Lehetővé teszi a játékosok számára, hogy minden katonai épületben szabályozzák, hogy az egyes rangokból hány katona állomásozzon ott."
+
+msgid "Adjust"
+msgstr ""
 
 #: libs/s25main/addons/AddonAdjustMilitaryStrength.h:29
 msgid "Adjust military strength"
@@ -598,6 +607,9 @@ msgstr ""
 msgid "Async logs received completely.\n"
 msgstr "Az aszinkron naplók fogadása befejeződött.\n"
 
+msgid "At THIS flag there is no geologist and no scout - its menu only builds roads. For those two you need an ordinary flag out in your land."
+msgstr ""
+
 #: libs/s25main/network/GameClient.cpp:1912
 msgid "At most %1% local players are supported, %2% were requested"
 msgstr ""
@@ -605,6 +617,9 @@ msgstr ""
 #: libs/s25main/gameData/BuildingConsts.cpp:117
 msgid "At the winery, grapes are stomped in a vat to produce wine. The vintner's wine is of high quality, worthy of sacrifice at the temple."
 msgstr "A borászatban a szőlőt egy kádban tapossák, hogy bor készüljön belőle. A borász bora kiváló minőségű, méltó arra, hogy a templomban áldozatként bemutassák."
+
+msgid "Attack menu"
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwAction.cpp:365
 msgid "Attack not possible."
@@ -688,6 +703,12 @@ msgstr "Babilóniaiak"
 #: libs/s25main/ingameWindows/iwPlayReplay.cpp:61
 msgid "Back"
 msgstr "Vissza"
+
+msgid "Back out"
+msgstr ""
+
+msgid "Back to here"
+msgstr ""
 
 #: libs/s25main/gameData/JobConsts.cpp:28
 msgid "Baker"
@@ -774,10 +795,19 @@ msgstr ""
 msgid "Brutus"
 msgstr "Brutus"
 
+msgid "Build a road"
+msgstr ""
+
+msgid "Build a waterway"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwAction.cpp:302
 #: libs/s25main/ingameWindows/iwAction.cpp:304
 msgid "Build headquarters"
 msgstr "Főhadiszállás építése"
+
+msgid "Build menu"
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwAction.cpp:204
 #: libs/s25main/ingameWindows/iwAction.cpp:216
@@ -804,6 +834,9 @@ msgstr "Útépítés"
 msgid "Building a waterway"
 msgstr "Vízi út építése"
 
+msgid "Building names and workload"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwBuildOrder.cpp:38
 #: libs/s25main/ingameWindows/iwMainMenu.cpp:71
 msgid "Building sequence"
@@ -827,6 +860,9 @@ msgstr "Hentes"
 #: libs/s25main/ingameWindows/iwStatistics.cpp:47
 msgid "COMP"
 msgstr "GÉP"
+
+msgid "Call in a geologist"
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwAction.cpp:208
 #: libs/s25main/ingameWindows/iwAction.cpp:222
@@ -880,6 +916,9 @@ msgstr "Nem játszható le újabb GC verzióval készült visszajátszás! (Jele
 #: libs/s25main/Replay.cpp:207
 msgid "Cannot play replay created with a more recent version (Current: %1%, Replay: %2%)"
 msgstr "Nem játszható le újabb verzióval készült visszajátszás! (Jelenlegi: %1%, Visszajátszás: %2%)"
+
+msgid "Careful: if a building stands right above this flag, this button asks whether to tear down THAT BUILDING instead."
+msgstr ""
 
 #: libs/s25main/gameData/JobConsts.cpp:23
 msgid "Carpenter"
@@ -971,6 +1010,9 @@ msgstr "Térkép ellenőrzése..."
 msgid "Checking Password..."
 msgstr "Jelszó ellenőrzése..."
 
+msgid "Choose"
+msgstr ""
+
 #: libs/s25main/desktops/dskCampaignMissionSelection.cpp:82
 msgid "Choose mission"
 msgstr "Válassz küldetést"
@@ -996,6 +1038,9 @@ msgstr "Közeli"
 #: libs/s25main/ingameWindows/iwAddons.cpp:47
 msgid "Close Without Saving"
 msgstr "Bezárás mentés nélkül"
+
+msgid "Close it"
+msgstr ""
 
 #: libs/s25main/desktops/dskGameLobby.cpp:424
 msgid "Closed"
@@ -1286,6 +1331,9 @@ msgstr "Nehézség"
 msgid "Dig up road"
 msgstr "Út felásása"
 
+msgid "Dig up this road"
+msgstr ""
+
 #: libs/s25main/gameData/BuildingBriefs.cpp:43
 msgid "Digs coal. The iron smelter, the armory and the mint all burn it."
 msgstr ""
@@ -1336,6 +1384,9 @@ msgstr "Letiltva"
 msgid "Disallow change"
 msgstr "Változtatás tiltása"
 
+msgid "Discard"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwAction.cpp:307
 msgid "Display options"
 msgstr "Megjelenítési beállítások"
@@ -1380,6 +1431,9 @@ msgstr "Szamártenyésztő"
 #: libs/s25main/gameData/BuildingConsts.cpp:48
 msgid "Donkey breeding"
 msgstr "Szamártenyészet"
+
+msgid "Donkeys carry the wares on this road instead of your carriers, which makes it faster."
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwBuildOrder.cpp:53
 #: libs/s25main/ingameWindows/iwTransport.cpp:33
@@ -1607,6 +1661,9 @@ msgstr "Eseményszám eltérés. Beolvasott események: %1%. Várt: %2%.\n"
 msgid "Every GF"
 msgstr "Összes GF"
 
+msgid "Every ware of yours goes in and out through this flag. Press A to start your first road here."
+msgstr ""
+
 #: libs/s25main/addons/AddonStatisticsVisibility.h:22
 msgid "Everyone"
 msgstr "Mindenki"
@@ -1634,6 +1691,9 @@ msgstr "Felfedező expedíció"
 #: libs/s25main/desktops/dskGameLobby.cpp:233
 msgid "Exploration:"
 msgstr "Felderítés:"
+
+msgid "Extend"
+msgstr ""
 
 #: libs/s25main/desktops/dskSelectMap.cpp:407
 msgid ""
@@ -1776,6 +1836,9 @@ msgstr "Fájlnév"
 msgid "Finances"
 msgstr "Pénzügyek"
 
+msgid "Finish"
+msgstr ""
+
 #: libs/s25main/gameData/BuildingBriefs.cpp:55
 msgid "Fires at enemy military buildings in range. Useless until you share a border with an enemy."
 msgstr ""
@@ -1791,6 +1854,15 @@ msgstr "Halász"
 #: libs/s25main/gameData/BuildingConsts.cpp:28
 msgid "Fishery"
 msgstr "Halászház"
+
+msgid "Flag"
+msgstr ""
+
+msgid "Flag menu"
+msgstr ""
+
+msgid "Flags are the junctions of your road network."
+msgstr ""
 
 #: libs/s25main/input/PlayerBrief.cpp:129
 msgid "Flags are the junctions of your road network. Wares are handed over from flag to flag, so a long road needs many of them."
@@ -1981,6 +2053,9 @@ msgstr "Ugrás a következő raktárra"
 msgid "Go to place"
 msgstr "Ugrás a helyszínre"
 
+msgid "Go to the headquarters"
+msgstr ""
+
 #: libs/s25main/desktops/dskGameLobby.cpp:249
 msgid "Goals:"
 msgstr "Célok:"
@@ -2085,6 +2160,15 @@ msgstr "Kalapács"
 #: libs/s25main/ingameWindows/iwHarborBuilding.cpp:16
 msgid "Harbor building"
 msgstr "Kikötőépület"
+
+msgid "He comes out of a warehouse, so this flag needs a road to one. Without that road nothing happens at all - and nothing tells you so."
+msgstr ""
+
+msgid "He walks out from THIS flag and digs around it for iron, gold, coal, granite and water. He puts up 15 signs and reports each kind of find once."
+msgstr ""
+
+msgid "He walks out from THIS flag, wanders about a hundred steps through the fog and then comes home. What he walks past stays uncovered."
+msgstr ""
 
 #: libs/s25main/gameData/BuildingConsts.cpp:10
 #: libs/s25main/ingameWindows/iwHQ.cpp:15
@@ -2220,6 +2304,9 @@ msgstr "Online előszoba"
 #: libs/s25main/ingameWindows/iwRoadWindow.cpp:20
 msgid "Interrupt road building"
 msgstr "Útépítés megszakítása"
+
+msgid "Into the window"
+msgstr ""
 
 #: libs/s25main/desktops/dskMainMenu.cpp:44
 msgid "Intro"
@@ -2388,6 +2475,12 @@ msgstr "Kevesebb újrajátszás"
 
 #: libs/s25main/gameData/BuildingBriefs.cpp:50
 msgid "Lifts the fog from a wide circle. It produces nothing - build it to see, not to earn."
+msgstr ""
+
+msgid "Like a road, but across the water. It only starts at a flag that stands on the shore."
+msgstr ""
+
+msgid "Like the geologist he comes out of a warehouse, so this flag needs a road to one."
 msgstr ""
 
 #: libs/s25main/desktops/dskOptions.cpp:340
@@ -2885,8 +2978,14 @@ msgstr "Több újrajátszás"
 msgid "More trees spawn animals"
 msgstr "Több fánál jelenjen meg állat"
 
+msgid "Move"
+msgstr ""
+
 #: libs/s25main/input/PlayerBrief.cpp:205
 msgid "Move the pointer and press A to lay the next piece."
+msgstr ""
+
+msgid "Moves your view back to your headquarters."
 msgstr ""
 
 #: libs/s25main/desktops/dskMainMenu.cpp:41
@@ -2987,6 +3086,9 @@ msgstr "Új térképek"
 #: libs/s25main/buildings/nobStorehouse.cpp:20
 msgid "New storehouse finished"
 msgstr "Egy új raktár elkészült"
+
+msgid "Next"
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwWares.cpp:189
 msgid "Next page"
@@ -3107,6 +3209,9 @@ msgstr ""
 msgid "Nothing fits on this spot - not even a flag. Move on a field or two."
 msgstr ""
 
+msgid "Nothing to do here: not one of your soldiers can reach this building. This tab carries no button at all, only the notice that an attack is not possible."
+msgstr ""
+
 #: libs/s25main/network/GameClientGF_Replay.cpp:97
 #, c-format
 msgid "Notice: Overall asynchronous frame count: %u"
@@ -3199,6 +3304,9 @@ msgstr "Olof"
 msgid "On"
 msgstr "Be"
 
+msgid "One back"
+msgstr ""
+
 #: libs/s25main/desktops/dskGameInterface.cpp:178
 msgid "Only %1% local views are supported, ignoring the additional local player(s) starting at slot %2%\n"
 msgstr ""
@@ -3231,6 +3339,9 @@ msgstr ""
 msgid "Open"
 msgstr "Nyitott"
 
+msgid "Open it"
+msgstr ""
+
 #: libs/s25main/drivers/VideoDriverWrapper.cpp:373
 msgid "OpenGL %1% %2%.%3% is not supported. Try updating your GPU drivers or hardware!"
 msgstr "Az OpenGL %1% %2%.%3% nem támogatott. Frissítsd a videokártya-illesztőprogramot vagy a hardvert!"
@@ -3238,6 +3349,9 @@ msgstr "Az OpenGL %1% %2%.%3% nem támogatott. Frissítsd a videokártya-ill
 #: libs/s25main/drivers/VideoDriverWrapper.cpp:370
 msgid "OpenGL %1%.%2% supported\n"
 msgstr "OpenGL %1%.%2% támogatott\n"
+
+msgid "Opens a small second window that keeps watching this spot while you work somewhere else."
+msgstr ""
 
 #: libs/s25main/desktops/dskOptions.cpp:367
 msgid "Optimized Textures:"
@@ -3402,6 +3516,9 @@ msgstr "Add meg a játék nevét"
 msgid "Please wait..."
 msgstr "Kis türelmet..."
 
+msgid "Point your allies here"
+msgstr ""
+
 #: libs/s25main/desktops/dskOptions.cpp:188
 msgid "Portrait:"
 msgstr "Portré:"
@@ -3433,6 +3550,9 @@ msgstr ""
 
 #: libs/s25main/gameData/BuildingBriefs.cpp:32
 msgid "Presses wine, which only the temple uses."
+msgstr ""
+
+msgid "Previous"
 msgstr ""
 
 #: libs/s25main/gameData/JobConsts.cpp:40
@@ -3504,6 +3624,15 @@ msgstr "Proxy típusa:"
 #: libs/s25main/ingameWindows/iwAction.cpp:220
 msgid "Pull down flag"
 msgstr "Zászló eltávolítása"
+
+msgid "Pull down this flag"
+msgstr ""
+
+msgid "Put up a flag"
+msgstr ""
+
+msgid "Put up a flag here"
+msgstr ""
 
 #: libs/s25main/desktops/dskCredits.cpp:57
 #: libs/s25main/desktops/dskCredits.cpp:62
@@ -3687,6 +3816,12 @@ msgstr "Visszatérés a kikötőbe"
 msgid "Rivers:"
 msgstr "Folyók:"
 
+msgid "Road"
+msgstr ""
+
+msgid "Road menu"
+msgstr ""
+
 #: libs/s25main/input/PlayerBrief.cpp:168
 msgid "Roads start and end at flags."
 msgstr ""
@@ -3864,6 +3999,9 @@ msgstr "Küldés"
 #: libs/s25main/ingameWindows/iwMilitaryBuilding.cpp:73
 msgid "Send max rank soldiers to a warehouse"
 msgstr "Max. rangú katonák raktárba küldése"
+
+msgid "Send out a scout"
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwAction.cpp:210
 #: libs/s25main/ingameWindows/iwAction.cpp:224
@@ -4090,6 +4228,9 @@ msgstr "A kovács mostantól 1 pajzsot és 1 kardot készít 1 vasércből és 1
 msgid "Socks v4"
 msgstr "Socks v4"
 
+msgid "Soldiers only march out from your own military buildings nearby. Build one closer and come back."
+msgstr ""
+
 #: libs/s25main/addons/AddonBattlefieldPromotion.h:17
 msgid "Soldiers winning a fight increase in rank."
 msgstr "A csatában győztes katonák előléptetést kapnak."
@@ -4172,6 +4313,9 @@ msgstr "Játék indítása, kis türelmet"
 #: libs/s25main/Loader.cpp:267
 msgid "Starting sound conversion: "
 msgstr "Hangátalakítás indítása: "
+
+msgid "Starts a road at this flag. Move the pointer and press A for each piece, X finishes it."
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwStatistics.cpp:78
 msgid "Statistics"
@@ -4348,6 +4492,9 @@ msgstr "A sörfőző gabonából és vízből készít minőségi sört. Ez az i
 msgid "The building statistics window gives you an insight into the number of buildings you have, by type. The number on the left is the total number of this type of building completed, the number on the right shows how many are currently under construction."
 msgstr "Az épületstatisztikák ablak áttekintést ad az épületeid számáról, típusonként. A bal oldali szám azt mutatja, hány épület készült már el az adott típusból, a jobb oldali pedig azt, hogy jelenleg mennyi van építés alatt."
 
+msgid "The buildings that fit on this spot. Move onto one and this box tells you what it does and what it costs."
+msgstr ""
+
 #: libs/s25main/gameData/BuildingConsts.cpp:199
 msgid "The butcher processes the livestock delivered into nutritious ham on which you miners are fed."
 msgstr "A hentes a beszállított jószágokat tápláló sonkává dolgozza fel, amellyel a bányászokat látják el."
@@ -4391,6 +4538,12 @@ msgstr "A fájl nem található!"
 #: libs/s25main/gameData/BuildingConsts.cpp:184
 msgid "The fish man is responsible for finding water rich in fish. His fish feed a great many miners."
 msgstr "A halász feladata, hogy halakban gazdag vizeket találjon. Az általa fogott halak számos bányászt etetnek."
+
+msgid "The flag goes away and with it the roads that end here."
+msgstr ""
+
+msgid "The flag of your headquarters"
+msgstr ""
 
 #: libs/s25main/gameData/BuildingConsts.cpp:260
 msgid "The flour produced at the windmill can be combined with water in the bakery to make oven-fresh bread. It's your miners' favorite!"
@@ -4450,6 +4603,9 @@ msgstr "Itt állíthatod be az egyes épületek áruprioritását. Minél magasa
 msgid "The quarrying of stone in a granite mine guarantees the supply of stone for buildings. However, even a granite mine has to feed its workers."
 msgstr "A gránitbányában végzett kőfejtés garantálja az épületek kőellátását. Ugyanakkor még egy gránitbányának is gondoskodnia kell dolgozói élelmezéséről."
 
+msgid "The road disappears. Flags that then hang on nothing stay where they are."
+msgstr ""
+
 #: libs/s25main/desktops/dskGameInterface.cpp:1633
 msgid "The road is too short - extend it first."
 msgstr ""
@@ -4465,6 +4621,9 @@ msgstr "A videokártya-illesztőprogram nem támogatja a felület méretezését
 #: libs/s25main/ingameWindows/iwShip.cpp:131
 msgid "The ship register contains all the ships in your fleet. Here you can monitor the loading and destinations of individual ships. Ships on an expedition are controlled from here as well."
 msgstr "A hajólajstrom tartalmazza az összes hajót a flottádban. Itt követheted nyomon az egyes hajók rakományát és célállomásait. Az expedíción lévő hajók irányítása is innen történik."
+
+msgid "The sign is only a mark: a mine digs what lies in the ground within two steps of itself, sign or no sign. Build it right next to a sign - the signs fade away after a while, what lies underneath does not."
+msgstr ""
 
 #: libs/s25main/gameData/BuildingBriefs.cpp:19
 msgid "The smallest guard post. Soldiers move in and your border grows a little further out around it."
@@ -4524,6 +4683,12 @@ msgstr "A győztesek:"
 #: libs/s25main/network/GameServer.cpp:1519
 msgid "There are %1% identical async log entries.\n"
 msgstr "%1% azonos aszinkron naplóbejegyzés található.\n"
+
+msgid "There is no geologist and no scout at THIS flag. For those two you need an ordinary flag out in your land - one that you put up yourself."
+msgstr ""
+
+msgid "There is nothing to do at this flag."
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwTools.cpp:185
 msgid "These settings control the tool production of your metalworks. The higher the value, the more likely this tool is to be produced."
@@ -4765,6 +4930,9 @@ msgstr "Korlátlan játék"
 msgid "Up"
 msgstr "Fel"
 
+msgid "Upgrade to a donkey road"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwAction.cpp:344
 msgid "Upgrade to donkey road"
 msgstr "Szamaras úttá fejlesztés"
@@ -4852,6 +5020,9 @@ msgstr "A videokártya-illesztőprogram nem tölthető be!"
 msgid "View Settings..."
 msgstr "Beállítások megtekintése..."
 
+msgid "View menu"
+msgstr ""
+
 #: libs/s25main/gameData/NationConsts.h:13
 msgid "Vikings"
 msgstr "Vikingek"
@@ -4898,10 +5069,19 @@ msgstr "Áru amivel kereskednél"
 msgid "Wares"
 msgstr "Áruk"
 
+msgid "Wares are carried from flag to flag, so a building without a road to your warehouse gets nothing and delivers nothing."
+msgstr ""
+
 #: libs/s25main/network/GameClientGF_Replay.cpp:48
 #, c-format
 msgid "Warning: The played replay is not in sync with the original match. (GF: %u)"
 msgstr "Figyelem: A lejátszott visszajátszás nincs szinkronban az eredeti mérkőzéssel. (GF: %u)"
+
+msgid "Watch window"
+msgstr ""
+
+msgid "Watch window, building names, jump to your headquarters, point your allies here. None of these change anything in the world."
+msgstr ""
 
 #: libs/s25main/gameData/BuildingConsts.cpp:14
 msgid "Watchtower"
@@ -4913,6 +5093,9 @@ msgstr "Őrtorony"
 #: libs/s25main/ingameWindows/iwMerchandiseStatistics.cpp:54
 msgid "Water"
 msgstr "Víz"
+
+msgid "Waterway"
+msgstr ""
 
 #: libs/s25main/figures/nofAttacker.cpp:465
 msgid "We are under attack!"
@@ -4953,6 +5136,15 @@ msgstr "Kút"
 #: libs/s25main/ingameWindows/iwHelp.cpp:17
 msgid "What is this?"
 msgstr "Mi ez?"
+
+msgid "What you can do at this flag:"
+msgstr ""
+
+msgid "What you can do in this tab:"
+msgstr ""
+
+msgid "What you can do with the road under the pointer."
+msgstr ""
 
 #: libs/s25main/desktops/dskOptions.cpp:298
 msgid "Window pinning"
@@ -4998,6 +5190,9 @@ msgstr "A világ össze lett rakva és ragasztva..."
 
 #: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
 msgid "Writes the name and the output of every building onto the map."
+msgstr ""
+
+msgid "Writes the name and the workload above every building. The workload tells you which of your works stand idle."
 msgstr ""
 
 #: libs/s25main/network/ClientError.cpp:14
@@ -5120,6 +5315,9 @@ msgstr "A videó- vagy hangillesztőprogram módosításához indítsd újra a j
 msgid "You win"
 msgstr "Te győztél"
 
+msgid "Your allies get a message with this spot in it. Without an ally nothing happens."
+msgstr ""
+
 #: libs/s25main/GamePlayer.cpp:1666
 msgid "Your ally wishes to notify you of this location"
 msgstr "A szövetségesed értesíteni kíván téged erről a helyről"
@@ -5164,9 +5362,18 @@ msgstr "Nagyítás"
 msgid "all developers who contributed via Github"
 msgstr "az összes fejlesztő aki GitHubon közreműködött"
 
+msgid "build a road from it"
+msgstr ""
+
+msgid "build a waterway from it"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwSkipGFs.cpp:57
 msgid "by GameFrames:"
 msgstr "GameFrame szerint:"
+
+msgid "call in a geologist"
+msgstr ""
 
 #: libs/s25main/network/GameClient.cpp:1652
 #, c-format
@@ -5220,6 +5427,21 @@ msgstr "ugrás gf %i-re, most gf %i-nél tartunk; az utolsó 5000 gf ideje: %.
 #: libs/libGamedata/gameData/CampaignDescription.cpp:30
 msgid "medium"
 msgstr "átlagos"
+
+msgid "send out a scout"
+msgstr ""
+
+msgid "send the strong ones or the weak ones"
+msgstr ""
+
+msgid "set how many soldiers march out"
+msgstr ""
+
+msgid "start the attack"
+msgstr ""
+
+msgid "tear it down"
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwSkipGFs.cpp:48
 msgid "to GameFrame:"

@@ -99,7 +99,7 @@ public:
     /// den ORIGINALEN S2-Daten und nicht im Repository. Ohne diesen Ersatz waere die
     /// Fokusnavigation auf der Weltkarte einer Kampagne auf keinem Rechner ohne
     /// S2-Installation pruefbar - und genau dort lag die Sackgasse, die diese Phase behebt.
-    /// Die Maske bleibt bewusst einfarbig: ctrlMapSelection::StepValue liest sie nicht, es
+    /// Die Maske bleibt bewusst einfarbig: ctrlMapSelection::findStepTarget liest sie nicht, es
     /// rechnet ausschliesslich mit den Ankerpositionen der Missionen.
     void LoadDummyMapSelectionFiles();
     /// Load a file and save it into the loader repo

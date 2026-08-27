@@ -145,6 +145,43 @@ public:
     /// true = es ist etwas passiert.
     virtual bool Activate() { return false; }
 
+    /// WUERDE Activate() jetzt etwas tun? Reine Frage, ohne es zu tun.
+    ///
+    /// Gebraucht von der Tastenhinweisleiste (brief::HintsFor): sie muss VOR dem Druck sagen,
+    /// ob A auf diesem Control etwas bewirkt. Bis Phase 12 versprach sie dort blind "A Waehlen",
+    /// auch auf einem Schieberegler oder einer Bildlaufleiste - beide haben gar kein Activate(),
+    /// und der Druck lief ins Leere. Ein Hinweis, der luegt, ist schlimmer als keiner.
+    ///
+    /// KEINE ZWEITE RECHNUNG: jede Klasse, die Activate() ueberschreibt, ueberschreibt auch
+    /// diese Frage, und ihr Activate() steigt mit genau diesem Aufruf ein. Damit koennen die
+    /// beiden nicht auseinanderlaufen.
+    virtual bool CanActivate() const { return false; }
+
+    /// WUERDE ein Klick auf das eigene Kind mit dieser Kennung ueberhaupt etwas aendern?
+    ///
+    /// BEFUND P3, gemessen: "A Waehlen" stand auf dem BEREITS GEWAEHLTEN Reiterkopf, und der
+    /// ist die erste Fokusstation nach Y in jedem Aktionsfenster - das Allererste also, was ein
+    /// Padspieler dort liest und ausprobiert. Ein Druck lief durch ctrlTab::SetSelection und
+    /// setzte Schritt fuer Schritt genau dieselben Werte noch einmal; der Zustand blieb Zeichen
+    /// fuer Zeichen derselbe.
+    ///
+    /// Gefragt wird der ELTERNTEIL und nicht der Knopf, weil nur er weiss, was sein
+    /// Msg_ButtonClick mit dieser Kennung anfaengt. Die Vorgabe ist "ja": jeder andere Knopf
+    /// verhaelt sich damit bit-identisch zu vorher.
+    ///
+    /// KEINE ZWEITE RECHNUNG, und das ist der Grund fuer den Schnitt an dieser Stelle:
+    /// ctrlButton::CanActivate fragt sie, und ctrlButton::Activate steigt mit CanActivate ein.
+    /// Wo die Antwort false ist, GESCHIEHT also wirklich nichts - die Leiste sagt nicht voraus,
+    /// was der Knopf tun wird, sondern liest dieselbe Bedingung, an der er abbricht.
+    virtual bool WouldChildClickDoAnything(unsigned /*ctrlId*/) const { return true; }
+
+    /// WUERDE CancelInput() jetzt etwas verwerfen? Dieselbe Regel wie oben: wer CancelInput()
+    /// ueberschreibt, ueberschreibt auch diese Frage und steigt damit ein.
+    ///
+    /// Die Leiste braucht sie, weil B auf einem Control mit offener Eingabe (aufgeklappte
+    /// Liste) NICHT das Fenster verlaesst, sondern nur die Liste zuklappt.
+    virtual bool CanCancelInput() const { return false; }
+
     enum class ValueAxis
     {
         Horizontal,
@@ -158,12 +195,42 @@ public:
     };
 
     /// Traegt dieses Control einen kontinuierlichen Wert (Analogmodus)? nullopt = nein.
+    ///
+    /// NICHT die Frage, an der das Steuerkreuz haengt - dafuer gibt es CanStepValue. Der
+    /// Unterschied ist BEFUND N8 und gemessen: ctrlMapSelection verbraucht das Steuerkreuz,
+    /// hat aber keinen Wertebereich, und eine schreibgeschuetzte Auswahlliste hat einen
+    /// Wertebereich, verbraucht das Steuerkreuz aber nicht. Wer wissen will, ob der Knopf
+    /// wirkt, fragt CanStepValue; wer den WERT braucht (Anzeige, Analogstick), fragt hier.
     virtual std::optional<ValueRange> GetValueRange() const { return std::nullopt; }
     /// Wert setzen UND wie ein Mausklick nach oben melden. false, wenn es keinen Wert gibt.
     virtual bool SetValue(unsigned /*value*/) { return false; }
-    /// Einen Rasterschritt. dir ist (-1|0|+1, -1|0|+1). true = verbraucht, der Fokus wandert
-    /// dann NICHT weiter.
-    virtual bool StepValue(const Position& /*dir*/) { return false; }
+
+    /// WUERDE ein Rasterschritt in diese Richtung von DIESEM Control verbraucht? Reine Frage.
+    /// dir ist (-1|0|+1, -1|0|+1).
+    ///
+    /// BEFUND N8: die Tastenhinweisleiste fragte frueher GetValueRange() und der Knopf wirkte
+    /// in StepValue() - zwei Funktionen ohne gemeinsame Bedingung, die nachweislich
+    /// auseinanderlaufen koennen. Jetzt ist es EINE Bedingung, und sie kann gar nicht mehr
+    /// auseinanderlaufen: StepValue ist unten NICHT MEHR VIRTUELL und liefert woertlich das
+    /// Ergebnis dieser Frage.
+    virtual bool CanStepValue(const Position& /*dir*/) const { return false; }
+    /// Die WIRKUNG des Rasterschrittes. Wird ausschliesslich von StepValue gerufen, und nur
+    /// dann, wenn CanStepValue(dir) true gesagt hat - eine Ueberschreibung darf also davon
+    /// ausgehen und muss die Vorbedingung nicht ein zweites Mal pruefen.
+    virtual void DoStepValue(const Position& /*dir*/) {}
+    /// Einen Rasterschritt. true = verbraucht, der Fokus wandert dann NICHT weiter.
+    ///
+    /// BEWUSST NICHT VIRTUELL - das ist die Erledigung von Befund N8. Eine Klasse, die den
+    /// Schritt annimmt, sagt in CanStepValue, WANN sie ihn annimmt, und in DoStepValue, WAS
+    /// dann geschieht. Damit ist "die Leiste nennt den Knopf" und "der Knopf wirkt" nicht
+    /// mehr aehnlich, sondern dieselbe Zeile Quelltext.
+    bool StepValue(const Position& dir)
+    {
+        if(!CanStepValue(dir))
+            return false;
+        DoStepValue(dir);
+        return true;
+    }
     /// Braucht dieses Control Freitext, solange es den Fokus hat?
     virtual bool WantsTextInput() const { return false; }
 

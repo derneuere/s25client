@@ -613,3 +613,12 @@ bool IngameWindow::StopDragging()
     }
     return false;
 }
+
+brief::Brief IngameWindow::GetPadBrief(const Window* /*focused*/) const
+{
+    // Die Vorgabe ist LEER und nicht etwa der Tooltip: brief::ForControl liefert den ohnehin
+    // schon, und zwar fuer jedes Control in jedem Fenster. Wer hier etwas zurueckgibt, sagt
+    // damit "ich weiss ueber dieses Control mehr als sein Tooltip" - alle anderen bleiben, wie
+    // sie sind.
+    return brief::Brief();
+}

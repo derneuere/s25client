@@ -148,13 +148,11 @@ bool ctrlProgress::SetValue(const unsigned value)
     return true;
 }
 
-bool ctrlProgress::StepValue(const Position& dir)
+void ctrlProgress::DoStepValue(const Position& dir)
 {
-    if(dir.x == 0)
-        return false; // senkrecht: der Fokus wandert weiter
-    // Exakt der Weg der +/- Knoepfe.
+    // Exakt der Weg der +/- Knoepfe. Die Vorbedingung (dir.x != 0) steht in CanStepValue und
+    // wird von Window::StepValue geprueft - hier gibt es sie kein zweites Mal.
     Msg_ButtonClick(dir.x < 0 ? 0u : 1u);
-    return true;
 }
 
 bool ctrlProgress::Msg_LeftDown(const MouseCoords& mc)

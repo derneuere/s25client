@@ -5378,3 +5378,226 @@ msgstr ""
 msgid "Statistics, goods, tools, military - and saving, giving up and leaving the game."
 msgstr ""
 
+
+msgid "The flag of your headquarters"
+msgstr ""
+
+msgid "Every ware of yours goes in and out through this flag. Press A to start your first road here."
+msgstr ""
+
+msgid "At THIS flag there is no geologist and no scout - its menu only builds roads. For those two you need an ordinary flag out in your land."
+msgstr ""
+
+msgid "Flag menu"
+msgstr ""
+
+msgid "What you can do at this flag:"
+msgstr ""
+
+msgid "build a road from it"
+msgstr ""
+
+msgid "build a waterway from it"
+msgstr ""
+
+msgid "tear it down"
+msgstr ""
+
+msgid "call in a geologist"
+msgstr ""
+
+msgid "send out a scout"
+msgstr ""
+
+msgid "There is nothing to do at this flag."
+msgstr ""
+
+msgid "There is no geologist and no scout at THIS flag. For those two you need an ordinary flag out in your land - one that you put up yourself."
+msgstr ""
+
+msgid "Previous"
+msgstr ""
+
+msgid "Move"
+msgstr ""
+
+msgid "Build menu"
+msgstr ""
+
+msgid "The buildings that fit on this spot. Move onto one and this box tells you what it does and what it costs."
+msgstr ""
+
+msgid "Put up a flag"
+msgstr ""
+
+msgid "Flags are the junctions of your road network."
+msgstr ""
+
+msgid "Road menu"
+msgstr ""
+
+msgid "What you can do with the road under the pointer."
+msgstr ""
+
+msgid "View menu"
+msgstr ""
+
+msgid "Watch window, building names, jump to your headquarters, point your allies here. None of these change anything in the world."
+msgstr ""
+
+msgid "Attack menu"
+msgstr ""
+
+msgid "Build a road"
+msgstr ""
+
+msgid "Starts a road at this flag. Move the pointer and press A for each piece, X finishes it."
+msgstr ""
+
+msgid "Wares are carried from flag to flag, so a building without a road to your warehouse gets nothing and delivers nothing."
+msgstr ""
+
+msgid "Build a waterway"
+msgstr ""
+
+msgid "Like a road, but across the water. It only starts at a flag that stands on the shore."
+msgstr ""
+
+msgid "Pull down this flag"
+msgstr ""
+
+msgid "The flag goes away and with it the roads that end here."
+msgstr ""
+
+msgid "Careful: if a building stands right above this flag, this button asks whether to tear down THAT BUILDING instead."
+msgstr ""
+
+msgid "Call in a geologist"
+msgstr ""
+
+msgid "He walks out from THIS flag and digs around it for iron, gold, coal, granite and water. He puts up 15 signs and reports each kind of find once."
+msgstr ""
+
+msgid "He comes out of a warehouse, so this flag needs a road to one. Without that road nothing happens at all - and nothing tells you so."
+msgstr ""
+
+msgid "The sign is only a mark: a mine digs what lies in the ground within two steps of itself, sign or no sign. Build it right next to a sign - the signs fade away after a while, what lies underneath does not."
+msgstr ""
+
+msgid "Send out a scout"
+msgstr ""
+
+msgid "He walks out from THIS flag, wanders about a hundred steps through the fog and then comes home. What he walks past stays uncovered."
+msgstr ""
+
+msgid "Like the geologist he comes out of a warehouse, so this flag needs a road to one."
+msgstr ""
+
+msgid "Put up a flag here"
+msgstr ""
+
+msgid "A flag costs nothing and you can tear it down again. Roads start and end at flags, and wares are handed over there."
+msgstr ""
+
+msgid "Upgrade to a donkey road"
+msgstr ""
+
+msgid "Donkeys carry the wares on this road instead of your carriers, which makes it faster."
+msgstr ""
+
+msgid "Dig up this road"
+msgstr ""
+
+msgid "The road disappears. Flags that then hang on nothing stay where they are."
+msgstr ""
+
+msgid "Watch window"
+msgstr ""
+
+msgid "Opens a small second window that keeps watching this spot while you work somewhere else."
+msgstr ""
+
+msgid "Building names and workload"
+msgstr ""
+
+msgid "Writes the name and the workload above every building. The workload tells you which of your works stand idle."
+msgstr ""
+
+msgid "Go to the headquarters"
+msgstr ""
+
+msgid "Moves your view back to your headquarters."
+msgstr ""
+
+msgid "Point your allies here"
+msgstr ""
+
+msgid "Your allies get a message with this spot in it. Without an ally nothing happens."
+msgstr ""
+
+msgid "Open it"
+msgstr ""
+
+msgid "Road"
+msgstr ""
+
+msgid "Actions"
+msgstr ""
+
+msgid "Flag"
+msgstr ""
+
+msgid "Waterway"
+msgstr ""
+
+msgid "Into the window"
+msgstr ""
+
+msgid "Close it"
+msgstr ""
+
+msgid "Extend"
+msgstr ""
+
+msgid "Finish"
+msgstr ""
+
+msgid "One back"
+msgstr ""
+
+msgid "Choose"
+msgstr ""
+
+msgid "Next"
+msgstr ""
+
+msgid "Back out"
+msgstr ""
+
+msgid "Adjust"
+msgstr ""
+
+msgid "Discard"
+msgstr ""
+
+msgid "Back to here"
+msgstr ""
+
+msgid "What you can do in this tab:"
+msgstr ""
+
+msgid "set how many soldiers march out"
+msgstr ""
+
+msgid "send the strong ones or the weak ones"
+msgstr ""
+
+msgid "start the attack"
+msgstr ""
+
+msgid "Nothing to do here: not one of your soldiers can reach this building. This tab carries no button at all, only the notice that an attack is not possible."
+msgstr ""
+
+msgid "Soldiers only march out from your own military buildings nearby. Build one closer and come back."
+msgstr ""
+

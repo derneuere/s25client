@@ -141,10 +141,10 @@ bool ctrlMapSelection::Msg_LeftUp(const MouseCoords& mc)
     return false;
 }
 
-bool ctrlMapSelection::StepValue(const Position& dir)
+int ctrlMapSelection::findStepTarget(const Position& dir) const
 {
     if(preview || dir == Position(0, 0) || inputData.missionSelectionInfos.empty())
-        return false;
+        return -1;
 
     const auto isPlayable = [this](size_t idx) {
         return idx < missionStatus.size() && missionStatus[idx].playable;
@@ -206,19 +206,22 @@ bool ctrlMapSelection::StepValue(const Position& dir)
         }
     }
 
-    if(best < 0)
-        return false; // in dieser Richtung liegt nichts - der Fokus wandert normal weiter
+    // best < 0 heisst: in dieser Richtung liegt nichts - der Fokus wandert normal weiter.
+    return best;
+}
 
-    setSelection(static_cast<size_t>(best));
+void ctrlMapSelection::DoStepValue(const Position& dir)
+{
+    // Die Vorbedingung steht in CanStepValue; hier ist das Ziel garantiert gueltig.
+    setSelection(static_cast<size_t>(findStepTarget(dir)));
     // Dieselbe Meldung wie im Mauspfad (Msg_LeftUp). Ohne sie zieht
     // dskCampaignMissionSelection den Startknopf nicht scharf.
     GetParent()->Msg_ButtonClick(GetID());
-    return true;
 }
 
 bool ctrlMapSelection::Activate()
 {
-    if(!IsVisible() || !GetParent() || !getSelection())
+    if(!CanActivate())
         return false;
     GetParent()->Msg_ButtonClick(GetID());
     return true;

@@ -36,7 +36,9 @@ public:
         return ValueRange{position, maximum, ValueAxis::Horizontal};
     }
     bool SetValue(unsigned value) override;
-    bool StepValue(const Position& dir) override;
+    /// Waagerecht verbraucht, senkrecht nicht - dort wandert der Fokus weiter.
+    bool CanStepValue(const Position& dir) const override { return dir.x != 0; }
+    void DoStepValue(const Position& dir) override;
 
 protected:
     void Draw_() override;

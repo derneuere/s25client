@@ -84,7 +84,10 @@ public:
     /// leerem Rechteck nichts zeichnet.
     bool IsFocusLeaf() const override { return true; }
     bool Activate() override;
-    bool StepValue(const Position& dir) override;
+    /// Dieselbe Vorbedingung, die Activate() prueft - siehe ctrlButton::CanActivate.
+    bool CanActivate() const override { return IsVisible() && GetParent() && HasValidSelection(); }
+    bool CanStepValue(const Position& dir) const override;
+    void DoStepValue(const Position& dir) override;
     std::optional<ValueRange> GetValueRange() const override;
 
 protected:

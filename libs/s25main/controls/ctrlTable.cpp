@@ -515,7 +515,7 @@ bool ctrlTable::HasValidSelection() const
 
 bool ctrlTable::Activate()
 {
-    if(!IsVisible() || !GetParent() || !HasValidSelection())
+    if(!CanActivate())
         return false;
     GetParent()->Msg_TableChooseItem(GetID(), *selection_);
     return true;
@@ -529,10 +529,13 @@ std::optional<Window::ValueRange> ctrlTable::GetValueRange() const
                       ValueAxis::Vertical};
 }
 
-bool ctrlTable::StepValue(const Position& dir)
+bool ctrlTable::CanStepValue(const Position& dir) const
 {
-    if(dir.y == 0 || rows_.empty())
-        return false;
+    // Waagerecht wandert der Fokus weiter; eine leere Tabelle hat keine Zeile zu waehlen.
+    return dir.y != 0 && !rows_.empty();
+}
+
+void ctrlTable::DoStepValue(const Position& dir)
+{
     MoveSelection(dir.y);
-    return true;
 }

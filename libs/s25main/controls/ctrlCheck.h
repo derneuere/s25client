@@ -34,6 +34,8 @@ public:
 
     bool CanFocus() const override { return !readonly && IsVisible(); }
     bool Activate() override;
+    /// Dieselbe Vorbedingung, die Activate() prueft - siehe ctrlButton::CanActivate.
+    bool CanActivate() const override { return !readonly && IsVisible() && GetParent(); }
 
 protected:
     void Draw_() override;

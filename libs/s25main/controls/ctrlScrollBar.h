@@ -42,13 +42,9 @@ public:
         Scroll(static_cast<int>(value) - static_cast<int>(scroll_pos));
         return true;
     }
-    bool StepValue(const Position& dir) override
-    {
-        if(dir.y == 0)
-            return false;
-        Scroll(dir.y);
-        return true;
-    }
+    /// Senkrecht verbraucht, waagerecht nicht - dort wandert der Fokus weiter.
+    bool CanStepValue(const Position& dir) const override { return dir.y != 0; }
+    void DoStepValue(const Position& dir) override { Scroll(dir.y); }
 
 protected:
     void Draw_() override;

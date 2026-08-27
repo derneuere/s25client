@@ -35,7 +35,7 @@ void ctrlList::SetSelection(const std::optional<unsigned>& selection)
 
 bool ctrlList::Activate()
 {
-    if(lines.empty() || !IsVisible() || !GetParent() || !selection_)
+    if(!CanActivate())
         return false;
     // Entspricht dem Doppelklick im Mauspfad (Msg_LeftUp).
     GetParent()->Msg_ListChooseItem(GetID(), *selection_);
@@ -49,10 +49,14 @@ std::optional<Window::ValueRange> ctrlList::GetValueRange() const
     return ValueRange{selection_.value_or(0u), static_cast<unsigned>(lines.size() - 1u), ValueAxis::Vertical};
 }
 
-bool ctrlList::StepValue(const Position& dir)
+bool ctrlList::CanStepValue(const Position& dir) const
 {
-    if(dir.y == 0 || lines.empty())
-        return false; // waagerecht: der Fokus wandert weiter
+    // Waagerecht wandert der Fokus weiter; eine leere Liste hat nichts zu blaettern.
+    return dir.y != 0 && !lines.empty();
+}
+
+void ctrlList::DoStepValue(const Position& dir)
+{
     const int last = static_cast<int>(lines.size()) - 1;
     int next = (selection_ ? static_cast<int>(*selection_) : (dir.y > 0 ? -1 : last + 1)) + dir.y;
     next = std::max(0, std::min(last, next));
@@ -62,7 +66,8 @@ bool ctrlList::StepValue(const Position& dir)
         // Die Auswahl kann aus dem Sichtbereich laufen - die Scrollleiste muss mit.
         ScrollToSelection();
     }
-    return true; // verbraucht, auch am Rand: der Fokus soll nicht aus der Liste springen
+    // Verbraucht, auch am Rand: der Fokus soll nicht aus der Liste springen. Das steht in
+    // CanStepValue, das hier auch am Rand true sagt.
 }
 
 void ctrlList::ScrollToSelection()

@@ -92,6 +92,16 @@ Window* FocusPath::GetFocused() const
     return cur;
 }
 
+bool FocusPath::HasFocusableControl(Window* const root)
+{
+    if(!root)
+        return false;
+    std::vector<unsigned> cur;
+    std::vector<Candidate> result;
+    collectFrom(*root, cur, result);
+    return !result.empty();
+}
+
 std::vector<FocusPath::Candidate> FocusPath::Collect() const
 {
     std::vector<Candidate> result;
@@ -133,19 +143,39 @@ bool FocusPath::Move(const Dir dir)
 {
     if(!root_)
         return false;
-    const auto candidates = Collect();
-    if(candidates.empty())
+    // Die einzige Stelle, an der ein SCHRITT etwas tut, das eine reine Frage nicht kann: gibt es
+    // gar keine Fokusstation mehr (Reiter gewechselt, Controls geloescht), faellt der Pfad weg.
+    if(Collect().empty())
     {
         SetPath({});
         return false;
     }
+    if(auto target = TargetFor(dir))
+    {
+        SetPath(std::move(*target));
+        return true;
+    }
+    return false;
+}
+
+bool FocusPath::CanMove(const Dir dir) const
+{
+    return TargetFor(dir).has_value();
+}
+
+std::optional<std::vector<unsigned>> FocusPath::TargetFor(const Dir dir) const
+{
+    if(!root_)
+        return std::nullopt;
+    const auto candidates = Collect();
+    if(candidates.empty())
+        return std::nullopt;
     const Window* focused = GetFocused();
     if(!focused)
     {
         // Die Kette ist gerissen (Control geloescht, Reiter gewechselt). Statt den Fokus zu
         // verlieren, faengt der Spieler vorne an.
-        SetPath(candidates.front().path);
-        return true;
+        return candidates.front().path;
     }
 
     if(dir == Dir::Next || dir == Dir::Prev)
@@ -153,16 +183,12 @@ bool FocusPath::Move(const Dir dir)
         const auto it = std::find_if(candidates.begin(), candidates.end(),
                                      [focused](const Candidate& c) { return c.ctrl == focused; });
         if(it == candidates.end())
-        {
-            SetPath(candidates.front().path);
-            return true;
-        }
+            return candidates.front().path;
         const auto idx = static_cast<std::ptrdiff_t>(it - candidates.begin());
         const auto next = idx + (dir == Dir::Next ? 1 : -1);
         if(next < 0 || next >= static_cast<std::ptrdiff_t>(candidates.size()))
-            return false; // kein Umlauf: der Fokus bleibt stehen
-        SetPath(candidates[next].path);
-        return true;
+            return std::nullopt; // kein Umlauf: der Fokus bleibt stehen
+        return candidates[next].path;
     }
 
     // Geometrisch. Kandidat ist das fokussierbare Control, dessen Mittelpunkt im gewuenschten
@@ -208,9 +234,8 @@ bool FocusPath::Move(const Dir dir)
         }
     }
     if(!best)
-        return false;
-    SetPath(best->path);
-    return true;
+        return std::nullopt;
+    return best->path;
 }
 
 bool FocusPath::Activate()
@@ -225,13 +250,15 @@ bool FocusPath::Cancel()
     return focused && focused->CancelInput();
 }
 
-bool FocusPath::Step(const Position& dir)
+FocusPath::StepPlan FocusPath::PlanStep(const Position& dir) const
 {
     if(dir == Position(0, 0))
-        return false;
-    Window* focused = GetFocused();
+        return StepPlan{};
+    const Window* const focused = GetFocused();
+    // Kein aufgeloestes Blatt (die Kette ist gerissen): der Schritt setzt den Fokus wieder auf
+    // die naechste Station, ganz gleich, wohin gedrueckt wurde.
     if(!focused)
-        return Move(Dir::Next);
+        return CanMove(Dir::Next) ? StepPlan{StepEffect::MoveFocus, Dir::Next} : StepPlan{};
 
     // Textmodus: solange ein Eingabefeld Freitext will, wandert der Fokus waagerecht nicht
     // mehr, sondern der Cursor im Feld. Genau der Weg, den auch die Tastatur nimmt.
@@ -241,22 +268,37 @@ bool FocusPath::Step(const Position& dir)
     // Begruendung). Der Zweig bleibt als der vorgesehene Anschluss stehen - er haengt an
     // Window::WantsTextInput und nicht an ctrlEdit, gilt also fuer jedes kuenftige Textcontrol.
     if(focused->WantsTextInput() && dir.y == 0)
+        return StepPlan{StepEffect::MoveTextCursor, Dir::Next};
+
+    // Erst fragt das Control, ob es den Schritt als Wertaenderung verbraucht. CanStepValue ist
+    // woertlich die Bedingung, unter der Window::StepValue ihn annimmt (Window.h, Befund N8).
+    if(focused->CanStepValue(dir))
+        return StepPlan{StepEffect::ChangeValue, Dir::Next};
+
+    const Dir moveDir = (dir.x < 0) ? Dir::Left : (dir.x > 0) ? Dir::Right : (dir.y < 0) ? Dir::Up : Dir::Down;
+    return CanMove(moveDir) ? StepPlan{StepEffect::MoveFocus, moveDir} : StepPlan{StepEffect::None, moveDir};
+}
+
+FocusPath::StepEffect FocusPath::PeekStep(const Position& dir) const
+{
+    return PlanStep(dir).effect;
+}
+
+bool FocusPath::Step(const Position& dir)
+{
+    const StepPlan plan = PlanStep(dir);
+    switch(plan.effect)
     {
-        focused->Msg_KeyDown(KeyEvent{dir.x < 0 ? KeyType::Left : KeyType::Right});
-        return true;
+        case StepEffect::None: return false;
+        case StepEffect::MoveTextCursor:
+            GetFocused()->Msg_KeyDown(KeyEvent{dir.x < 0 ? KeyType::Left : KeyType::Right});
+            return true;
+        // StepValue kann hier nicht mehr false liefern: es liefert woertlich das Ergebnis von
+        // CanStepValue, und genau das hat der Plan schon gelesen.
+        case StepEffect::ChangeValue: return GetFocused()->StepValue(dir);
+        case StepEffect::MoveFocus: return Move(plan.moveDir);
     }
-
-    // Erst fragt das Control, ob es den Schritt als Wertaenderung verbraucht.
-    if(focused->StepValue(dir))
-        return true;
-
-    if(dir.x < 0)
-        return Move(Dir::Left);
-    if(dir.x > 0)
-        return Move(Dir::Right);
-    if(dir.y < 0)
-        return Move(Dir::Up);
-    return Move(Dir::Down);
+    return false;
 }
 
 bool FocusPath::OnPadMove(const Position& delta, const unsigned elapsedMs)

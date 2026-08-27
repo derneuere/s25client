@@ -9,6 +9,7 @@
 #include "SnapOffset.h"
 #include "Window.h"
 #include "helpers/EnumArray.h"
+#include "input/PlayerBrief.h"
 #include "gameData/const_gui_ids.h"
 #include <array>
 #include <vector>
@@ -139,6 +140,22 @@ public:
     /// zugehoerige FocusPath schon tot ist, greift ~IngameWindow auf freigegebenen Speicher zu.
     unsigned GetNumFocusRings() const { return static_cast<unsigned>(focusRings_.size()); }
     void Msg_PaintAfter() override;
+
+    /// KLARTEXT ZU EINEM FOKUSSIERTEN CONTROL DIESES FENSTERS - leer, wenn dieses Fenster keinen
+    /// hat.
+    ///
+    /// Der Grund, warum die Auskunft HIER haengt und nicht in brief::ForControl: die Bedeutung
+    /// eines Knopfes steht in seinem FENSTER. Ein ctrlButton mit der ID 4 in einer ctrlGroup ist
+    /// fuer sich genommen nichts; erst iwAction weiss, dass das "Geologen rufen" ist. Eine
+    /// Tabelle in PlayerBrief, die Fenster-, Reiter- und Knopfnummern aufzaehlte, waere eine
+    /// zweite Beschriftung neben der ersten und veraltete beim naechsten neuen Knopf still.
+    ///
+    /// Reine Anzeige: der Rueckgabewert wird gelesen und gezeichnet, sonst nichts. Diese Methode
+    /// darf keinen Zustand aendern und kein GameCommand erzeugen.
+    ///
+    /// Fuer Maus und Tastatur ist sie folgenlos - gerufen wird sie ausschliesslich aus
+    /// dskGameInterface::RefreshBrief, und das laeuft nur fuer Ansichten mit angestecktem Pad.
+    virtual brief::Brief GetPadBrief(const Window* focused) const;
 
 protected:
     void Draw_() final;

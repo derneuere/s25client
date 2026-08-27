@@ -22,13 +22,72 @@ zu, und ein spaeterer Beitrag zurueck an den Upstream muss von Hand aufbereitet 
 ## Wie der Bau sie benutzt
 
 `CMakeLists.txt` im Wurzelverzeichnis sammelt die `.po` per Glob und uebergibt sie an
-`gettext_create_translations`. Pro Sprache laufen dann zwei Schritte:
+`rttr_create_translations` — die eigene Fassung von `gettext_create_translations`, siehe
+[Warum eine eigene Fassung](#warum-eine-eigene-fassung-von-gettext_create_translations). Pro
+Sprache laufen dann zwei Schritte:
 
-1. `msgmerge --sort-output --no-wrap --quiet --update --backup=none <po> <pot>` — dieser
-   Schritt schreibt **in die Quelldatei zurueck**. Er ist idempotent: solange sich `rttr.pot`
-   nicht aendert, bleiben die `.po` byte-gleich. Nach einer Aenderung an `rttr.pot` sind
-   einmalig alle `.po` geaendert; diese Aenderung ist erwuenscht und gehoert committet.
-2. `msgfmt` erzeugt `<build>/gen/languages/rttr-<locale>.mo`.
+1. `msgmerge --sort-output --no-wrap --quiet --no-fuzzy-matching --update --backup=none <po> <pot>`
+   — dieser Schritt schreibt **in die Quelldatei zurueck**. Er ist idempotent: solange sich
+   `rttr.pot` nicht aendert, bleiben die `.po` byte-gleich. Nach einer Aenderung an `rttr.pot`
+   sind einmalig alle `.po` geaendert; diese Aenderung ist erwuenscht und gehoert committet.
+2. `msgfmt` erzeugt `<build>/gen/languages/rttr-<locale>.mo`. **Ohne `--use-fuzzy`**: ein als
+   `#, fuzzy` markierter Eintrag steht nicht in der `.mo` und damit nie auf dem Schirm.
+
+## Warum eine eigene Fassung von `gettext_create_translations`
+
+Wegen genau eines Schalters: **`--no-fuzzy-matching`**.
+
+Ohne ihn raet `msgmerge` zu jeder NEUEN msgid eine Uebersetzung, indem es die aehnlichste ALTE
+msgid sucht — Aehnlichkeit der englischen Zeichenkette, nicht der Bedeutung — und schreibt sie
+als `#, fuzzy` in die `.po`. Fuer die 57 neuen Klartextsaetze aus Phase 12 hat es das in 27
+Katalogen getan, rund 24 Eintraege je Katalog. Gemessen, woertlich aus `rttr-pl.po`:
+
+```text
+#, fuzzy
+msgid "The flag of your headquarters"
+msgstr "Idź do kwatery głównej"     # = "GEH ZUM HAUPTQUARTIER"
+
+#, fuzzy
+msgid "Open it"
+msgstr "Otwarte"                  # = "Offen", das Eigenschaftswort
+```
+
+Auf dem Schirm stand davon nichts, weil `msgfmt` ohne `--use-fuzzy` laeuft. Die Falle schnappt
+beim naechsten Uebersetzer zu, der die Fuzzies bestaetigt — er bekommt eine HQ-Flagge mit der
+Ueberschrift "Geh zum Hauptquartier". Ein Hinweis, der luegt, ist schlimmer als kein Hinweis;
+das gilt in jeder Sprache.
+
+Ausser diesem Schalter ist die eigene Fassung ein Abbild des Originals: dieselbe
+Argumentpruefung (`FATAL_ERROR` bei fehlendem `DESTINATION`/`FILES` und bei unbekannten
+Argumenten), dieselbe Umrechnung eines relativen `DESTINATION` auf `CMAKE_CURRENT_BINARY_DIR`,
+dieselben zwei Befehle je Sprache. Beides fehlte in der ersten Fassung und ist nachgetragen —
+folgenlos fuer den einen Aufruf, den es gibt, aber eine stille Abweichung von der Funktion, die
+sie ersetzt, bemerkt erst der naechste Aufrufer.
+
+Der Schalter **unterlaesst nur das Raten**. Er entfernt keine bestehenden Fuzzy-Eintraege und
+beruehrt die Arbeit keines Uebersetzers. Eine neue msgid steht danach unuebersetzt in der `.po`,
+und unuebersetzt heisst "faellt auf das englische Original zurueck" — ehrlich und sichtbar.
+
+Die bereits geschriebenen Falschvorschlaege sind einmalig aus den 27 Katalogen entfernt worden
+(nur die, deren msgid neu war; jeder aeltere Fuzzy-Eintrag steht unangetastet). Ohne den
+Schalter waeren sie beim naechsten `msgmerge --update` sofort wieder da.
+
+Die eigene Fassung steht **hier** und nicht in `external/libutil`: das ist ein Submodul und
+gehoert nicht zu diesem Repository — eine Aenderung dort waere beim naechsten
+`git submodule update` weg.
+
+## Was NUR auf Deutsch und Englisch dasteht
+
+Die Klartexte des Padpfades (Phase 9 und Phase 12: Gebaeudebloecke, Knotenbloecke, die Saetze zu
+den Handlungen des Aktionsfensters, die Tastenhinweisleiste) sind **nur im deutschen Katalog
+uebersetzt**. Ein polnischer oder franzoesischer Spieler liest sie auf Englisch, mitten in einer
+sonst uebersetzten Oberflaeche.
+
+Das ist kein Fehler des Programms, sondern der Stand der Uebersetzung, und es ist die richtige
+Voreinstellung: unuebersetzt heisst englisch, und englisch ist wahr. Falsch waere der
+Fuzzy-Vorschlag oben. Wer eine Sprache nachziehen will, findet die Saetze in `rttr.pot` — sie
+stehen dort am Ende, in der Reihenfolge, in der `brief::ForBuilding`, `brief::ForNode`,
+`brief::ForAction` und `brief::KeyLabel` sie erzeugen.
 
 Die `.mo` werden von dort in das Ausgabeverzeichnis kopiert. Die `.po` und `.pot` selbst
 werden **nicht** ausgeliefert und **nicht** installiert; dafuer sorgen die

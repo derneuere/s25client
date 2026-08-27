@@ -59,9 +59,14 @@ public:
 
     bool CanFocus() const override { return !readonly && IsVisible(); }
     bool Activate() override;
+    /// Dieselbe Vorbedingung, die Activate() prueft - siehe ctrlButton::CanActivate.
+    bool CanActivate() const override { return !readonly && IsVisible() && GetParent(); }
+    /// Dieselbe Vorbedingung, die CancelInput() prueft: verworfen wird nur eine OFFENE Liste.
+    bool CanCancelInput() const override { return !readonly && IsListOpen(); }
     bool CancelInput() override;
     void OnFocusLost() override;
-    bool StepValue(const Position& dir) override;
+    bool CanStepValue(const Position& dir) const override;
+    void DoStepValue(const Position& dir) override;
     std::optional<ValueRange> GetValueRange() const override;
 
 protected:

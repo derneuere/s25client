@@ -942,6 +942,58 @@ bool dskGameInterface::OpenObjectWindow(PlayerView& view, const MapPoint cSel)
     return false;
 }
 
+bool dskGameInterface::CanOpenObjectWindow(PlayerView& view, const MapPoint pt) const
+{
+    // Die drei Bedingungen von OpenObjectWindow, in derselben Reihenfolge und mit demselben
+    // Viewer - nur ohne das Fenster. Mehr fragt jene Funktion nicht ab; alles Weitere
+    // (welches Fachfenster, ob schon eines offen ist) entscheidet erst, WAS aufgeht, nicht OB.
+    if(!pt.isValid())
+        return false;
+    const GameWorldViewer& viewer = view.GetViewer();
+    if(viewer.GetShip(pt))
+        return true;
+    const NodalObjectType type = viewer.GetWorld().GetNO(pt)->GetType();
+    if(type != NodalObjectType::Building && type != NodalObjectType::Buildingsite)
+        return false;
+    return viewer.IsOwner(pt);
+}
+
+bool dskGameInterface::CanOpenSystemMenu(PlayerView& view) const
+{
+    // BEFUND N1, gemessen: hier fehlte der STRASSENBAU. OnPadButton faengt Back nur ab, solange
+    // kein Baumodus laeuft - laeuft er, faellt die Flanke in den Fokus, und FocusPath::OnPadButton
+    // verschluckt sie (return true fuer jeden Knopf). Die Leiste versprach trotzdem "Back Menue",
+    // und zwar auf dem Weg, den sie SELBST vorgibt: eigene Flagge -> RB -> A (Baumodus laeuft,
+    // das Aktionsfenster bleibt stehen) -> Y (Fokus ins Fenster). Gemessen: "Leiste verspricht
+    // Back=Menue: true / nach Back: Systemmenue offen = false". Das ist der Knopf, den ein
+    // festgefahrener Anfaenger als Ausweg sucht.
+    //
+    // Diese Funktion ist seitdem die EINE Bedingung mit ZWEI Aufrufern: OnPadButton faengt Back
+    // genau dann ab, wenn sie true sagt, und die Leiste nennt ihn genau dann.
+    if(view.GetRoad().mode != RoadBuildMode::Disabled)
+        return false;
+    // Ist das Menue schon offen, SCHLIESST derselbe Knopf es wieder - dann ist er in jedem Fall
+    // belegt. Sonst gilt die Sperre aus PadOpenSystemMenu: ein eigenes (oder besitzerloses)
+    // modales Fenster laege vor dem Menue und der Fokus spraenge blind hinein.
+    if(WINDOWMANAGER.FindNonModalWindow(CGI_PADMENU, view.GetIndex()))
+        return true;
+    const IngameWindow* const top = WINDOWMANAGER.GetTopMostWindow(view.GetIndex());
+    return !(top && top->IsModal());
+}
+
+bool dskGameInterface::CanEnterWindow(IngameWindow* const wnd)
+{
+    // WOERTLICH die Kette, an der EnterWindow entscheidet - und seit Befund N5 ist es dieselbe
+    // Zeile Quelltext und keine Abschrift mehr.
+    //
+    // BEFUND N5, gemessen: EnterWindow rief ReleaseFocus VOR SetRoot. Traf Y ein Fenster ohne
+    // Fokusstation, scheiterte SetRoot, die Vorabfrage kehrte trotzdem zurueck - und der Spieler
+    // stand ohne Fokus da ("nach Y: Fokus noch aktiv = false"). Ein Knopf, der den Spieler aus
+    // seinem eigenen Fenster wirft, ohne ihn irgendwohin zu bringen, ist kein Knopf, sondern ein
+    // Fehler. Deshalb steht die Frage jetzt VOR dem Loslassen.
+    return wnd && !wnd->IsMinimized() && FocusPath::HasFocusableControl(wnd);
+}
+
 bool dskGameInterface::PadOpenWindow(PlayerView& view)
 {
     // Der A-Knopf. Die Besitzklammer ist hier bereits offen (OnPadButton) - das entstehende
@@ -1304,7 +1356,17 @@ brief::NodeVerdict dskGameInterface::JudgeNode(PlayerView& view, const MapPoint 
         }
     }
     if(opts.tabs.flag)
+    {
+        // DIESELBE Frage, die ShowActionWindow stellt, um iwAction::FlagType::HQ zu setzen: steht
+        // im Nordwesten das Hauptquartier, hat der Flaggenreiter GENAU EINEN Knopf ("Strasse
+        // bauen") - kein Abreissen, kein Geologe, kein Spaeher. Der Satz zu OwnFlag versprach
+        // dort bisher alle drei, und zwar an der einzigen Flagge, die ein Anfaenger zu
+        // Spielbeginn besitzt. Ein Hinweis, der luegt, ist schlimmer als keiner.
+        const GameWorldBase& world = view.GetViewer().GetWorld();
+        if(world.GetNO(world.GetNeighbour(pt, Direction::NorthWest))->GetGOT() == GO_Type::NobHq)
+            return brief::NodeVerdict::OwnHQFlag;
         return brief::NodeVerdict::OwnFlag;
+    }
     if(opts.tabs.setflag)
         return brief::NodeVerdict::FlagOnly;
     if(opts.tabs.cutroad)
@@ -1328,32 +1390,147 @@ void dskGameInterface::RefreshBrief(PlayerView& view)
     // FOKUS, und der Fokus ist je Ansicht gefuehrt (FocusPath). Deshalb koennen vier Spieler
     // gleichzeitig vier verschiedene Texte lesen; mit dem einen WindowManager::curTooltip
     // waere das konstruktiv unmoeglich.
-    if(view.GetFocus().IsActive())
+    // Die Tastenhinweisleiste (CONTROLLER-UX.md 6.2) entsteht in DERSELBEN Rechnung wie der
+    // Klartext und aus DENSELBEN Werten. Das ist der ganze Grund, warum sie hier steht und nicht
+    // in einer eigenen HUD-Schicht: eine zweite Ableitung derselben Zustandsfrage veraltete
+    // neben der ersten, und ein Hinweis, der luegt, ist schlimmer als keiner.
+    brief::KeyContext keys;
+    keys.canOpenSystemMenu = CanOpenSystemMenu(view);
+    keys.inWindow = view.GetFocus().IsActive();
+    keys.roadMode = view.GetRoad().mode != RoadBuildMode::Disabled;
+
+    // Y UND B, EINMAL RICHTIG GEFRAGT - Befund B2 und B3.
+    //
+    // Vorher stand hier ein einziges `windowOpen = GetTopMostWindow(idx) != nullptr`, und zwar
+    // ERST NACH den beiden vorderen Zweigen. Beides war falsch:
+    //
+    //  - Zu SCHWACH: "es gibt ein Fenster" ist nicht "Y kommt hinein" und nicht "B macht es zu".
+    //    Gemessen wurde beides - ein Fenster ohne bedienbares Control laesst den Fokus untaetig,
+    //    und das Beobachtungsfenster (CloseBehavior::NoRightClick) geht mit B nicht zu.
+    //  - Zu SPAET: im Fenster fuehrt Y in ein NEU obenauf gelegtes Fenster (die Vorabfrage in
+    //    OnPadButton laeuft vor dem Fokus), und genau dort schwieg die Leiste.
+    //
+    // Deshalb steht die Frage jetzt VOR allen drei Zweigen und ist woertlich die Kette, an der
+    // EnterWindow und PadCloseTopMostWindow entscheiden.
+    //
+    // Der eine gemessene Fall, der HIER BEWUSST BLEIBT, wie er ist: GetTopMostWindow(idx)
+    // liefert auch BESITZERLOSE Fenster (SHARED_WINDOW_OWNER - Nachrichtenboxen, Systemfenster),
+    // und damit bieten alle vier Sitzplaetze Y und B auf dasselbe Fenster an. Das ist keine
+    // Luege, sondern das gemessene Verhalten des Padpfads seit Phase 5: jeder Sitzplatz darf ein
+    // solches Fenster wirklich betreten und wirklich schliessen (EnterTopMostWindow und
+    // PadCloseTopMostWindow benutzen dieselbe Ueberladung). Die Leiste sagt hier also die
+    // Wahrheit; sie zu aendern hiesse, die PADBELEGUNG zu aendern, und das ist nicht Sache
+    // dieser Runde.
+    IngameWindow* const topWnd = WINDOWMANAGER.GetTopMostWindow(view.GetIndex());
+    // Die Vorabfrage aus OnPadButton (`top && top != root`) plus die Bedingung, unter der
+    // EnterWindow den Fokus wirklich setzt - und diese zweite Haelfte ist seit Befund N5
+    // dieselbe Funktion, die auch der Knopf ruft, und keine Abschrift mehr.
+    keys.canEnterWindow = topWnd && topWnd != view.GetFocus().GetRoot() && CanEnterWindow(topWnd);
+    keys.canCloseWindow = topWnd && !topWnd->ShouldBeClosed()
+                          && topWnd->getCloseBehavior() == CloseBehavior::Regular && !topWnd->IsPinned();
+
+    if(keys.inWindow)
     {
-        view.SetBrief(brief::ForControl(view.GetFocus().GetFocused()));
+        // Erst das FENSTER fragen, dann den Tooltip. Ein Knopf in iwAction heisst "Gelehrten
+        // rufen" und sagt damit nichts darueber, was er tut - iwAction::GetPadBrief legt den
+        // Klartext dazu. Wo kein Fenster etwas beisteuert, bleibt alles wie in Phase 9.
+        const Window* const focused = view.GetFocus().GetFocused();
+        brief::Brief b;
+        if(const auto* wnd = dynamic_cast<const IngameWindow*>(view.GetFocus().GetRoot()))
+            b = wnd->GetPadBrief(focused);
+        if(b.empty())
+            b = brief::ForControl(focused);
+        // BEFUND B1: was im Fenster belegt ist, entscheidet das FOKUSSIERTE CONTROL - und jede
+        // dieser vier Fragen wird an genau der Stelle gestellt, an der auch der Knopf selbst
+        // entscheidet. Ohne sie zeigte die Leiste in jedem Fensterzustand woertlich dasselbe.
+        if(focused)
+        {
+            keys.focusCanActivate = focused->CanActivate();
+            keys.focusCanCancelInput = focused->CanCancelInput();
+        }
+        // DAS STEUERKREUZ, Richtung fuer Richtung - Befund N4 und N8. Gefragt wird
+        // FocusPath::PeekStep, und das ist woertlich die Rechnung, die auch der Druck ausfuehrt
+        // (beide gehen durch PlanStep). Vorher stand hier Window::GetValueRange - eine ZWEITE
+        // Frage, die nachweislich anders ausfallen kann als die, an der der Knopf entscheidet.
+        const auto dpadOf = [&view](const Position& dir) {
+            switch(view.GetFocus().PeekStep(dir))
+            {
+                case FocusPath::StepEffect::ChangeValue: return brief::DpadEffect::AdjustValue;
+                case FocusPath::StepEffect::MoveFocus: return brief::DpadEffect::MoveFocus;
+                // Der Textcursor: heute unerreichbar, weil ctrlEdit keine Fokusstation ist
+                // (ctrlEdit::CanFocus). Bekommt der Baum eines Tages ein Textcontrol am Pad,
+                // faellt das hier auf und braucht dann eine eigene Beschriftung - bis dahin ist
+                // Schweigen ehrlicher als ein geratenes Wort.
+                case FocusPath::StepEffect::MoveTextCursor:
+                case FocusPath::StepEffect::None: break;
+            }
+            return brief::DpadEffect::None;
+        };
+        keys.dpadLeft = dpadOf(Position(-1, 0));
+        keys.dpadRight = dpadOf(Position(1, 0));
+        keys.dpadUp = dpadOf(Position(0, -1));
+        keys.dpadDown = dpadOf(Position(0, 1));
+        keys.focusHasNextStation = view.GetFocus().CanMove(FocusPath::Dir::Next);
+        // BEFUND N3: LB geht eine Station zurueck, und das stand nie da.
+        keys.focusHasPrevStation = view.GetFocus().CanMove(FocusPath::Dir::Prev);
+        b.keys = brief::HintsFor(keys);
+        view.SetBrief(std::move(b));
         return;
     }
     // Der Strassenbau ist ein MODUS, in dem A, X und B etwas anderes tun als sonst. Ohne Ansage
     // ist er die Sackgasse, aus der PadRejection ueberhaupt entstanden ist.
-    if(view.GetRoad().mode != RoadBuildMode::Disabled)
+    if(keys.roadMode)
     {
-        view.SetBrief(brief::ForRoadBuilding(view.GetRoad().mode == RoadBuildMode::Boat));
+        const RoadBuildState& road = view.GetRoad();
+        keys.roadPieces = static_cast<unsigned>(road.route.size());
+        keys.roadCanEnd = CanRoadEndAt(view, road.point);
+        // BEFUND P1 UND P1b: was A hier tut, wird NICHT nachgerechnet, sondern es wird derselbe
+        // Plan gelesen, den PadExtendRoad gleich ausfuehrt. Am Wegende ist er leer - und dort
+        // stand bis eben bedingungslos "A Verlaengern".
+        switch(PlanRoadStep(view).effect)
+        {
+            case RoadStepPlan::Effect::Extend: keys.roadStep = brief::RoadStep::Extend; break;
+            case RoadStepPlan::Effect::ShortenTo: keys.roadStep = brief::RoadStep::ShortenTo; break;
+            case RoadStepPlan::Effect::None: keys.roadStep = brief::RoadStep::None; break;
+        }
+        brief::Brief b = brief::ForRoadBuilding(road.mode == RoadBuildMode::Boat);
+        b.keys = brief::HintsFor(keys);
+        view.SetBrief(std::move(b));
         return;
     }
     const MapPoint pt = view.GetView().GetSelectedPt();
     if(!pt.isValid())
     {
-        view.SetBrief(brief::Brief());
+        brief::Brief b;
+        b.keys = brief::HintsFor(keys);
+        view.SetBrief(std::move(b));
         return;
     }
-    view.SetBrief(brief::ForNode(JudgeNode(view, pt)));
+    keys.verdict = JudgeNode(view, pt);
+    // AUS DERSELBEN RECHNUNG wie das Fenster, nicht neben ihr: hasAction() ist woertlich die
+    // Bedingung, unter der PadOpenActionWindow oeffnet statt abzulehnen, und tabs.setflag die,
+    // unter der iwAction seinen Knopf "Fahne setzen" ueberhaupt anbietet.
+    const ActionOptions opts = ComputeActionOptions(view, pt);
+    keys.canOpenActionMenu = opts.hasAction() || opts.tradeWarehouse != nullptr;
+    keys.canPlaceFlag = opts.tabs.setflag;
+    keys.canOpenObjectWindow = CanOpenObjectWindow(view, pt);
+    // Der Wasserweg haengt an GENAU derselben Bedingung wie PadStartRoad(waterRoad = true):
+    // eigene Flagge, Flaggenart Wasser.
+    if(const noFlag* const flag = view.GetViewer().GetWorld().GetSpecObj<noFlag>(pt))
+        keys.canStartWaterway = flag->GetPlayer() == static_cast<unsigned char>(view.GetPlayerId())
+                                && flag->GetFlagType() == FlagType::Water;
+
+    brief::Brief b = brief::ForNode(keys.verdict);
+    b.keys = brief::HintsFor(keys);
+    view.SetBrief(std::move(b));
 }
 
-void dskGameInterface::DrawBrief(const PlayerView& view) const
+dskGameInterface::BriefLayout dskGameInterface::LayoutBrief(const PlayerView& view) const
 {
+    BriefLayout out;
     const brief::Brief& b = view.GetBrief();
     if(b.empty())
-        return;
+        return out;
     const glFont& font = *NormalFont;
     const unsigned lineHeight = font.getHeight();
     const Rect viewport(view.GetView().GetPos(), view.GetView().GetSize());
@@ -1383,28 +1560,80 @@ void dskGameInterface::DrawBrief(const PlayerView& view) const
         for(std::string& part : font.GetWrapInfo(line, textWidth, textWidth).CreateSingleStrings(line))
             wrapped.push_back(std::move(part));
     }
-    const unsigned numLines = static_cast<unsigned>(wrapped.size()) + (b.title.empty() ? 0u : 1u);
-    if(numLines == 0)
-        return;
+    // Die Tastenzeile wird MIT umgebrochen und nicht abgeschnitten: eine Leiste, der ihr letzter
+    // Eintrag fehlt, verschweigt genau den Knopf, den ein Anfaenger nicht kennt. GEMESSEN passt
+    // sie in einer Viertel-Ansicht in aller Regel auf eine Zeile (852 Punkte Kastenbreite gegen
+    // hoechstens sieben kurze Eintraege); der Umbruch ist die Zusicherung fuer den Rest.
+    std::vector<std::string> keyLines;
+    if(!b.keys.empty())
+    {
+        const std::string keyText = brief::KeyLine(b.keys);
+        for(std::string& part : font.GetWrapInfo(keyText, textWidth, textWidth).CreateSingleStrings(keyText))
+            keyLines.push_back(std::move(part));
+    }
 
-    const Rect panel = brief::PanelRect(viewport, safeArea, numLines, lineHeight, avoid);
-    DrawRectangle(panel, 0xB4000000);
+    // Titel gelb, Fliesstext weiss, die Tastenleiste ein gedaempftes Grau - damit sie als
+    // BESCHRIFTUNG lesbar ist und nicht als weiterer Satz. Dieselbe Schrift wie der Rest des
+    // Kastens; eine zweite Schriftgroesse mitten in einem Kasten ist eine Sichtprobe am Geraet
+    // und keine Rechnung (siehe den Bericht zu dieser Phase).
+    if(!b.title.empty())
+        out.lines.push_back(BriefLine{b.title, COLOR_YELLOW});
+    for(std::string& line : wrapped)
+        out.lines.push_back(BriefLine{std::move(line), COLOR_WHITE});
+    for(std::string& line : keyLines)
+        out.lines.push_back(BriefLine{std::move(line), keyLineColor});
+
+    if(out.lines.empty())
+        return out;
+    out.panel = brief::PanelRect(viewport, safeArea, static_cast<unsigned>(out.lines.size()), lineHeight, avoid);
+    out.textOrigin = out.panel.getOrigin() + DrawPoint(textPadding, 3);
+    out.lineHeight = lineHeight;
+    return out;
+}
+
+void dskGameInterface::DrawBrief(const PlayerView& view) const
+{
+    // DIESE FUNKTION ENTSCHEIDET NICHTS MEHR. Sie zeichnet stur die Liste, die LayoutBrief
+    // liefert - und genau das ist die Erledigung von Befund B4.
+    //
+    // Der Befund lautete: nichts in der Suite sichert zu, dass die Tastenzeile ueberhaupt
+    // gezeichnet wird. Pruefer 1 hat die Zeile ersatzlos aus dem Zeichenweg entfernt und 306
+    // Faelle blieben gruen; Pruefer 2 hat nachgemessen, warum - der Zeichenweg lief in der
+    // ganzen Suite kein einziges Mal (WINDOWMANAGER.GetCurrentDesktop() != dsk in jeder
+    // Splitscreen-Fixture, also blieb `paintForReal` wirkungslos).
+    //
+    // WAS EIN NACHWEIS NICHT KANN, und das bleibt wahr: der DummyRenderer verwirft jeden
+    // Zeichenaufruf; kein Testfall kann sehen, dass ein Buchstabe erscheint. WAS ER JETZT KANN:
+    // die Liste lesen, aus der gezeichnet wird, und zwar dieselbe, aus der DrawBrief zeichnet.
+    // Eine "Tastenzeile" gibt es in dieser Funktion nicht mehr - sie kann hier also auch nicht
+    // mehr einzeln herausfallen, ohne aus LayoutBrief zu verschwinden, und das SIEHT ein
+    // Nachweis (tests/s25Main/splitscreen/testPadKeyHints.cpp, TheDrawnPanelReallyCarriesTheKeyLine).
+    const BriefLayout layout = LayoutBrief(view);
+    if(layout.lines.empty())
+        return;
+    const glFont& font = *NormalFont;
+    DrawRectangle(layout.panel, 0xB4000000);
     // Ein schmaler Streifen in der Spielerfarbe: bei vier Kaesten auf einem Fernseher ist das
     // der schnellste Weg zu erkennen, welcher der eigene ist. Dieselbe Farbe traegt schon der
     // Fokusrahmen (ClearFocusRing/AddFocusRing).
     const unsigned playerColor = worldViewer.GetWorld().GetPlayer(view.GetPlayerId()).color;
-    DrawRectangle(Rect(panel.getOrigin(), Extent(2, panel.getSize().y)), playerColor);
+    DrawRectangle(Rect(layout.panel.getOrigin(), Extent(2, layout.panel.getSize().y)), playerColor);
 
-    DrawPoint textPos = panel.getOrigin() + DrawPoint(textPadding, 3);
-    if(!b.title.empty())
+    // BEFUND N7: hier stand die Schleife. Was von ihr uebrig bleibt, ist ein Ausgeber ohne
+    // Verzweigung - er kann keine Zeile mehr auslassen, weil er keine Zeile mehr auswaehlt.
+    EmitBriefLines(layout, [&font](const DrawPoint& pos, const BriefLine& line) {
+        font.Draw(pos, line.text, FontStyle{}, line.color);
+    });
+}
+
+void dskGameInterface::EmitBriefLines(const BriefLayout& layout,
+                                      const std::function<void(const DrawPoint&, const BriefLine&)>& emit)
+{
+    DrawPoint textPos = layout.textOrigin;
+    for(const BriefLine& line : layout.lines)
     {
-        font.Draw(textPos, b.title, FontStyle{}, COLOR_YELLOW);
-        textPos.y += static_cast<int>(lineHeight);
-    }
-    for(const std::string& line : wrapped)
-    {
-        font.Draw(textPos, line, FontStyle{}, COLOR_WHITE);
-        textPos.y += static_cast<int>(lineHeight);
+        emit(textPos, line);
+        textPos.y += static_cast<int>(layout.lineHeight);
     }
 }
 
@@ -2118,10 +2347,18 @@ void dskGameInterface::OnPadButton(const unsigned slot, const PadButton button, 
     // Fenster ein ANDERES ist als das, in dem der Spieler schon steht - sonst bliebe es beim
     // alten Verhalten, und ein Y im eigenen Fenster wuerde den Fokus zurueck auf das erste
     // Control werfen.
-    if(button == PadButton::Back && view.GetRoad().mode == RoadBuildMode::Disabled)
+    if(button == PadButton::Back && CanOpenSystemMenu(view))
     {
-        // Im Baumodus bleibt Back wirkungslos, wie LB und RB auch: dort ist der Modus die
-        // Bedeutung, und ein Menue mitten in einer halb gelegten Strasse waere eine Falle.
+        // BEFUND N1: hier stand die Bedingung `view.GetRoad().mode == RoadBuildMode::Disabled`
+        // ZWEITER Hand - die Leiste fragte CanOpenSystemMenu, das den Baumodus nicht kannte, und
+        // versprach "Back Menue", wo der Knopf nichts tat. Jetzt ist es eine Bedingung mit zwei
+        // Aufrufern.
+        //
+        // Was sich dadurch am VERHALTEN aendert: nichts Messbares. Faellt Back durch (Baumodus,
+        // oder ein modales Fenster vor diesem Sitzplatz), verschluckt ihn entweder der Fokus
+        // (FocusPath::OnPadButton, default: break) oder er landet im Weltzweig, der fuer Back
+        // keinen Fall hat. Vorher wurde er hier verschluckt und PadOpenSystemMenu lehnte ab -
+        // in beiden Faellen geschieht nichts.
         if(down)
             PadOpenSystemMenu(view);
         return;
@@ -2335,14 +2572,21 @@ bool dskGameInterface::EnterWindow(PlayerView& view, IngameWindow* const wnd)
     // muss - naemlich das, das es gerade selbst geoeffnet hat. Ueber "das oberste" ginge das
     // nicht sicher: liegt ein modales Fenster im Stapel, wird ein neues Fenster DAVOR
     // eingefuegt (WindowManager::DoShow) und ist gar nicht oben.
-    if(!wnd || wnd->IsMinimized())
+    // ERST FRAGEN, DANN LOSLASSEN - Befund N5. Vorher stand hier nur `!wnd || wnd->IsMinimized()`
+    // und die dritte Bedingung ("es gibt ueberhaupt etwas zu bedienen") fiel erst unten in
+    // SetRoot auf - nach ReleaseFocus, also nachdem der Spieler seinen Fokus schon verloren
+    // hatte. Der Rueckgabewert false war dann keine folgenlose Ablehnung mehr.
+    if(!CanEnterWindow(wnd))
         return false;
     // Erst den alten Rahmen abmelden: SetRoot() vergisst die bisherige Wurzel, und ein dort
     // stehen gebliebener Eintrag zeichnete danach einen Rahmen um ein Control, das gar nicht
     // mehr in diesem Fenster liegt.
     ReleaseFocus(view);
+    // Kann nach CanEnterWindow nicht mehr scheitern - SetRoot sammelt mit derselben Funktion
+    // (FocusPath::HasFocusableControl). Die Abfrage bleibt als Riegel stehen, falls das eines
+    // Tages nicht mehr stimmt; erreicht wird sie nicht.
     if(!view.GetFocus().SetRoot(wnd))
-        return false; // in diesem Fenster gibt es nichts zu bedienen
+        return false;
     wnd->AddFocusRing(view.GetFocus(), view.GetViewer().GetPlayer().color);
     return true;
 }
@@ -2493,26 +2737,45 @@ bool dskGameInterface::PadStartRoad(PlayerView& view, const bool waterRoad)
     return true;
 }
 
-bool dskGameInterface::PadExtendRoad(PlayerView& view)
+dskGameInterface::RoadStepPlan dskGameInterface::PlanRoadStep(const PlayerView& view) const
 {
-    RoadBuildState& rb = view.GetRoad();
+    RoadStepPlan plan;
+    const RoadBuildState& rb = view.GetRoad();
     if(rb.mode == RoadBuildMode::Disabled)
-        return false;
+        return plan;
     const MapPoint pt = view.GetView().GetSelectedPt();
     // Der Zeiger steht auf dem Wegende - der HAEUFIGSTE Zustand, weil GameWorldView::DrawGUI
-    // genau diesen Punkt hervorhebt. Hier ist nichts zu verlaengern; BuildRoadPart faengt es
-    // zwar auch ab, aber dieser Zweig sagt es aus, statt sich darauf zu verlassen.
+    // genau diesen Punkt hervorhebt, und der ERSTE Zustand jedes Strassenbaus. Hier ist nichts
+    // zu verlaengern, und es gibt auch keine Meldung darueber (Befund P1).
     if(!pt.isValid() || pt == rb.point)
-        return false;
+        return plan;
 
     // Zeigt der Spieler auf ein Stueck, das er selbst schon gelegt hat, ist das ein Rueckbau
     // bis dorthin - dieselbe Entscheidung, die auch der Mausklick trifft (ContextClick,
-    // GetIdInCurBuildRoad -> DemolishRoad). Beides ist rein visuell.
+    // GetIdInCurBuildRoad -> DemolishRoad). Beides ist rein visuell. Befund P1b: die Leiste
+    // nannte das bis eben "Verlaengern".
     if(const unsigned idOnRoad = GetIdInCurBuildRoad(view, pt))
     {
-        DemolishRoad(view, idOnRoad);
-        return true;
+        plan.effect = RoadStepPlan::Effect::ShortenTo;
+        plan.idOnRoad = idOnRoad;
+        return plan;
     }
+    plan.effect = RoadStepPlan::Effect::Extend;
+    return plan;
+}
+
+bool dskGameInterface::PadExtendRoad(PlayerView& view)
+{
+    // EINE Rechnung, zwei Aufrufer: dieser Knopf und die Tastenhinweisleiste (RefreshBrief).
+    // Was die Leiste ankuendigt, ist woertlich das, was hier gleich geschieht.
+    const RoadStepPlan plan = PlanRoadStep(view);
+    switch(plan.effect)
+    {
+        case RoadStepPlan::Effect::None: return false;
+        case RoadStepPlan::Effect::ShortenTo: DemolishRoad(view, plan.idOnRoad); return true;
+        case RoadStepPlan::Effect::Extend: break;
+    }
+    const MapPoint pt = view.GetView().GetSelectedPt();
 
     // SCHUTZ (BEFUND A): der Zielknoten muss auf EIGENEM Gebiet liegen.
     //

@@ -6,6 +6,7 @@
 
 #include "Point.h"
 #include "driver/PadEvent.h"
+#include <optional>
 #include <vector>
 
 class Window;
@@ -94,6 +95,16 @@ public:
     /// die Padnavigation abmeldet - ein Clear() wuerde dort in eine geloeschte Wurzel greifen.
     void ClearSilently();
 
+    /// GIBT ES in diesem Fenster ueberhaupt eine Fokusstation?
+    ///
+    /// WOERTLICH die Frage, an der SetRoot() scheitert - dieselbe Sammlung, nur ohne eine Wurzel
+    /// zu setzen. Statisch, weil der Fragesteller ein FREMDES Fenster meint: die
+    /// Tastenhinweisleiste muss vor dem Druck sagen, ob Y in das oberste Fenster hineinfuehrt,
+    /// und dieses Fenster ist gerade NICHT die Wurzel dieses Spielers. Ohne die Frage verspricht
+    /// die Leiste Y auch dort, wo SetRoot() gleich false liefert und der Fokus untaetig bleibt -
+    /// gemessen an einem Fenster ohne bedienbares Control.
+    static bool HasFocusableControl(Window* root);
+
     /// Alle fokussierbaren Controls unterhalb der Wurzel, in ID-Reihenfolge, mit Abstieg in
     /// Container, die selbst nicht fokussierbar sind (ctrlGroup, ctrlOptionGroup, ctrlTab).
     /// In ein fokussierbares Control wird NICHT abgestiegen: die Kopfknoepfe einer Tabelle und
@@ -104,6 +115,38 @@ public:
     /// stehen). Kein Umlauf ueber die Fenstergrenze: ein Spieler kann nie versehentlich in ein
     /// fremdes Fenster rutschen.
     bool Move(Dir dir);
+
+    /// Was ein Rasterschritt in DIESE Bildschirmrichtung bewirkt.
+    ///
+    /// BEFUND N4, gemessen: die Leiste nannte das Steuerkreuz NUR auf einer Werteachse. In
+    /// jedem gewoehnlichen Fenster bewegt es aber den FOKUS (Step faellt auf Move zurueck),
+    /// und davon stand nirgends etwas - der Spieler las in jedem Fenster "A Waehlen - RB
+    /// Weiter - B Zurueck" und musste einen ueberschossenen Knopf viermal mit RB umrunden.
+    enum class StepEffect
+    {
+        /// Nichts. Weder ein Wert noch ein Fokus bewegt sich.
+        None,
+        /// Das fokussierte Control verbraucht den Schritt als Wertaenderung.
+        ChangeValue,
+        /// Der Textcursor im fokussierten Eingabefeld wandert.
+        MoveTextCursor,
+        /// Der Fokus wandert auf ein anderes Control.
+        MoveFocus
+    };
+
+    /// WAS TUT das Steuerkreuz (oder der Stick) in dieser Richtung? Reine Frage, kein Schritt.
+    ///
+    /// Fuer die Tastenhinweisleiste. Sie und Step() teilen sich EINE Rechnung (PlanStep) -
+    /// ohne das koennte die Leiste "Einstellen" sagen, wo der Fokus wandert, und schweigen,
+    /// wo etwas geschieht.
+    StepEffect PeekStep(const Position& dir) const;
+
+    /// WUERDE Move(dir) den Fokus wirklich versetzen? Reine Frage, kein Schritt.
+    ///
+    /// Fuer die Tastenhinweisleiste: RB heisst "eine Fokusstation weiter", und Dir::Next kennt
+    /// KEINEN Umlauf (siehe Move) - auf der letzten Station tut die Schulter nichts. Bis Phase 12
+    /// stand "RB Weiter" trotzdem in jedem Fensterzustand.
+    bool CanMove(Dir dir) const;
 
     /// A-Knopf: Window::Activate() auf dem Blatt. false, wenn nichts fokussiert ist.
     bool Activate();
@@ -127,6 +170,22 @@ public:
     void DrawRing(unsigned color) const;
 
 private:
+    /// Das Ziel eines Schrittes, ohne ihn zu gehen - der gesamte Inhalt von Move(). Move() und
+    /// CanMove() teilen sich damit EINE Rechnung und koennen nicht auseinanderlaufen.
+    std::optional<std::vector<unsigned>> TargetFor(Dir dir) const;
+
+    /// Was ein Rasterschritt tut UND worauf er sich richtet - der gesamte Inhalt von Step().
+    /// Step() fuehrt diesen Plan nur noch aus, PeekStep() liest ihn ab. Dieselbe Bauform wie
+    /// TargetFor, und aus demselben Grund.
+    struct StepPlan
+    {
+        StepEffect effect = StepEffect::None;
+        /// Nur bei MoveFocus belegt. NICHT aus `dir` ableitbar: ohne aufgeloestes Blatt faellt
+        /// der Schritt auf Dir::Next zurueck, ganz gleich, wohin gedrueckt wurde.
+        Dir moveDir = Dir::Next;
+    };
+    StepPlan PlanStep(const Position& dir) const;
+
     /// Ein Rasterschritt in Bildschirmrichtung: erst fragt das fokussierte Control, ob es den
     /// Schritt als Wertaenderung verbraucht (Fortschrittsbalken, Scrollleiste, Liste), sonst
     /// wandert der Fokus.

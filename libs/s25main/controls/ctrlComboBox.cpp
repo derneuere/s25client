@@ -220,7 +220,7 @@ void ctrlComboBox::Msg_ListSelectItem(unsigned, const int selection)
 
 bool ctrlComboBox::Activate()
 {
-    if(readonly || !IsVisible() || !GetParent())
+    if(!CanActivate())
         return false;
     auto* list = GetCtrl<ctrlList>(0);
     if(!list->IsVisible())
@@ -242,7 +242,7 @@ bool ctrlComboBox::Activate()
 
 bool ctrlComboBox::CancelInput()
 {
-    if(readonly || !IsListOpen())
+    if(!CanCancelInput())
         return false;
     RestoreAndClose();
     return true;
@@ -318,38 +318,43 @@ std::optional<Window::ValueRange> ctrlComboBox::GetValueRange() const
     return ValueRange{list->GetSelection().value_or(0u), list->GetNumLines() - 1u, ValueAxis::Vertical};
 }
 
-bool ctrlComboBox::StepValue(const Position& dir)
+bool ctrlComboBox::CanStepValue(const Position& dir) const
 {
+    // Schreibgeschuetzt heisst schreibgeschuetzt - auch fuer das Steuerkreuz. GENAU HIER lag
+    // Befund N8: GetValueRange() liefert hier trotzdem einen Wertebereich, die Leiste haette
+    // also "Steuerkreuz Einstellen" versprochen, und der Druck haette nichts getan.
     if(readonly)
         return false;
+    const auto* list = GetCtrl<ctrlList>(0);
+    // AUFGEKLAPPT: das Steuerkreuz blaettert nur, es waehlt nicht. Auch waagerecht
+    // verbraucht - solange die Liste offen ist, soll der Fokus nicht unter ihr wegrutschen
+    // und sie offen zuruecklassen. Heraus fuehren A (bestaetigen), B (verwerfen) und die
+    // Schultertasten (verwerfen ueber OnFocusLost).
+    if(list->IsVisible())
+        return true;
+    return dir.y != 0 && list->GetNumLines() > 0;
+}
+
+void ctrlComboBox::DoStepValue(const Position& dir)
+{
     auto* list = GetCtrl<ctrlList>(0);
     if(list->IsVisible())
     {
-        // AUFGEKLAPPT: das Steuerkreuz blaettert nur, es waehlt nicht. Auch waagerecht
-        // verbraucht - solange die Liste offen ist, soll der Fokus nicht unter ihr
-        // wegrutschen und sie offen zuruecklassen. Heraus fuehren A (bestaetigen), B
-        // (verwerfen) und die Schultertasten (verwerfen ueber OnFocusLost).
         if(dir.y != 0)
         {
             browsing_ = true;
             list->StepValue(dir);
             browsing_ = false;
         }
-        return true;
+        return;
     }
-    if(dir.y == 0)
-        return false;
-    const int numLines = static_cast<int>(list->GetNumLines());
-    if(numLines == 0)
-        return false;
-    const int last = numLines - 1;
+    const int last = static_cast<int>(list->GetNumLines()) - 1;
     const auto& sel = list->GetSelection();
     int next = (sel ? static_cast<int>(*sel) : (dir.y > 0 ? -1 : last + 1)) + dir.y;
     next = std::max(0, std::min(last, next));
     // Bewusst ueber die Liste: das loest Msg_ListSelectItem auf DIESEM Control aus und damit
     // genau den Weg, den auch ein Mausklick auf einen Listeneintrag nimmt.
     list->SetSelection(static_cast<unsigned>(next));
-    return true;
 }
 
 void ctrlComboBox::AddItem(const std::string& text)

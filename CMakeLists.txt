@@ -332,10 +332,93 @@ add_subdirectory(extras)
 find_package(Gettext REQUIRED)
 # Die Kataloge liegen im Hauptprojekt, nicht in einem Submodul: ein Auschecken dieses Branches
 # bringt die Uebersetzungen mit. Siehe data/RTTR/languages/README.md.
-# Achtung: gettext_create_translations laesst msgmerge --update in diese Quelldateien schreiben.
+# Achtung: dieser Schritt laesst msgmerge --update in die Quelldateien zurueckschreiben.
 file(GLOB RTTR_PO_FILES CONFIGURE_DEPENDS data/RTTR/languages/*.po)
 set(RTTR_TRANSLATION_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/gen/languages) # Used by copyDepsToBuildDir
-gettext_create_translations(data/RTTR/languages/rttr.pot ALL
+
+# EIGENE FASSUNG STATT gettext_create_translations() AUS external/libutil - und zwar wegen genau
+# EINES Schalters: --no-fuzzy-matching.
+#
+# DER BEFUND, gemessen in Phase 12. Ohne diesen Schalter raet msgmerge zu jeder NEUEN msgid eine
+# Uebersetzung, indem es die aehnlichste ALTE msgid sucht - Aehnlichkeit der englischen
+# Zeichenkette, nicht der Bedeutung -, und schreibt sie als "#, fuzzy" in die .po. Fuer die 57
+# neuen Klartextsaetze dieser Phase hat es das in 27 Katalogen getan, rund 24 Eintraege je
+# Katalog. Woertlich aus rttr-pl.po:
+#
+#     #, fuzzy
+#     msgid "The flag of your headquarters"
+#     msgstr "Idź do kwatery głównej"      <- "GEH ZUM HAUPTQUARTIER"
+#
+#     #, fuzzy
+#     msgid "Open it"
+#     msgstr "Otwarte"                     <- "Offen", das Eigenschaftswort; genau die Kollision,
+#                                             die im Deutschen sorgfaeltig vermieden wurde
+#
+# Auf dem Schirm steht davon heute nichts, weil msgfmt ohne --use-fuzzy laeuft (in der .mo
+# nachgeprueft). Die Falle schnappt beim naechsten Uebersetzer zu, der die Fuzzies bestaetigt:
+# er bekommt eine HQ-Flagge mit der Ueberschrift "Geh zum Hauptquartier". Ein Hinweis, der luegt,
+# ist schlimmer als kein Hinweis - das gilt in jeder Sprache.
+#
+# WARUM DER SCHALTER UND NICHT NUR EINE EINMALIGE BEREINIGUNG: er wirkt bei JEDEM Bau. Die
+# falschen Vorschlaege sind zusaetzlich aus den .po entfernt worden; ohne diesen Schalter waeren
+# sie beim naechsten `msgmerge --update` sofort wieder da.
+#
+# WAS DER SCHALTER NICHT TUT: er entfernt keine bestehenden Fuzzy-Eintraege und beruehrt die
+# Arbeit keines Uebersetzers. Er unterlaesst nur das RATEN. Eine neue msgid steht danach
+# unuebersetzt in der .po - und unuebersetzt heisst hier "faellt auf das englische Original
+# zurueck", was ehrlich ist und sichtbar bleibt.
+#
+# WARUM HIER UND NICHT IN external/libutil: das ist ein Submodul und gehoert nicht zu diesem
+# Repository. Eine Aenderung dort waere bei jedem `git submodule update` weg.
+#
+# BEFUND N9: diese Fassung war KEINE vollstaendige Kopie. Es fehlten die Argumentpruefung und
+# die Umrechnung eines RELATIVEN DESTINATION auf CMAKE_CURRENT_BINARY_DIR. Beides ist heute
+# folgenlos - der eine Aufruf unten uebergibt beide Pflichtargumente und ein absolutes
+# DESTINATION -, aber eine stille Abweichung von der Funktion, die man ersetzt, ist genau die
+# Sorte Unterschied, die erst der naechste Aufrufer bemerkt. Sie sind jetzt beide da; der
+# EINZIGE gewollte Unterschied zum Original ist --no-fuzzy-matching.
+function(rttr_create_translations potFile)
+    cmake_parse_arguments(ARG "ALL" "DESTINATION;INSTALL_DESTINATION" "FILES" ${ARGN})
+    foreach(reqArg DESTINATION FILES)
+        if(NOT ARG_${reqArg})
+            message(FATAL_ERROR "Missing argument ${reqArg}")
+        endif()
+    endforeach()
+    if(ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR "Unknown arguments: ${ARG_UNPARSED_ARGUMENTS}")
+    endif()
+    get_filename_component(absPotFile ${potFile} ABSOLUTE)
+    if(IS_ABSOLUTE ${ARG_DESTINATION})
+        set(destination ${ARG_DESTINATION})
+    else()
+        set(destination ${CMAKE_CURRENT_BINARY_DIR}/${ARG_DESTINATION})
+    endif()
+    file(MAKE_DIRECTORY ${destination})
+    set(moFiles "")
+    foreach(currentPoFile ${ARG_FILES})
+        get_filename_component(absFile ${currentPoFile} ABSOLUTE)
+        get_filename_component(lang ${absFile} NAME_WE)
+        set(moFile ${destination}/${lang}.mo)
+        add_custom_command(
+          OUTPUT ${moFile}
+          COMMAND ${GETTEXT_MSGMERGE_EXECUTABLE} --sort-output --no-wrap --quiet --no-fuzzy-matching
+                  --update --backup=none ${absFile} ${absPotFile}
+          COMMAND ${GETTEXT_MSGFMT_EXECUTABLE} -o ${moFile} ${absFile}
+          DEPENDS ${absPotFile} ${absFile}
+        )
+        list(APPEND moFiles ${moFile})
+    endforeach()
+    if(ARG_ALL)
+        add_custom_target(translations ALL DEPENDS ${moFiles})
+    else()
+        add_custom_target(translations DEPENDS ${moFiles})
+    endif()
+    if(ARG_INSTALL_DESTINATION)
+        install(FILES ${moFiles} DESTINATION ${ARG_INSTALL_DESTINATION})
+    endif()
+endfunction()
+
+rttr_create_translations(data/RTTR/languages/rttr.pot ALL
     DESTINATION ${RTTR_TRANSLATION_OUTPUT}
     INSTALL_DESTINATION ${RTTR_DATADIR}/RTTR/languages
     FILES ${RTTR_PO_FILES}
