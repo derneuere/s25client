@@ -688,6 +688,22 @@ public:
     /// Unterschied zwischen ihnen gar nicht mehr.
     BriefLayout LayoutBrief(const PlayerView& view) const;
 
+    /// Derselbe Umbruch und dieselbe Lage fuer einen BELIEBIGEN Block dieser Ansicht.
+    ///
+    /// Herausgezogen wegen Befund O1 der Welle 14b: LayoutRing muss wissen, wie hoch der Kasten
+    /// fuer die ANDEREN Eintraege der Seite waere, nicht nur fuer den gerade gewaehlten. Es ist
+    /// dieselbe Rechnung, nur mit einem anderen Block - keine zweite daneben.
+    BriefLayout LayoutBriefOf(const PlayerView& view, const brief::Brief& b) const;
+
+    /// DER KLARTEXT, DEN EIN EINTRAG IM KASTEN BEKOMMT - die eine Quelle dafuer.
+    ///
+    /// Zwei Leser: RefreshBrief fragt sie fuer das FOKUSSIERTE Control (das ist der Kasten, den
+    /// der Spieler liest), LayoutRing fragt sie fuer JEDEN Eintrag der Seite (das ist die Hoehe,
+    /// die der Ring reserviert). Stuenden die zwei Ableitungen nebeneinander, koennte die eine
+    /// neben der anderen veralten und der Ring reservierte Platz fuer einen Text, den es gar
+    /// nicht gibt.
+    static brief::Brief PadBriefFor(const PlayerView& view, const Window* ctrl);
+
     /// ... und die einzige Lesestelle.
     ///
     /// Was ein Nachweis in PlayerView::GetBrief() liest, ist die QUELLE dessen, was hier

@@ -604,6 +604,28 @@ struct KeyContext
     /// gibt, und beide - Leiste und Knopf - fragen dafuer DIESELBE Funktion
     /// (dskGameInterface::RingHasPages). Verschmolzen, nicht abgeschrieben.
     bool ringHasPages = false;
+    /// Der Ring dieser Seite traegt MEHR ALS EINEN Sektor - nur dann bewegt das Steuerkreuz
+    /// ueberhaupt etwas, UND nur dann bewegt der linke Stick etwas.
+    ///
+    /// BEFUND N1 DER WELLE 14b, gemessen: die vier Richtungen standen BEDINGUNGSLOS in der
+    /// Leiste, sobald der Ring offen war. Die WIRKUNG hat aber eine Bedingung -
+    /// dskGameInterface::RingTurnSector rechnet bei einem einzigen Eintrag
+    /// idx = ((0+dir) % 1 + 1) % 1 = 0 und setzt Fokus und Zeiger auf denselben Sektor; am
+    /// Gezeichneten aendert sich kein Strich. Der Hauptreiter "Flagge setzen" des
+    /// Aktionsfensters ist genau so ein Ring.
+    ///
+    /// BEFUND N1 DER WELLE 14c, gemessen: die Korrektur oben hat den LINKEN STICK vergessen.
+    /// Er stand im einsektorigen Ring weiter in der Leiste ("Linker Stick Zeigen") und bewegte
+    /// in acht gemessenen Richtungen nichts. Der Stick nimmt einen anderen Weg als die Knoepfe
+    /// (dskGameInterface::RingOnPadMove -> RingSyncFocus statt RingOnPadButton ->
+    /// RingTurnSector), landet aber auf DERSELBEN Sektorenliste aus DEMSELBEN Aufruf
+    /// (dskGameInterface::RingPageCtrls) - deshalb ist dies eine Bedingung fuer beide und nicht
+    /// zufaellig zwei gleich aussehende.
+    ///
+    /// DIESELBE BAUFORM WIE `ringHasPages`, und aus demselben Grund: gefragt wird die Zahl, an
+    /// der auch die Wirkung rechnet (dskGameInterface::RingPageCtrls). Verschmolzen, nicht
+    /// abgeschrieben - eine Quelle, drei Leser.
+    bool ringManySectors = false;
     /// "NUR ZUSCHAUEN" laeuft. Dann ist GENAU EIN Knopf belegt, und der Kasten besteht aus
     /// dieser einen Zeile.
     bool watchOnly = false;

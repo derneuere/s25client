@@ -264,6 +264,34 @@ bool ringNamesButton(const brief::Brief& b, const PadButton button)
     return ringActionFor(b, button).has_value();
 }
 
+/// Was verspricht die Leiste fuer den LINKEN STICK? Das Gegenstueck zu `ringActionFor`, und es
+/// gibt es, weil ein Stickhinweis keinen Knopf traegt (KeyInput::LeftStickAxis, `button` ohne
+/// Bedeutung) - genau deshalb konnte eine Pruefung, die nur `PadButton` kennt, ihn nie sehen.
+std::optional<brief::KeyAction> ringStickAction(const brief::Brief& b)
+{
+    const auto it = std::find_if(b.keys.begin(), b.keys.end(), [](const brief::KeyHint& h) {
+        return h.input == brief::KeyInput::LeftStickAxis;
+    });
+    return it == b.keys.end() ? std::nullopt : std::optional<brief::KeyAction>(it->action);
+}
+
+bool ringNamesStick(const brief::Brief& b)
+{
+    return ringStickAction(b).has_value();
+}
+
+/// DIE ACHT RICHTUNGEN DES LINKEN STICKS, als Vollausschlag. Acht und nicht vier, weil der Ring
+/// ein Kreis ist: eine Bedingung, die nur auf den Achsen zutraefe, waere auf den Diagonalen
+/// nicht gemessen. Die Diagonalen liegen auf demselben Kreis wie die Achsen (0,7 je Achse), also
+/// kommt keine Richtung schwaecher am Ring an als eine andere.
+const std::vector<PointF>& eightStickDirections()
+{
+    static const std::vector<PointF> dirs = {PointF(0.f, -1.f),   PointF(0.7f, -0.7f), PointF(1.f, 0.f),
+                                             PointF(0.7f, 0.7f),  PointF(0.f, 1.f),    PointF(-0.7f, 0.7f),
+                                             PointF(-1.f, 0.f),   PointF(-0.7f, -0.7f)};
+    return dirs;
+}
+
 bool ringHasHint(const brief::Brief& b, const PadButton button, const brief::KeyAction action)
 {
     const auto a = ringActionFor(b, button);
@@ -1701,6 +1729,260 @@ BOOST_FIXTURE_TEST_CASE(WhereThereReallyArePagesTheBarNamesTheShouldersAndTheyWo
     press(11, PadButton::B);
 }
 
+/// DERSELBE MASSSTAB IM RING MIT EINEM EINZIGEN SEKTOR - BEFUND N1 DER WELLE 14b.
+///
+/// GEMESSEN: die Leiste versprach "Steuerkreuz Drehen", und das Steuerkreuz drehte nichts.
+/// PlayerBrief::HintsFor fuegte die vier Richtungen BEDINGUNGSLOS hinzu, sobald der Ring offen
+/// war, waehrend die WIRKUNG eine Bedingung hat: dskGameInterface::RingTurnSector rechnet bei
+/// einem einzigen Eintrag idx = ((0+dir) % 1 + 1) % 1 = 0 und setzt Fokus und Zeiger auf
+/// denselben Sektor. Am Gezeichneten aendert sich kein Strich. Dieselbe Klasse wie K2/4A (LB und
+/// RB im einseitigen Ring) und wie B1 der zweiten Welle-14-Runde: ein Hinweis ohne Bedingung
+/// neben einer Wirkung mit Bedingung.
+///
+/// WARUM ES EIN EIGENER FALL SEIN MUSS UND NICHT EINE ZEILE IM VORIGEN:
+///   - InTheRingTheBarNamesEveryInputThatDoesSomething misst am einseitigen SYSTEMMENUE (viele
+///     Sektoren) und am HQ-Flaggenring. Ein Ring mit EINEM Sektor kommt dort konstruktiv nicht
+///     vor - genau deshalb ist der Befund durchgerutscht.
+///   - Der eine Zustand, der ihn hergibt, ist der Hauptreiter "Flagge setzen" (TAB_SETFLAG) des
+///     Aktionsfensters: gemessen genau EIN Knopf. Und dessen A erzeugt ein GAMECOMMAND
+///     (GAMECLIENT.SetFlag). In PadViewFixture laeuft keine Partie, das Kommando verpufft, das
+///     Fenster bleibt offen - dort SIEHT die Gleichheit unten ein totes A, das in Wahrheit die
+///     Fixture ist und nicht das Erzeugnis. Deshalb misst dieser Fall in einer LAUFENDEN Partie.
+///
+/// GEMESSEN WIRD DAS GEZEICHNETE. Die Zielrichtung (padring::Ring::GetAim) wird nirgends
+/// gezeichnet; ein Druck, der nur sie verstellt, ist fuer den Spieler nichts. Deshalb steht
+/// neben dem Zustand des Sitzplatzes das ganze Ringbild - jeder Streifen, jedes Bild, jede
+/// Schriftflaeche mit Farbe und Lage.
+BOOST_FIXTURE_TEST_CASE(InARingWithASingleSectorTheBarPromisesNoTurning, PadGameFixture)
+{
+    setUpTwoLocalPlayers();
+    PlayerView& padView = dsk->GetPlayerView(1);
+    // Erst Platz 0, dann Platz 1 - der Router vergibt die Sitzplaetze in der Reihenfolge, in der
+    // die Pads in die Hand genommen werden.
+    aimPadAt(10, 0, hqFlagOf(world(), 0));
+    {
+        const MapPoint firstSpot = findBuildSpotFor(world(), dsk->GetPlayerView(1).GetViewer(), BuildingQuality::Hut);
+        BOOST_TEST_REQUIRE(firstSpot.isValid());
+        aimPadAt(11, 1, firstSpot);
+    }
+
+    /// So viele Sektoren traegt die aktuelle Seite - dieselbe Zahl, an der RingTurnSector
+    /// rechnet: beide rufen RingPageCtrls.
+    const auto sectorCount = [&]() {
+        unsigned pages = 1;
+        return dskGameInterface::RingPageCtrls(padView, pages).size();
+    };
+    /// DAS GANZE RINGBILD als eine Zeile. Ein geschlossener Ring zeichnet nichts und ergibt die
+    /// leere Zeile - auch das ist ein Unterschied, den der Spieler sieht.
+    const auto drawnRing = [&]() {
+        dsk->DrawRing(padView); // warmzeichnen: Schriften und Bilder laden beim ersten Mal
+        ringTap::reset();
+        {
+            RTTR_STUB_FUNCTION(glVertexPointer, ringTap::glVertexPointer);
+            RTTR_STUB_FUNCTION(glColor4ub, ringTap::glColor4ub);
+            RTTR_STUB_FUNCTION(glDrawArrays, ringTap::glDrawArrays);
+            dsk->DrawRing(padView);
+        }
+        std::string out;
+        for(const ringTap::Batch& b : ringTap::batches)
+        {
+            out += std::to_string(static_cast<unsigned>(b.mode)) + "/" + std::to_string(b.color) + ":";
+            for(const PointF& p : b.verts)
+                out += std::to_string(std::lround(p.x)) + "," + std::to_string(std::lround(p.y)) + " ";
+            out += "|";
+        }
+        return out;
+    };
+    struct Snapshot
+    {
+        bool ringOpen;
+        unsigned page;
+        const Window* focused;
+        const Window* root;
+        const IngameWindow* top;
+        bool showBQ, showNames, showProductivity, watchOnly;
+
+        bool operator==(const Snapshot& o) const
+        {
+            return ringOpen == o.ringOpen && page == o.page && focused == o.focused && root == o.root
+                   && top == o.top && showBQ == o.showBQ && showNames == o.showNames
+                   && showProductivity == o.showProductivity && watchOnly == o.watchOnly;
+        }
+    };
+    const auto snap = [&]() {
+        return Snapshot{padView.GetRing().IsOpen(),
+                        padView.GetRing().GetPage(),
+                        padView.GetFocus().GetFocused(),
+                        padView.GetFocus().GetRoot(),
+                        WINDOWMANAGER.GetTopMostWindow(1u),
+                        padView.GetView().IsShowingBQ(),
+                        padView.GetView().IsShowingNames(),
+                        padView.GetView().IsShowingProductivity(),
+                        padView.IsWatchOnly()};
+    };
+    const auto closeRing = [&]() {
+        for(int i = 0; i < 3 && padView.GetRing().IsOpen(); ++i)
+            press(11, PadButton::B);
+        for(unsigned v = 0; v < 2u; ++v)
+        {
+            if(IngameWindow* const w = WINDOWMANAGER.GetTopMostWindow(v))
+            {
+                if(!w->ShouldBeClosed() && w->getCloseBehavior() == CloseBehavior::Regular)
+                    w->Close();
+            }
+        }
+        step(16);
+        if(padView.IsWatchOnly())
+            press(11, PadButton::B);
+        step(16);
+    };
+    /// Einen Ring mit GENAU EINEM Sektor herstellen, und zwar ueber den produktiven Weg: Zeiger
+    /// auf einen eigenen Bauplatz, A fuer das Aktionsfenster, dann mit RB blaettern, bis die
+    /// Seite einen einzigen Eintrag traegt. Der Bauplatz wird JEDES MAL neu gesucht - A setzt in
+    /// dieser Lage wirklich eine Flagge, und derselbe Punkt gaebe danach ein anderes Fenster.
+    const auto openSingleSectorRing = [&]() {
+        closeRing();
+        const MapPoint spot = findBuildSpotFor(world(), padView.GetViewer(), BuildingQuality::Hut);
+        BOOST_TEST_REQUIRE(spot.isValid());
+        aimAt(1, spot);
+        press(11, PadButton::A);
+        BOOST_TEST_REQUIRE(padView.GetRing().IsOpen());
+        for(int i = 0; i < 24 && sectorCount() != 1u; ++i)
+            press(11, PadButton::RightShoulder);
+        BOOST_TEST_REQUIRE(sectorCount() == 1u);
+    };
+
+    /// VOLLAUSSCHLAG DES LINKEN STICKS in eine Richtung und danach zurueck in die Mitte - wie
+    /// ein Daumen, der drueckt und loslaesst. 60 Frames, weil der Ringzeiger die Verschiebungen
+    /// erst aufsammeln muss, bis er die Totzone verlaesst (padring::Ring::AimDeadRadius); ein
+    /// einzelner Frame maesse nur, dass der Zeiger noch in der Mitte steht.
+    const auto pushStick = [&](const PointF dir) {
+        for(int frame = 0; frame < 60; ++frame)
+        {
+            pads.axis(11, PadAxis::LeftX, dir.x);
+            pads.axis(11, PadAxis::LeftY, dir.y);
+            step(16);
+        }
+        pads.axis(11, PadAxis::LeftX, 0.f);
+        pads.axis(11, PadAxis::LeftY, 0.f);
+        step(16);
+    };
+
+    unsigned checked = 0, named = 0, acted = 0, deadPromises = 0;
+    for(const PadButton button : helpers::enumRange<PadButton>())
+    {
+        openSingleSectorRing();
+        const std::string bar = dumpRingKeys(padView.GetBrief());
+        const auto claimed = ringActionFor(padView.GetBrief(), button);
+        const Snapshot before = snap();
+        const std::string drawnBefore = drawnRing();
+        // Zweimal dasselbe Bild ohne Druck - sonst maesse der Vergleich unten Rauschen.
+        BOOST_TEST_REQUIRE(drawnRing() == drawnBefore);
+        press(11, button);
+        const bool reallyActed = !(snap() == before) || drawnRing() != drawnBefore;
+        ++checked;
+        if(claimed)
+            ++named;
+        if(reallyActed)
+            ++acted;
+        if(claimed && !reallyActed)
+        {
+            ++deadPromises;
+            BOOST_TEST_MESSAGE("AUDIT-EINSEKTOR TOT: " << brief::PadButtonLabel(button)
+                                                       << " versprochen, wirkungslos");
+        }
+        BOOST_TEST_CONTEXT("EIN Sektor / Knopf " << brief::PadButtonLabel(button) << "  Leiste=" << bar)
+        BOOST_TEST(reallyActed == claimed.has_value());
+    }
+    BOOST_TEST_MESSAGE("AUDIT-EINSEKTOR: " << checked << " Knoepfe im Ring mit EINEM Sektor, genannt = " << named
+                                           << ", gewirkt = " << acted << ", tote Versprechen = " << deadPromises);
+    BOOST_TEST(acted > 0u);
+    BOOST_TEST(named == acted);
+    BOOST_TEST(deadPromises == 0u);
+
+    // --- DERSELBE MASSSTAB FUER DEN LINKEN STICK - Befund N1 der Welle 14c -------------------
+    //
+    // Die Schleife oben prueft die KNOEPFE erschoepfend und den Stick GAR NICHT. Genau daran ist
+    // dieser Befund zweimal vorbeigekommen: die Welle 14b hat die vier Steuerkreuzrichtungen auf
+    // `ringManySectors` gestellt, die Stickzeile daneben stehenlassen, und keine Zusicherung
+    // konnte das merken, weil `ringActionFor` nur Knoepfe kennt (ein Stickhinweis traegt keinen
+    // PadButton). Ab hier gilt fuer den Stick woertlich dasselbe wie fuer jeden Knopf: was
+    // wirkt, steht da; was dasteht, wirkt.
+    //
+    // GEMESSEN WIRD AM GEZEICHNETEN, nicht am Zustand - und das ist bei diesem Eingang die
+    // eigentliche Frage. Der Stick bewegt IMMER etwas: padring::Ring::Aim verschiebt den Zeiger
+    // in jedem Fall. Nur wird der Zeiger nirgends gezeichnet, und die Hervorhebung folgt dem
+    // FOKUS (dskGameInterface::LayoutRing). Ein Zeiger, der wandert, ohne dass ein Strich sich
+    // aendert, ist fuer den Spieler kein Zeigen - und ein Versprechen darauf ist eine Luege.
+    {
+        unsigned dirsActed = 0, dirsChecked = 0;
+        std::string bar;
+        bool claimed = false;
+        for(const PointF dir : eightStickDirections())
+        {
+            // JEDE RICHTUNG AUS FRISCHEM RING, genau wie jeder Knopf oben aus frischem Ring
+            // kommt: ein stehengebliebener Zeiger der vorigen Richtung waere ein Vorzustand,
+            // den der Spieler so nie hat.
+            openSingleSectorRing();
+            bar = dumpRingKeys(padView.GetBrief());
+            claimed = ringNamesStick(padView.GetBrief());
+            const Snapshot before = snap();
+            const std::string drawnBefore = drawnRing();
+            BOOST_TEST_REQUIRE(drawnRing() == drawnBefore);
+            pushStick(dir);
+            if(!(snap() == before) || drawnRing() != drawnBefore)
+                ++dirsActed;
+            ++dirsChecked;
+        }
+        BOOST_TEST_MESSAGE("AUDIT-EINSEKTOR STICK: " << dirsChecked << " Richtungen, gewirkt = " << dirsActed
+                                                     << ", genannt = " << (claimed ? "ja" : "nein"));
+        BOOST_TEST_CONTEXT("EIN Sektor / linker Stick, " << dirsChecked << " Richtungen  Leiste=" << bar)
+        BOOST_TEST((dirsActed > 0u) == claimed);
+    }
+
+    // DIE GEGENPROBE IN DERSELBEN LAGE: sobald der Ring mehr als einen Sektor traegt, MUSS das
+    // Steuerkreuz dastehen - sonst waere die Heilung auch mit "es wird nie genannt" zu haben,
+    // und das waere die Luege in die andere Richtung.
+    closeRing();
+    const MapPoint spot = findBuildSpotFor(world(), padView.GetViewer(), BuildingQuality::Castle);
+    BOOST_TEST_REQUIRE(spot.isValid());
+    aimAt(1, spot);
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE(padView.GetRing().IsOpen());
+    BOOST_TEST_REQUIRE(sectorCount() > 1u);
+    for(const PadButton dpad : {PadButton::DpadLeft, PadButton::DpadRight, PadButton::DpadUp, PadButton::DpadDown})
+    {
+        BOOST_TEST_CONTEXT("MEHRERE Sektoren / " << brief::PadButtonLabel(dpad))
+        {
+            BOOST_TEST(ringHasHint(padView.GetBrief(), dpad, brief::KeyAction::TurnRing));
+            const std::string drawnBefore = drawnRing();
+            press(11, dpad);
+            BOOST_TEST(drawnRing() != drawnBefore);
+        }
+    }
+    // ... UND DER LINKE STICK GENAUSO. Ohne diese Haelfte waere die Heilung oben auch mit "der
+    // Stick wird nirgends mehr genannt" zu haben - und das waere die Luege in die andere
+    // Richtung, und zwar bei dem Eingang, mit dem der Auftraggeber den Ring bedient.
+    {
+        BOOST_TEST(ringNamesStick(padView.GetBrief()));
+        const auto stickAction = ringStickAction(padView.GetBrief());
+        BOOST_TEST_REQUIRE(stickAction.has_value());
+        BOOST_TEST((*stickAction == brief::KeyAction::AimRing));
+        unsigned pages = 1;
+        const std::vector<Window*> ctrls = dskGameInterface::RingPageCtrls(padView, pages);
+        BOOST_TEST_REQUIRE(ctrls.size() > 1u);
+        // Erst WEG von Sektor 0 - sonst haette der Ausschlag nach oben nichts zu bewegen, und
+        // der Fall bewiese nur, dass ein Fokus stehenbleibt.
+        press(11, PadButton::DpadRight);
+        BOOST_TEST_REQUIRE(padView.GetFocus().GetFocused() != ctrls.front());
+        const std::string drawnBefore = drawnRing();
+        pushStick(PointF(0.f, -1.f)); // Vollausschlag nach OBEN = Sektor 0
+        BOOST_TEST(padView.GetFocus().GetFocused() == ctrls.front());
+        BOOST_TEST(drawnRing() != drawnBefore);
+    }
+    closeRing();
+}
+
 // ============================================================================================
 // 9. BEFUND K3 - DAS UNSICHTBARE RINGFENSTER FING DIE MAUS
 // ============================================================================================
@@ -2849,6 +3131,121 @@ BOOST_FIXTURE_TEST_CASE(WhileTheAxesKeepTheirShapeEveryDotKeepsItsPlaceAndOnlyTh
     // Dieser Ring hat gemessen beides - sonst maesse der Fall nur eine Haelfte.
     BOOST_TEST(sameShapeSteps > 0u);
     BOOST_TEST(shapeChanges > 0u);
+
+    press(11, PadButton::B);
+    WINDOWMANAGER.Draw();
+}
+
+// ============================================================================================
+// WELLE 14b - BEFUND O1: DIE RINGMITTE SPRANG UNTER DEM DAUMEN
+// ============================================================================================
+
+/// DER BEFUND: der ganze Ring wanderte senkrecht, waehrend der Spieler ZIELTE.
+///
+/// URSACHE, im Quelltext belegt: der Klartextkasten aus Phase 9 traegt je nach GEWAEHLTEM
+/// Eintrag verschieden viele Zeilen, und LayoutRing setzte den Ring ueber genau diesen Kasten.
+/// Jeder Stickausschlag waehlt einen anderen Eintrag - also verschob jeder Stickausschlag das
+/// Ziel, auf das der Daumen gerade zeigt. Bei einem Radialmenue ist das die unangenehmste Sorte
+/// Bewegung: der Spieler korrigiert eine Bewegung, die er selbst ausgeloest hat.
+///
+/// GEHEILT: LayoutRing reserviert den HOECHSTEN Kasten, den die Eintraege DIESER SEITE erzeugen
+/// koennen, statt den des gewaehlten. Solange der Spieler auf einer Seite zielt, steht die Mitte
+/// damit still.
+///
+/// GEMESSEN WIRD DAS GEZEICHNETE, und zwar die GEOMETRIE ohne Farbe: die Hervorhebung DARF die
+/// Farbe wechseln (sie ist die Auswahl), aber kein Strich darf sich bewegen. Eine Rechnung waere
+/// hier kein Beweis - der Kasten und der Ring treffen sich erst im Zeichner.
+///
+/// DIE ZAEHNE DES FALLES stehen unten ausdruecklich in einer Zusicherung: die Eintraege dieser
+/// Seite MUESSEN verschieden hohe Kaesten erzeugen (min != max). Ohne diese Zeile waere der Fall
+/// auch auf einem Ring gruen, auf dem alle Eintraege gleich lang schreiben - und damit wertlos.
+BOOST_FIXTURE_TEST_CASE(WhileAimingOnOnePageTheRingDoesNotMoveUnderTheThumb, PadViewFixture<2>)
+{
+    const MapPoint spot = findBuildSpotFor(worldFixture.world, view(1).GetViewer(), BuildingQuality::Castle);
+    BOOST_TEST_REQUIRE(spot.isValid());
+    seatPad(*this, 11, 1);
+    aimPadAt(11, 1, spot);
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    unsigned pages = 1;
+    const auto numSectors = static_cast<unsigned>(dskGameInterface::RingPageCtrls(view(1), pages).size());
+    BOOST_TEST_REQUIRE(numSectors > 1u);
+
+    /// JEDER STRICH, DEN DrawRing HINAUSSCHICKT - OHNE DIE FARBE. Sektoren, Bilder, Schrift.
+    const auto drawnGeometry = [&] {
+        dsk->DrawRing(view(1)); // warmzeichnen (Schrifttexturen)
+        ringTap::reset();
+        {
+            RTTR_STUB_FUNCTION(glVertexPointer, ringTap::glVertexPointer);
+            RTTR_STUB_FUNCTION(glColor4ub, ringTap::glColor4ub);
+            RTTR_STUB_FUNCTION(glDrawArrays, ringTap::glDrawArrays);
+            dsk->DrawRing(view(1));
+        }
+        std::string out;
+        for(const ringTap::Batch& b : ringTap::batches)
+        {
+            out += "|" + std::to_string(static_cast<unsigned>(b.mode));
+            for(const PointF& v : b.verts)
+                out += "," + std::to_string(std::lround(v.x)) + ":" + std::to_string(std::lround(v.y));
+        }
+        return out;
+    };
+
+    const std::string geomAtStart = drawnGeometry();
+    const Position centerAtStart = dsk->LayoutRing(view(1)).center;
+    unsigned minLines = 9999, maxLines = 0;
+    int biggestCenterJump = 0;
+    unsigned movedSteps = 0;
+    // EINMAL RINGSUM mit dem Steuerkreuz - jeder Sektor dieser Seite ist einmal der gewaehlte.
+    for(unsigned i = 0; i < numSectors; ++i)
+    {
+        const auto lines = static_cast<unsigned>(dsk->LayoutBrief(view(1)).lines.size());
+        minLines = std::min(minLines, lines);
+        maxLines = std::max(maxLines, lines);
+        press(11, PadButton::DpadRight);
+        unsigned nowPages = 1;
+        // Das Steuerkreuz blaettert nicht - waere die Seite gewechselt, maesse der Fall etwas
+        // anderes als das, was er behauptet.
+        BOOST_TEST_REQUIRE(dskGameInterface::RingPageCtrls(view(1), nowPages).size() == numSectors);
+        const Position center = dsk->LayoutRing(view(1)).center;
+        biggestCenterJump = std::max(biggestCenterJump, std::abs(center.y - centerAtStart.y));
+        const std::string geom = drawnGeometry();
+        if(geom != geomAtStart)
+            ++movedSteps;
+        BOOST_TEST_CONTEXT("Sektor " << i << ", Kastenzeilen " << lines)
+        {
+            // DIE EINE ZUSICHERUNG: kein Strich hat sich bewegt.
+            BOOST_TEST(geom == geomAtStart);
+            BOOST_TEST(center == centerAtStart);
+        }
+    }
+    BOOST_TEST_MESSAGE("AUDIT O1: " << numSectors << " Sektoren durchgezielt, Kastenzeilen " << minLines << " bis "
+                                    << maxLines << ", groesster Sprung der RINGMITTE " << biggestCenterJump
+                                    << " Punkte, Schritte mit veraendertem Bild " << movedSteps);
+    // DIE ZAEHNE: auf dieser Seite schreiben die Eintraege WIRKLICH verschieden lang. Waere das
+    // nicht so, waere der Fall auch ohne die Heilung gruen.
+    BOOST_TEST(minLines < maxLines);
+    BOOST_TEST(biggestCenterJump == 0);
+    BOOST_TEST(movedSteps == 0u);
+
+    // WAS UEBRIG BLEIBT - gemessen und nicht behauptet: beim BLAETTERN traegt die naechste Seite
+    // andere Eintraege, also eine andere hoechste Zeilenzahl, und dort kann die Mitte weiterhin
+    // springen. Das ist EIN Sprung je Blaettern statt eines je Zielbewegung, und er faellt mit
+    // dem Wechsel des ganzen Ringinhalts zusammen. Hier wird er nur BEZIFFERT und nicht
+    // zugesichert - eine Zusicherung "auch das Blaettern bewegt nichts" waere heute falsch, und
+    // eine falsche Zusicherung ist schlimmer als eine offene Zahl.
+    const auto axesOf = [&] {
+        std::string out;
+        for(const dskGameInterface::RingPageAxis& a : dskGameInterface::RingPageAxes(view(1)))
+            out += std::to_string(a.index) + "/" + std::to_string(a.count) + " ";
+        return out;
+    };
+    const std::string axesBefore = axesOf();
+    const Position beforePaging = dsk->LayoutRing(view(1)).center;
+    press(11, PadButton::RightShoulder);
+    const Position afterPaging = dsk->LayoutRing(view(1)).center;
+    BOOST_TEST_MESSAGE("AUDIT O1: ein Blaettern (" << axesBefore << "-> " << axesOf() << ") bewegte die Mitte um "
+                                                   << std::abs(afterPaging.y - beforePaging.y) << " Punkte");
 
     press(11, PadButton::B);
     WINDOWMANAGER.Draw();

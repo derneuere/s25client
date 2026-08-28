@@ -626,7 +626,25 @@ std::vector<KeyHint> HintsFor(const KeyContext& ctx)
         // Stickausschlag kein PadButton ist. Jetzt kann sie es (KeyInput::LeftStickAxis), und
         // damit steht der Eingang, mit dem der Spieler den Ring ueberhaupt bedient, an erster
         // Stelle - dort, wo ein Anfaenger zuerst hinsieht.
-        addStick(KeyAction::AimRing);
+        //
+        // ... UNTER DERSELBEN BEDINGUNG WIE DAS STEUERKREUZ eine Handvoll Zeilen weiter unten -
+        // Befund N1 der Welle 14c. Die Welle 14b hat die vier Steuerkreuzrichtungen auf
+        // `ringManySectors` gestellt und GENAU DIESE Zeile dabei stehenlassen; auf einem Ring
+        // mit einem einzigen Sektor versprach die Leiste also weiter "Linker Stick Zeigen",
+        // waehrend der Stick in allen acht Richtungen nichts bewegte - und der Stick ist das
+        // Mittel, mit dem der Auftraggeber den Ring ueberhaupt bedient.
+        //
+        // ES IST WIRKLICH DIESELBE BEDINGUNG UND KEINE ZWEITE, nachgesehen statt angenommen:
+        // der Stick laeuft ueber dskGameInterface::RingOnPadMove -> RingSyncFocus, das
+        // Steuerkreuz ueber RingOnPadButton -> RingTurnSector, und BEIDE holen ihre Sektoren aus
+        // demselben Aufruf (dskGameInterface::RingPageCtrls) auf derselben Seite. Bei einem
+        // einzigen Eintrag liefert padring::SectorAt zwangslaeufig 0 (Zeiger draussen) oder -1
+        // (Zeiger in der Mitte); das eine fokussiert den Sektor, der ohnehin schon den Fokus
+        // traegt, das andere tut gar nichts. Am Gezeichneten aendert sich in beiden Faellen kein
+        // Strich - die Hervorhebung folgt dem FOKUS und nicht dem Zeiger, und der Zeiger selbst
+        // wird nirgends gezeichnet (dskGameInterface::LayoutRing, DrawRing).
+        if(ctx.ringManySectors)
+            addStick(KeyAction::AimRing);
         // A loest den gewaehlten Sektor aus - dieselbe Frage wie im Fenster (Window::CanActivate),
         // denn es ist derselbe Aufruf (FocusPath::Activate).
         if(ctx.focusCanActivate)
@@ -636,10 +654,19 @@ std::vector<KeyHint> HintsFor(const KeyContext& ctx)
         // Right und Down einen weiter), genannt waren nur Left und Right. KeyLine zieht die
         // vier zu einem Eintrag zusammen ("Left/Right/Up/Down Drehen"), die WERTE bleiben
         // getrennt, damit ein Nachweis jede Richtung einzeln druecken kann.
-        add(PadButton::DpadLeft, KeyAction::TurnRing);
-        add(PadButton::DpadRight, KeyAction::TurnRing);
-        add(PadButton::DpadUp, KeyAction::TurnRing);
-        add(PadButton::DpadDown, KeyAction::TurnRing);
+        //
+        // ... ABER NUR, WENN ES ETWAS ZU DREHEN GIBT - Befund N1 der Welle 14b. Auf einem Ring
+        // mit EINEM Sektor stand das hier bedingungslos da, und der Druck bewegte nichts:
+        // RingTurnSector rechnet ((0+dir) % 1 + 1) % 1 = 0. Dieselbe Bauform wie `ringHasPages`
+        // eine Zeile weiter unten, und dieselbe Quelle wie die Wirkung - `ringManySectors` zaehlt
+        // genau die Liste, aus der RingTurnSector seinen Sektor nimmt.
+        if(ctx.ringManySectors)
+        {
+            add(PadButton::DpadLeft, KeyAction::TurnRing);
+            add(PadButton::DpadRight, KeyAction::TurnRing);
+            add(PadButton::DpadUp, KeyAction::TurnRing);
+            add(PadButton::DpadDown, KeyAction::TurnRing);
+        }
         // LB und RB blaettern - aber nur, wenn es ueberhaupt etwas zu blaettern gibt. Ein
         // einseitiger Ring (das Systemmenue) nennt sie deshalb nicht, UND dort tun sie seit
         // Befund K2/4A auch wirklich nichts mehr: dskGameInterface::RingTurnPage fragt fuer

@@ -1447,7 +1447,15 @@ void dskGameInterface::RefreshBrief(PlayerView& view)
     // weniger als acht Eintraegen.
     keys.ringOpen = view.GetRing().IsOpen();
     if(keys.ringOpen)
+    {
         keys.ringHasPages = RingHasPages(view);
+        // ... und dasselbe fuer das STEUERKREUZ (Befund N1 der Welle 14b): gezaehlt wird die
+        // Eintragsliste, aus der RingTurnSector seinen Sektor nimmt - derselbe Aufruf, nicht
+        // eine zweite Bedingung daneben. Auf einem Ring mit einem einzigen Sektor dreht der
+        // Knopf nichts, und deshalb nennt ihn die Leiste dort auch nicht.
+        unsigned numRingPages = 1;
+        keys.ringManySectors = RingPageCtrls(view, numRingPages).size() > 1;
+    }
     keys.roadMode = view.GetRoad().mode != RoadBuildMode::Disabled;
 
     // Y UND B, EINMAL RICHTIG GEFRAGT - Befund B2 und B3.
@@ -1485,12 +1493,11 @@ void dskGameInterface::RefreshBrief(PlayerView& view)
         // Erst das FENSTER fragen, dann den Tooltip. Ein Knopf in iwAction heisst "Gelehrten
         // rufen" und sagt damit nichts darueber, was er tut - iwAction::GetPadBrief legt den
         // Klartext dazu. Wo kein Fenster etwas beisteuert, bleibt alles wie in Phase 9.
+        //
+        // DIESE ZWEI ZEILEN STEHEN SEIT BEFUND O1 DER WELLE 14b IN PadBriefFor, weil LayoutRing
+        // dieselbe Frage fuer die uebrigen Eintraege der Seite stellt - eine Quelle, zwei Leser.
         const Window* const focused = view.GetFocus().GetFocused();
-        brief::Brief b;
-        if(const auto* wnd = dynamic_cast<const IngameWindow*>(view.GetFocus().GetRoot()))
-            b = wnd->GetPadBrief(focused);
-        if(b.empty())
-            b = brief::ForControl(focused);
+        brief::Brief b = PadBriefFor(view, focused);
         // BEFUND B1: was im Fenster belegt ist, entscheidet das FOKUSSIERTE CONTROL - und jede
         // dieser vier Fragen wird an genau der Stelle gestellt, an der auch der Knopf selbst
         // entscheidet. Ohne sie zeigte die Leiste in jedem Fensterzustand woertlich dasselbe.
@@ -1611,10 +1618,27 @@ void dskGameInterface::RefreshBrief(PlayerView& view)
     view.SetBrief(std::move(b));
 }
 
+brief::Brief dskGameInterface::PadBriefFor(const PlayerView& view, const Window* const ctrl)
+{
+    // Erst das FENSTER fragen, dann den Tooltip - woertlich die Reihenfolge, die RefreshBrief
+    // fuer das fokussierte Control gefahren hat, seit es diesen Kasten gibt. Sie steht jetzt
+    // hier, weil LayoutRing dieselbe Frage fuer die uebrigen Eintraege der Seite stellt.
+    brief::Brief b;
+    if(const auto* wnd = dynamic_cast<const IngameWindow*>(view.GetFocus().GetRoot()))
+        b = wnd->GetPadBrief(ctrl);
+    if(b.empty())
+        b = brief::ForControl(ctrl);
+    return b;
+}
+
 dskGameInterface::BriefLayout dskGameInterface::LayoutBrief(const PlayerView& view) const
 {
+    return LayoutBriefOf(view, view.GetBrief());
+}
+
+dskGameInterface::BriefLayout dskGameInterface::LayoutBriefOf(const PlayerView& view, const brief::Brief& b) const
+{
     BriefLayout out;
-    const brief::Brief& b = view.GetBrief();
     if(b.empty())
         return out;
     const glFont& font = *NormalFont;
@@ -3816,9 +3840,50 @@ dskGameInterface::RingLayout dskGameInterface::LayoutRing(const PlayerView& view
     const int right = std::min<int>(viewport.right, safeArea.right);
     const int top = std::max<int>(viewport.top, safeArea.top);
     int bottom = std::min<int>(viewport.bottom, safeArea.bottom);
-    const BriefLayout brief = LayoutBrief(view);
-    if(!brief.lines.empty() && brief.panel.top > top && brief.panel.top < bottom)
-        bottom = brief.panel.top;
+    // --- BEFUND O1 DER WELLE 14b: DIE RINGMITTE SPRANG BEIM BLAETTERN ------------------------
+    //
+    // GEMESSEN: der ganze Ring wanderte senkrecht um bis zu 28 Punkte. Der Klartextkasten aus
+    // Phase 9 traegt je nach GEWAEHLTEM Eintrag verschieden viele Zeilen ("Holzfaeller" gegen
+    // eine dreizeilige Beschreibung), und diese Zeile hier setzte den Ring ueber GENAU DIESEN
+    // Kasten. Der Spieler bewegt den Stick, der Kasten wird hoeher, der Ring rutscht nach oben -
+    // das Ziel wandert unter dem Daumen weg. Bei einem Radialmenue, das mit dem Stick bedient
+    // wird, ist das die unangenehmste Sorte Bewegung.
+    //
+    // GEHEILT WIRD AN DER RESERVIERUNG: der Ring weicht nicht mehr dem Kasten, den er GERADE
+    // hat, sondern dem HOECHSTEN, den diese Seite ueberhaupt erzeugen kann. Solange der Spieler
+    // auf der Seite zielt, steht die Mitte damit still - egal, welchen Sektor er trifft.
+    //
+    // DER PREIS, ausgesprochen: bei kurzen Eintraegen bleibt zwischen Ring und Kasten Luft
+    // stehen, und der Ring ist um diese Luft kleiner. Das ist der bessere Handel - ein
+    // wandernder Zielpunkt kostet jeden einzelnen Stickausschlag, die Luft kostet nichts.
+    //
+    // WAS ES NICHT HEILT (gemessen und im Bericht beziffert): beim SEITEN- oder REITERWECHSEL
+    // traegt die naechste Seite andere Eintraege und damit eine andere hoechste Zeilenzahl -
+    // dort kann die Mitte weiterhin springen. Das ist ein Sprung je Blaettern statt eines
+    // Sprungs je Zielbewegung, und er faellt mit dem Wechsel des ganzen Ringinhalts zusammen.
+    //
+    // DIE ZEILEN KOMMEN AUS DERSELBEN QUELLE WIE DER GEZEICHNETE KASTEN (PadBriefFor +
+    // LayoutBriefOf). Der Kasten, den der Spieler WIRKLICH liest, ist dabei immer mitgezaehlt -
+    // sonst koennte die Reservierung kleiner ausfallen als das Gezeichnete, und der Ring liefe
+    // in seine eigene Beschriftung.
+    int reservedTop = bottom;
+    const auto reserve = [&](const BriefLayout& bl) {
+        if(!bl.lines.empty() && bl.panel.top > top && bl.panel.top < reservedTop)
+            reservedTop = bl.panel.top;
+    };
+    reserve(LayoutBrief(view));
+    for(const Window* const ctrl : ctrls)
+    {
+        brief::Brief cand = PadBriefFor(view, ctrl);
+        if(cand.empty())
+            continue;
+        // DIE TASTENZEILE IST EINE EIGENSCHAFT DES RINGZUSTANDS und nicht des Eintrags: sie
+        // steht fuer alle Sektoren gleich da. Deshalb wird hier die WIRKLICHE genommen und
+        // keine zweite gerechnet.
+        cand.keys = view.GetBrief().keys;
+        reserve(LayoutBriefOf(view, cand));
+    }
+    bottom = reservedTop;
     const int freeH = std::max(1, bottom - top);
     const int freeW = std::max(1, right - left);
     out.freeArea = Rect(Position(left, top), Extent(static_cast<unsigned>(freeW), static_cast<unsigned>(freeH)));
