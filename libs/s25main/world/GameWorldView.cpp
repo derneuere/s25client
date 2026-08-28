@@ -38,7 +38,7 @@
 #include <cmath>
 
 GameWorldView::GameWorldView(const GameWorldViewer& gwv, const Position& pos, const Extent& size)
-    : selPt(0, 0), show_bq(SETTINGS.ingame.showBQ), show_names(SETTINGS.ingame.showNames),
+    : selPt(0, 0), bqMode_(SETTINGS.ingame.showBQ ? BqMode::All : BqMode::Off), show_names(SETTINGS.ingame.showNames),
       show_productivity(SETTINGS.ingame.showProductivity), offset(0, 0), lastOffset(0, 0), gwv(gwv), origin_(pos),
       size_(size), zoomFactor_(1.f), targetZoomFactor_(1.f), zoomSpeed_(0.f)
 {
@@ -263,8 +263,11 @@ void GameWorldView::Draw(const RoadBuildState& rb, const MapPoint selected, bool
                 DrawMovingFiguresFromBelow(terrainRenderer, Position(x, y), objsBetweenRows);
                 DrawFigures(curPt, curPos, objsBetweenRows);
 
-                if(IsShowingBQ())
-                    DrawConstructionAid(curPt, curPos);
+                // OHNE BEDINGUNG - die Entscheidung steckt IN DrawConstructionAid
+                // (ShouldDrawConstructionAid). Eine Bedingung hier waere eine zweite Abschrift
+                // derselben Regel, und der Nachweis, der den Zeichner misst, liefe an ihr
+                // vorbei. Dieselbe Linie wie EmitRing und EmitBriefLines (Befund N7).
+                DrawConstructionAid(curPt, curPos);
                 if(resourceRevealMode != Cheats::ResourceRevealMode::Nothing)
                     DrawResource(curPt, curPos, resourceRevealMode);
             } else if(visibility == Visibility::FogOfWar)
@@ -578,8 +581,28 @@ constexpr auto getBqImgs()
     return imgs;
 }
 
+bool GameWorldView::ShouldDrawConstructionAid(const MapPoint& pt) const
+{
+    switch(GetBqMode())
+    {
+        case BqMode::Off: return false;
+        // GENAU EIN Knoten: der, auf den der Zeiger DIESER Ansicht zeigt. selPt kommt aus
+        // UpdateSelection, das Draw() als erstes ruft - es ist also im selben Bild aktuell, und
+        // vier Spieler haben vier davon.
+        //
+        // Ohne Zeiger ist selPt MapPoint::Invalid(); dann trifft kein einziger Knoten, und die
+        // Ansicht zeigt in dieser Stufe gar nichts. Das ist richtig so: die Stufe heisst "nur
+        // am Zeiger", und wo keiner ist, ist auch nichts zu zeigen.
+        case BqMode::Cursor: return pt == selPt;
+        case BqMode::All: return true;
+    }
+    return false;
+}
+
 void GameWorldView::DrawConstructionAid(const MapPoint& pt, const DrawPoint& curPos)
 {
+    if(!ShouldDrawConstructionAid(pt))
+        return;
     BuildingQuality bq = gwv.GetBQ(pt);
     if(bq != BuildingQuality::Nothing)
     {
@@ -691,11 +714,27 @@ void GameWorldView::ToggleShowBQ()
     // Gegen den SICHTBAREN Zustand gekippt, nicht gegen das gespeicherte Feld: sieht der Mensch
     // die Bauhilfe (weil sie erzwungen ist) und drueckt auf "aus", muss sie ausgehen. Der Zwang
     // faellt dabei weg - ein ausdruecklicher Wille schlaegt eine Bequemlichkeitsvorgabe.
-    show_bq = !IsShowingBQ();
-    forcedShowBQ_ = false;
-    // Ein ausdrueckliches "aus" bleibt stehen, bis derselbe Mensch wieder "an" sagt - siehe
-    // die Begruendung an bqExplicitlyOff_.
-    bqExplicitlyOff_ = !show_bq;
+    SetBqMode(IsShowingBQ() ? BqMode::Off : BqMode::All);
+}
+
+void GameWorldView::CycleBqMode()
+{
+    // Gegen den SICHTBAREN Zustand gekippt, aus demselben Grund wie oben.
+    switch(GetBqMode())
+    {
+        case BqMode::Off: SetBqMode(BqMode::Cursor); break;
+        case BqMode::Cursor: SetBqMode(BqMode::All); break;
+        case BqMode::All: SetBqMode(BqMode::Off); break;
+    }
+}
+
+void GameWorldView::SetBqMode(const BqMode mode)
+{
+    bqMode_ = mode;
+    forcedBqMode_ = BqMode::Off;
+    // Ein ausdrueckliches "aus" bleibt stehen, bis derselbe Mensch wieder etwas anderes sagt -
+    // siehe die Begruendung an bqExplicitlyOff_.
+    bqExplicitlyOff_ = (mode == BqMode::Off);
     SaveIngameSettingsValues();
     onHudSettingsChanged();
 }
@@ -705,9 +744,12 @@ void GameWorldView::ForceShowBQ()
     // Der Wille des Menschen schlaegt die Bequemlichkeitsvorgabe. Ohne diese Zeile ist der
     // Bauhilfe-Schalter im Ring wirkungslos, sobald der Spieler das naechste Mal A auf Bauland
     // drueckt - und das ist die haeufigste Handlung des Spiels.
-    if(bqExplicitlyOff_ || forcedShowBQ_)
+    if(bqExplicitlyOff_ || forcedBqMode_ != BqMode::Off)
         return;
-    forcedShowBQ_ = true;
+    // CURSOR UND NICHT ALL - das ist der eigentliche Fix des Befundes. Die Begruendung steht
+    // ausfuehrlich an BqMode: der Klartextkasten, den Phase 9 danebengestellt hat, beschreibt
+    // genau diesen einen Knoten.
+    forcedBqMode_ = BqMode::Cursor;
     // BEWUSST OHNE SaveIngameSettingsValues() - siehe die Begruendung an der Deklaration.
     onHudSettingsChanged();
 }
@@ -741,8 +783,8 @@ void GameWorldView::CopyHudSettingsTo(GameWorldView& other, bool copyBQ) const
     // Beide Bauhilfe-Felder gehen denselben Weg, sonst koennte der Zwang ueber eine Kopie in
     // eine Ansicht sickern, deren SaveIngameSettingsValues ihn dann doch in die ini schriebe.
     // Der einzige Aufrufer (iwObservate) uebergibt copyBQ == false, dort ist beides aus.
-    other.show_bq = (copyBQ ? show_bq : false);
-    other.forcedShowBQ_ = (copyBQ ? forcedShowBQ_ : false);
+    other.bqMode_ = (copyBQ ? bqMode_ : BqMode::Off);
+    other.forcedBqMode_ = (copyBQ ? forcedBqMode_ : BqMode::Off);
     other.bqExplicitlyOff_ = (copyBQ ? bqExplicitlyOff_ : false);
     other.show_names = show_names;
     other.show_productivity = show_productivity;
@@ -844,8 +886,16 @@ void GameWorldView::Resize(const Extent& newSize)
 
 void GameWorldView::SaveIngameSettingsValues() const
 {
+    // BEFUND K3 der Welle 14: SETTINGS ist EINE Datei fuer ALLE Sitzplaetze. Wer sie nicht
+    // besitzt, schreibt sie auch nicht - die ausfuehrliche Begruendung steht an
+    // persistsHudSettings_. Die Sperre sitzt HIER und nicht bei den vier Umschaltern: sonst
+    // gaebe es sie viermal, und der fuenfte Umschalter haette sie vergessen.
+    if(!persistsHudSettings_)
+        return;
     auto& ingameSettings = SETTINGS.ingame;
-    ingameSettings.showBQ = show_bq;
+    // Die ini kennt nur Ja/Nein. `Cursor` und `All` gehen beide als "ja" hinein und kommen
+    // beim naechsten Start beide als `All` zurueck - siehe die Begruendung an bqMode_.
+    ingameSettings.showBQ = (bqMode_ != BqMode::Off);
     ingameSettings.showNames = show_names;
     ingameSettings.showProductivity = show_productivity;
 }

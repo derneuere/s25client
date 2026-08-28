@@ -788,6 +788,18 @@ msgstr ""
 msgid "Build a waterway"
 msgstr ""
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: all"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: here"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: off"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwAction.cpp:302
 #: libs/s25main/ingameWindows/iwAction.cpp:304
 msgid "Build headquarters"
@@ -1109,11 +1121,6 @@ msgstr ""
 #: libs/s25main/addons/AddonMilitaryAid.h:21
 msgid "Construction aid only"
 msgstr ""
-
-#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
-#, fuzzy
-msgid "Construction aid: off"
-msgstr "მშენებლობა"
 
 #: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
 #, fuzzy
@@ -5100,6 +5107,10 @@ msgstr ""
 msgid "Well"
 msgstr "ჭა"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "What fits on a spot - a flag, a hut, a house, a castle or a mine. Three steps: off, only under your pointer, or on every spot of the map."
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwHelp.cpp:17
 msgid "What is this?"
 msgstr ""
@@ -5420,3 +5431,7 @@ msgstr ""
 #: data/RTTR/gamedata/world/winterworld.lua:8
 msgid "winterworld"
 msgstr ""
+
+#, fuzzy
+#~ msgid "Construction aid: off"
+#~ msgstr "მშენებლობა"

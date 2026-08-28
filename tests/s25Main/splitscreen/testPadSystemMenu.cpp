@@ -199,10 +199,18 @@ BOOST_FIXTURE_TEST_CASE(APadPlayerTurnsTheConstructionAidSymbolsOnAndOffWithTheG
     focusTo(11, 1, iwPadSystemMenu::ID_CONSTRUCTION_AID, menuOf(1));
     press(11, PadButton::A);
     BOOST_TEST(view(1).GetView().IsShowingBQ());
+    // WELLE 14: der erste Druck landet auf der MITTLEREN Stufe, nicht auf "alles". Der Befund
+    // des Auftraggebers war woertlich, dass "alles" die Karte erschlaegt; der Umlauf beginnt
+    // deshalb bei dem, was er wirklich wollte.
+    BOOST_TEST((view(1).GetView().GetBqMode() == BqMode::Cursor));
+
+    press(11, PadButton::A);
+    BOOST_TEST((view(1).GetView().GetBqMode() == BqMode::All));
 
     // ... und wieder AUS. Genau das war bisher unmoeglich: Phase 9 schaltet die Bauhilfe beim
     // Oeffnen des Baumenues ein (ForceShowBQ), und kein Padknopf schaltete sie je wieder aus.
     press(11, PadButton::A);
+    BOOST_TEST((view(1).GetView().GetBqMode() == BqMode::Off));
     BOOST_TEST(!view(1).GetView().IsShowingBQ());
 }
 

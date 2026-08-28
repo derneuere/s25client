@@ -805,6 +805,18 @@ msgstr ""
 msgid "Build a waterway"
 msgstr ""
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: all"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: here"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: off"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwAction.cpp:302
 #: libs/s25main/ingameWindows/iwAction.cpp:304
 #, fuzzy
@@ -1137,11 +1149,6 @@ msgstr "Stavební režim"
 #: libs/s25main/addons/AddonMilitaryAid.h:21
 msgid "Construction aid only"
 msgstr "Pouze stavební pomoc"
-
-#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
-#, fuzzy
-msgid "Construction aid: off"
-msgstr "Stavební režim"
 
 #: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
 #, fuzzy
@@ -5183,6 +5190,10 @@ msgstr "Programování webové stránky"
 msgid "Well"
 msgstr "Studna"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "What fits on a spot - a flag, a hut, a house, a castle or a mine. Three steps: off, only under your pointer, or on every spot of the map."
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwHelp.cpp:17
 msgid "What is this?"
 msgstr "Co je toto?"
@@ -5520,6 +5531,10 @@ msgstr "Zimní svět"
 
 #~ msgid "Coming soon"
 #~ msgstr "Již brzy"
+
+#, fuzzy
+#~ msgid "Construction aid: off"
+#~ msgstr "Stavební režim"
 
 #~ msgid "Continent"
 #~ msgstr "Kontinent"

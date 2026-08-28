@@ -159,7 +159,10 @@ public:
     /// Kasten dazu verspricht, und es muss stimmen.
     struct WatchOnlySaved
     {
-        bool showBQ = false;
+        /// WELLE 14: der MODUS und nicht mehr ein Ja/Nein. Waere es ein bool geblieben, kaeme
+        /// ein Spieler, der vor dem Zuschauen "nur am Zeiger" stehen hatte, danach mit "alles"
+        /// zurueck - und der Kasten verspricht woertlich "B bringt alles zurueck".
+        BqMode showBQ = BqMode::Off;
         bool showNames = false;
         bool showProductivity = false;
     };

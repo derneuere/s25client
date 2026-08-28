@@ -31,6 +31,39 @@ public:
 
 struct ObjectBetweenLines;
 
+/// WIEVIEL BAUHILFE DIESE ANSICHT ZEIGT - Welle 14.
+///
+/// DER BEFUND, woertlich: "Sobald ich ein Gebaeude gebaut habe sieht es immer so aus. Ich wuerde
+/// das gerne mit dem Controller toggeln ob ich alles sehe oder nur den Indikator unter meinem
+/// Zeiger."
+///
+/// GEMESSEN auf einer echten Karte (80x48, zwei Ansichten, echter Nebel des Krieges): von 260
+/// sichtbaren Knoten tragen 142 ein Symbol - jeder zweite. Bei vier Ansichten auf einem 4K-
+/// Fernseher sind es 168 je Viertel. Die Landschaft darunter ist damit nicht mehr zu erkennen,
+/// und die zwei Gebaeude, die der Spieler wirklich gebaut hat, gehen in dem Feld unter.
+///
+/// WARUM DREI STUFEN UND NICHT ZWEI: der Klartextkasten aus Phase 9 beschreibt GENAU EINEN
+/// Knoten - den unter dem Zeiger ("Platz fuer ein grosses Gebaeude. Hier passt alles, bis hin zu
+/// Bauernhof, Festung oder Katapult."). Die Lektion, um die es Phase 9 ging, ist die Deckung von
+/// Satz und Symbol: "'Platz fuer eine kleine Huette' steht dort, wo im Bild die Huette liegt."
+/// Genau EIN Symbol deckt diesen Satz. Die 141 weiteren decken ihn zu.
+///
+/// Deshalb ist `Cursor` das, was Phase 9 erzwingt (ForceShowBQ), und nicht `All` - und genau
+/// dieser Zwang war die Ursache dafuer, dass es "immer so aussieht, sobald ich ein Gebaeude
+/// gebaut habe".
+///
+/// KEIN LEISTUNGSARGUMENT: der Unterschied ist gemessen 63 Mikrosekunden je Bild und Ansicht,
+/// also 1,5 % eines Kerns bei vier Ansichten und 60 Bildern. Das ist eine LESBARKEITSfrage.
+enum class BqMode
+{
+    /// Gar keine Symbole - freie Sicht auf die Landschaft.
+    Off,
+    /// NUR der Knoten unter dem Zeiger DIESER Ansicht. Ohne Zeiger: gar keiner.
+    Cursor,
+    /// Jeder sichtbare Knoten, wie seit jeher.
+    All
+};
+
 class GameWorldView
 {
     /// Currently selected point (where the mouse points to)
@@ -48,22 +81,30 @@ class GameWorldView
 
     /// Show building quality icons. DIE EINSTELLUNG DES MENSCHEN - und nur sie geht je nach
     /// SETTINGS.ingame.showBQ zurueck (SaveIngameSettingsValues).
-    bool show_bq;
+    ///
+    /// WELLE 14: war ein bool, ist jetzt dreistufig (BqMode). Die ini kennt weiterhin nur ein
+    /// Ja/Nein (`show_building_quality`); `Cursor` und `All` kommen beim Laden beide als `All`
+    /// zurueck. Das ist bewusst und nicht vergessen - die ini gehoert allen Sitzplaetzen
+    /// gemeinsam, und ein Padspieler soll dem Mausspieler dort keine Stufe hinterlassen, die
+    /// dessen Knopf gar nicht erreichen kann. Der offene Punkt steht im Bericht.
+    BqMode bqMode_;
     /// Bauhilfe, die dieser Ansicht fuer DIESE PARTIE aufgezwungen wurde (ForceShowBQ).
     ///
-    /// Getrennt von show_bq und nicht mit ihm verrechnet, weil SaveIngameSettingsValues ALLE
+    /// Getrennt von bqMode_ und nicht mit ihm verrechnet, weil SaveIngameSettingsValues ALLE
     /// drei HUD-Werte dieser Ansicht in die ini schreibt und nicht nur den gerade geaenderten.
-    /// Lebte die erzwungene Bauhilfe in show_bq, truege der naechste HUD-Umschalter DIESER
+    /// Lebte die erzwungene Bauhilfe in bqMode_, truege der naechste HUD-Umschalter DIESER
     /// Ansicht sie dort hinein - iwAction, Reiter "Anzeigeoptionen" ruft
     /// ToggleShowNamesAndProductivity() auf der Ansicht, aus der das Fenster geoeffnet wurde,
     /// also auf der des PADSPIELERS. Der Mausspieler faende die Bauhilfe danach dauerhaft
     /// eingeschaltet vor, ohne sie je angefasst zu haben.
-    bool forcedShowBQ_ = false;
-    /// Der Mensch hat die Bauhilfe AUSDRUECKLICH ausgeschaltet (ToggleShowBQ auf "aus").
+    /// WELLE 14: aus einem bool ein Modus geworden. ForceShowBQ erzwingt `Cursor` - siehe die
+    /// Begruendung an BqMode.
+    BqMode forcedBqMode_ = BqMode::Off;
+    /// Der Mensch hat die Bauhilfe AUSDRUECKLICH ausgeschaltet (SetBqMode auf BqMode::Off).
     ///
     /// BEFUND PHASE 13, gemessen: ohne dieses Feld war jeder Schalter im Systemmenue nur die
     /// halbe Antwort. dskGameInterface::PadOpenActionWindow ruft ForceShowBQ() bei JEDEM A auf
-    /// Bauland, und forcedShowBQ_ faellt ausschliesslich in ToggleShowBQ. Wer die Bauhilfe also
+    /// Bauland, und forcedBqMode_ faellt ausschliesslich in SetBqMode. Wer die Bauhilfe also
     /// ausschaltete und danach einmal A drueckte, hatte sie wieder an - und zwar fuer immer,
     /// weil derselbe Griff sie jedes Mal aufs Neue erzwingt. Genau die Schleife, die der
     /// Auftraggeber mit "ich verstehe nicht, wie ich die Symbole ausschalte" beschrieben hat.
@@ -72,6 +113,31 @@ class GameWorldView
     /// darf ihn auch nicht fuer immer festschreiben: schaltet der Mensch die Bauhilfe spaeter
     /// wieder ein, faellt das Feld, und die Vorgabe wirkt wieder.
     bool bqExplicitlyOff_ = false;
+    /// DIESE ANSICHT DARF DIE INI SCHREIBEN.
+    ///
+    /// BEFUND K3 der Welle 14, gemessen: SaveIngameSettingsValues schreibt in SETTINGS.ingame -
+    /// und SETTINGS ist EINE Datei fuer ALLE Sitzplaetze. Solange die Bauhilfe ein Ja/Nein war,
+    /// war das bloss laestig (ein Padspieler stellte dem Mausspieler die Vorgabe um); mit der
+    /// dreistufigen Bauhilfe wird es inhaltlich falsch: ein Padspieler auf "nur am Zeiger"
+    /// schreibt in das gemeinsame Ja/Nein ein "ja", und der Mausspieler faengt die naechste
+    /// Partie mit "alles" an - einer Stufe, die er selbst nie gewaehlt hat und die sein
+    /// zweistufiger Knopf gar nicht meint.
+    ///
+    /// DIE ENTSCHEIDUNG: nur der HAUPTSITZPLATZ schreibt (dskGameInterface::CreateViews setzt
+    /// das Feld fuer jede weitere Ansicht auf false). Die zweite angebotene Loesung - ein
+    /// EIGENES ini-Feld fuer die Padstufe - loest den Befund nicht: auch ein neues Feld waere
+    /// EIN Wert fuer VIER Sitzplaetze, und der zweite Padspieler ueberschriebe damit den ersten.
+    /// Sie benennt das Leck um, statt es zu schliessen.
+    ///
+    /// WAS DER ZWEITE SITZPLATZ DAFUER VERLIERT: seine Anzeigewahl gilt nur fuer diese Partie.
+    /// Das ist die richtige Reihenfolge - eine Vorgabe, die allen gehoert, darf nicht von dem
+    /// geaendert werden, der sie nicht besitzt. Der Mausspieler (immer die Hauptansicht) und der
+    /// Einzelspieler merken von alledem nichts; fuer sie ist das Verhalten Bit fuer Bit das alte.
+    ///
+    /// VORGABE true, damit JEDE andere GameWorldView im Baum (iwObservate, Minimap-Vorschau,
+    /// Einzelspieler) sich unveraendert verhaelt - abgeschaltet wird ausdruecklich und an genau
+    /// einer Stelle.
+    bool persistsHudSettings_ = true;
     /// Show building names
     bool show_names;
     /// Show productivities
@@ -155,18 +221,64 @@ public:
     /// Show or hide construction aid. Der ausdrueckliche Wille eines Menschen: er hebt eine
     /// erzwungene Bauhilfe auf (sonst liesse sie sich nie wieder abschalten) und er wird
     /// gespeichert.
+    ///
+    /// ZWEISTUFIG UND ES BLEIBT ZWEISTUFIG: aus <-> alles. Das ist Bit fuer Bit, was der
+    /// MAUSSPIELER seit jeher an seinem Knopf (ID_btConstructionAid) und an der Leertaste
+    /// erlebt, und was dskBenchmark braucht. Die dritte Stufe haengt am Ringschalter des
+    /// Padspielers (CycleBqMode) - dort ist Platz fuer eine Beschriftung, die den Zustand nennt,
+    /// am Mausknopf ist es ein unbeschriftetes Symbol von 1996 mit einem Tooltip.
     void ToggleShowBQ();
+    /// DER DREISTUFIGE UMLAUF - aus, nur am Zeiger, alles, wieder aus.
+    ///
+    /// Woertlich der Wunsch des Auftraggebers ("ob ich alles sehe oder nur den Indikator unter
+    /// meinem Zeiger"). Beginnt beim SICHTBAREN Zustand, nicht beim gespeicherten Feld: sieht
+    /// der Mensch eine erzwungene Bauhilfe am Zeiger und drueckt weiter, kommt "alles" - und
+    /// nicht ein Sprung zurueck an den Anfang.
+    void CycleBqMode();
+    /// Setzt den Modus GERADEHERAUS - der Weg, den "nur zuschauen" beim Verlassen nimmt
+    /// (LeaveWatchOnly stellt genau den Modus wieder her, den es vorgefunden hat, und dafuer
+    /// genuegt kein Umschalter).
+    void SetBqMode(BqMode mode);
     /// Erzwingt die Bauhilfe fuer DIESE Ansicht und DIESE Partie.
     ///
     /// Sie wird NICHT in SETTINGS.ingame.showBQ geschrieben - weder hier noch spaeter durch
-    /// irgendeinen anderen HUD-Umschalter dieser Ansicht. Genau dafuer gibt es forcedShowBQ_ als
+    /// irgendeinen anderen HUD-Umschalter dieser Ansicht. Genau dafuer gibt es forcedBqMode_ als
     /// eigenes Feld; die ausfuehrliche Begruendung steht dort.
     ///
     /// Ein Padspieler, der in Ansicht 2 das Baumenue oeffnet, aendert dem Mausspieler damit
     /// nichts - auch nicht nach einem Neustart.
     void ForceShowBQ();
-    /// Zeigt diese Ansicht gerade die Bauhilfe? Einstellung ODER Zwang.
-    bool IsShowingBQ() const { return show_bq || forcedShowBQ_; }
+    /// DIESE ANSICHT SCHREIBT NICHT MEHR IN DIE GEMEINSAME INI (Befund K3). Genau ein Aufrufer:
+    /// dskGameInterface::CreateViews fuer jede Ansicht ausser der ersten. Die ausfuehrliche
+    /// Begruendung steht an persistsHudSettings_.
+    void StopPersistingHudSettings() { persistsHudSettings_ = false; }
+    /// Schreibt diese Ansicht ihre HUD-Werte in SETTINGS? Lesbar, damit ein Nachweis die
+    /// Trennung messen kann, statt sie zu glauben.
+    bool PersistsHudSettings() const { return persistsHudSettings_; }
+    /// WIEVIEL Bauhilfe diese Ansicht gerade zeigt: Einstellung, sonst Zwang.
+    ///
+    /// DIE EINE ZAHL, die der Zeichner liest - und dieselbe, die ein Nachweis liest. Eine
+    /// Einstellung ungleich `Off` schlaegt den Zwang; ForceShowBQ greift ohnehin nur, solange
+    /// gar nichts eingestellt ist.
+    BqMode GetBqMode() const { return bqMode_ != BqMode::Off ? bqMode_ : forcedBqMode_; }
+    /// Zeigt diese Ansicht ueberhaupt Bauhilfe? Einstellung ODER Zwang. Bleibt bestehen, weil
+    /// sieben Lesestellen genau diese Frage stellen und keine feinere brauchen.
+    bool IsShowingBQ() const { return GetBqMode() != BqMode::Off; }
+    /// TRAEGT DIESER KNOTEN EIN SYMBOL? Die Entscheidung als eigene, benannte Rechnung.
+    ///
+    /// Sie steht hier und nicht im Zeichner, weil GameWorldView::Draw im Testprozess nicht
+    /// laeuft (die Gelaendetexturen fehlen in den Testdaten). Verschmolzen statt abgeschrieben:
+    /// DrawConstructionAid ruft sie selbst als erstes auf - es gibt also keine Bedingung beim
+    /// Aufrufer, die neben dieser veralten koennte, und ein Nachweis kann den PRODUKTIVEN
+    /// Zeichner Knoten fuer Knoten laufen lassen und die Symbole zaehlen.
+    bool ShouldDrawConstructionAid(const MapPoint& pt) const;
+    /// Zeichnet die Bauhilfe EINES Knotens - oder nichts, wenn er in dieser Stufe keins traegt.
+    ///
+    /// OEFFENTLICH, damit ein Nachweis die GEZEICHNETEN Symbole zaehlen kann und nicht nur den
+    /// Zustand abfragt. Der ganze Zeichner GameWorldView::Draw laeuft im Testprozess nicht (die
+    /// Gelaendetexturen fehlen in den Testdaten), diese Funktion aber schon - und sie ist
+    /// dieselbe, die Draw je Knoten ruft, mitsamt ihrer Entscheidung.
+    void DrawConstructionAid(const MapPoint& pt, const DrawPoint& curPos);
     /// Show or hide building names
     void ToggleShowNames();
     /// Show or hide productivity
@@ -220,7 +332,6 @@ private:
     void DrawBoundaryStone(const MapPoint& pt, DrawPoint pos, Visibility vis);
     void DrawResource(const MapPoint& pt, DrawPoint curPos, Cheats::ResourceRevealMode resRevealMode);
     void DrawObject(const MapPoint& pt, const DrawPoint& curPos) const;
-    void DrawConstructionAid(const MapPoint& pt, const DrawPoint& curPos);
     void DrawFigures(const MapPoint& pt, const DrawPoint& curPos,
                      std::vector<ObjectBetweenLines>& objsBetweenRows) const;
     void DrawMovingFiguresFromBelow(const TerrainRenderer& terrainRenderer, const DrawPoint& curPos,

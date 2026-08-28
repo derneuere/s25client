@@ -803,6 +803,18 @@ msgstr "Eine Straße bauen"
 msgid "Build a waterway"
 msgstr "Einen Wasserweg bauen"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: all"
+msgstr "Bauhilfe: alles"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: here"
+msgstr "Bauhilfe: hier"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: off"
+msgstr "Bauhilfe: aus"
+
 #: libs/s25main/ingameWindows/iwAction.cpp:302
 #: libs/s25main/ingameWindows/iwAction.cpp:304
 #, fuzzy
@@ -1133,10 +1145,6 @@ msgstr "Bauhilfsmodus"
 #: libs/s25main/addons/AddonMilitaryAid.h:21
 msgid "Construction aid only"
 msgstr "Nur Konstruktionshilfe"
-
-#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
-msgid "Construction aid: off"
-msgstr "Bauhilfe: aus"
 
 #: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
 msgid "Construction aid: on"
@@ -5168,6 +5176,10 @@ msgstr "Webseiten Programmierung"
 #: libs/s25main/gameData/BuildingConsts.cpp:45
 msgid "Well"
 msgstr "Brunnen"
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "What fits on a spot - a flag, a hut, a house, a castle or a mine. Three steps: off, only under your pointer, or on every spot of the map."
+msgstr "Was auf einen Platz passt - eine Flagge, eine Hütte, ein Haus, eine Burg oder ein Bergwerk. Drei Stufen: aus, nur unter deinem Zeiger, oder auf jedem Platz der Karte."
 
 #: libs/s25main/ingameWindows/iwHelp.cpp:17
 msgid "What is this?"

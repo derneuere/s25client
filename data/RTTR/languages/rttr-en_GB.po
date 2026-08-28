@@ -801,6 +801,18 @@ msgstr ""
 msgid "Build a waterway"
 msgstr ""
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: all"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: here"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: off"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwAction.cpp:302
 #: libs/s25main/ingameWindows/iwAction.cpp:304
 #, fuzzy
@@ -1133,11 +1145,6 @@ msgstr "Construction aid mode"
 #: libs/s25main/addons/AddonMilitaryAid.h:21
 msgid "Construction aid only"
 msgstr "Construction aid only"
-
-#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
-#, fuzzy
-msgid "Construction aid: off"
-msgstr "Construction aid mode"
 
 #: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
 #, fuzzy
@@ -5162,6 +5169,10 @@ msgstr "Website Programming"
 msgid "Well"
 msgstr "Well"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "What fits on a spot - a flag, a hut, a house, a castle or a mine. Three steps: off, only under your pointer, or on every spot of the map."
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwHelp.cpp:17
 msgid "What is this?"
 msgstr "What is this?"
@@ -5500,6 +5511,10 @@ msgstr "Winter world"
 
 #~ msgid "Coming soon"
 #~ msgstr "Coming soon"
+
+#, fuzzy
+#~ msgid "Construction aid: off"
+#~ msgstr "Construction aid mode"
 
 #~ msgid "Continent"
 #~ msgstr "Continent"

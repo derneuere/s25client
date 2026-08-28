@@ -51,6 +51,9 @@
 #include "input/PlayerBrief.h"
 #include "network/GameClient.h"
 #include "nodeObjs/noFlag.h"
+#include "TerrainRenderer.h"
+#include "helpers/containerUtils.h"
+#include "driver/KeyEvent.h"
 #include "world/GameWorld.h"
 #include "world/GameWorldViewer.h"
 #include "PadFixture.h"
@@ -999,7 +1002,13 @@ BOOST_FIXTURE_TEST_CASE(SwitchingTheConstructionAidOffSurvivesThenextPressOfA, P
             break;
         press(11, PadButton::DpadRight);
     }
-    if(view(1).GetView().IsShowingBQ())
+    // GEDRUECKT WIRD, BIS "AUS" DASTEHT - und mindestens einmal. Vorher stand hier ein
+    // "nur falls sie ueberhaupt an ist", und damit hing der Fall am ZUFALL: war die Ansicht
+    // ohnehin schon aus, gab es gar keinen ausdruecklichen Willen, und gemessen wurde etwas
+    // anderes als der Titel verspricht. Aufgefallen ist das erst, als SETTINGS.ingame.showBQ
+    // nicht mehr von jedem Sitzplatz beschrieben wird (Befund K3) und die Ansicht deshalb in
+    // einem anderen Zustand startete. Der Umlauf hat drei Stufen, also genuegen drei Druecke.
+    for(unsigned i = 0; i < 3u && (i == 0u || view(1).GetView().IsShowingBQ()); ++i)
         press(11, PadButton::A);
     BOOST_TEST_REQUIRE(!view(1).GetView().IsShowingBQ());
     press(11, PadButton::B);
@@ -1283,6 +1292,11 @@ BOOST_FIXTURE_TEST_CASE(EveryRingLabelFitsItsPlaceInEveryMeasuredLanguage, PadVi
             // Beschriftungen im Konstruktor und in UpdateToggleLabels ueber _(). Deshalb wird
             // der Ring je Sprache frisch geoeffnet und wieder geschlossen.
             seatPad(*this, 11, 1);
+            // WELLE 14: die Bauhilfe hat DREI Beschriftungen, und gemessen wird die BREITESTE -
+            // sonst haenge das Ergebnis daran, in welchem Zustand ein frueherer Fall die
+            // Ansicht hinterlassen hat. "Build aid: here" ist die laengste englische,
+            // "Bauhilfe: alles" die laengste deutsche (Befund K4 der Welle 14 hat sie gekuerzt).
+            gwv(1).SetBqMode(BqMode::Cursor);
             press(11, PadButton::Back);
             BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
             const auto layout = dsk->LayoutRing(view(1));
@@ -1354,6 +1368,121 @@ BOOST_FIXTURE_TEST_CASE(EveryRingLabelFitsItsPlaceInEveryMeasuredLanguage, PadVi
     BOOST_TEST_MESSAGE("AUDIT: " << passes << " Durchgaenge, " << entriesSeen << " Beschriftungen gemessen");
     BOOST_TEST(passes == 6u);
     BOOST_TEST(entriesSeen >= 42u);
+}
+
+/// DIE LUECKE, DIE BEFUND K4 DER WELLE 14 DURCHGELASSEN HAT - und der Grund, warum dieser Fall
+/// jetzt hier steht und nicht in einer Wegwerfdatei.
+///
+/// GEMESSEN: bei 1280x720 im Fernsehmodus mit VIER Ansichten brachen zwei deutsche Tuerschilder
+/// des Rings um. Der Nachweis daneben (EveryRingLabelFitsItsPlaceInEveryMeasuredLanguage) hat es
+/// nicht gefangen, und das aus zwei belegbaren Gruenden:
+///   (1) Er misst ZWEI Sitzplaetze. Bei vier Ansichten ist ein Viewport nur halb so breit, und
+///       genau die Breite entscheidet ueber den Umbruch.
+///   (2) Er misst 800x600 (ohne Fernsehmodus) und 3840x2160. 1280x720 liegt dazwischen: gross
+///       genug, dass der Deckel von 300 noch nicht greift, klein genug, dass ein Viertel davon
+///       eng wird.
+/// Die Phase 13 hatte das breiter gemessen - vier Sitzplaetze, sieben Sprachen, 588
+/// Beschriftungen -, aber in einer WEGWERFDATEI (`testNachpruefungP13.cpp`), die danach
+/// geloescht wurde. Damit war die Messung eine Erinnerung und kein Nachweis. Ein Befund, den
+/// niemand mehr misst, kommt zurueck; genau das ist hier passiert.
+///
+/// Dieser Fall ist die Wegwerfdatei, festgeschrieben: vier Sitzplaetze, beide Fernsehgroessen,
+/// sieben Sprachen - und dieselben Zusicherungen wie nebenan, gelesen aus DEM Kasten, in den
+/// gezeichnet wird.
+BOOST_FIXTURE_TEST_CASE(NoRingLabelBreaksOnAnyTelevisionSizeAtFourSeats, PadViewFixture<4>)
+{
+    const ScreenSetting restoreScreen;
+
+    struct Screen
+    {
+        const char* what;
+        unsigned w, h;
+    };
+    const Screen screens[] = {{"720p im Fernsehmodus", 1280, 720}, {"4K im Fernsehmodus", 3840, 2160}};
+    // Sieben Sprachen: die drei, in denen der Befund der Phase 13 gemessen wurde, dazu vier
+    // weitere ausgelieferte Kataloge mit langen Woertern.
+    const char* const langs[] = {"de", "fr", "pl", "ru", "tr", "hu", "cs"};
+
+    unsigned labels = 0;
+    unsigned wrapped = 0;
+    unsigned germanWrapped = 0;
+    for(const Screen& sc : screens)
+    {
+        ScreenSetting::use(sc.w, sc.h, true);
+        restartDesktop();
+        for(unsigned v = 0; v < 4u; ++v)
+        {
+            const PadDeviceId dev = static_cast<PadDeviceId>(30 + v);
+            seatPad(*this, dev, v);
+            aimPadAt(dev, v, hqFlagOf(worldFixture.world, static_cast<unsigned char>(v)));
+        }
+        for(const char* const lang : langs)
+        {
+            const rttr::test::LocaleResetter useLang(lang);
+            // ALLE DREI STUFEN DER BAUHILFE. Sie tragen drei verschieden lange Schilder, und der
+            // Befund betraf ZWEI davon - ein Fall, der nur eine Stufe einstellt, findet nur eines.
+            for(const BqMode bq : {BqMode::Off, BqMode::Cursor, BqMode::All})
+            for(unsigned v = 0; v < 4u; ++v)
+            {
+                const PadDeviceId dev = static_cast<PadDeviceId>(30 + v);
+                gwv(v).SetBqMode(bq);
+                press(dev, PadButton::Back);
+                BOOST_TEST_REQUIRE(view(v).GetRing().IsOpen());
+                const auto layout = dsk->LayoutRing(view(v));
+                BOOST_TEST_REQUIRE(!layout.empty());
+                for(unsigned i = 0; i < layout.entries.size(); ++i)
+                {
+                    const auto& e = layout.entries[i];
+                    ++labels;
+                    std::string text;
+                    for(const std::string& line : e.labelLines)
+                        text += (text.empty() ? "" : "|") + line;
+                    BOOST_TEST_CONTEXT(sc.what << " / Sitzplatz " << v << " / " << lang << " / Sektor " << i << " \""
+                                               << text << "\"")
+                    {
+                        // (1) Nichts ist stumm.
+                        BOOST_TEST((e.icon != nullptr || !e.labelLines.empty()));
+                        // (2) Nichts ragt aus der freien Flaeche.
+                        BOOST_TEST(boxInside(e.labelBox, layout.freeArea));
+                        // (3) KEIN UMBRUCH auf einem Fernseher - der Auftraggeber sitzt drei
+                        //     Meter davor, und ein umgebrochenes Tuerschild ist die halbe
+                        //     Lesbarkeit. Das ist die Zusicherung, die der Befund K4 gerissen hat.
+                        if(!e.icon)
+                            BOOST_TEST(e.labelLines.size() == 1u);
+                    }
+                    if(!e.icon && e.labelLines.size() > 1u)
+                    {
+                        ++wrapped;
+                        if(std::string(lang) == "de")
+                            ++germanWrapped;
+                        BOOST_TEST_MESSAGE("AUDIT UMBRUCH: " << sc.what << " / Sitzplatz " << v << " / " << lang
+                                                             << " / \"" << text << "\" Wortbreite "
+                                                             << NormalFont->getWidth(e.ctrl->GetRingLabel())
+                                                             << ", freie Flaeche " << layout.freeArea.getSize()
+                                                             << ", Ring " << static_cast<int>(2.f * layout.rOuter));
+                    }
+                }
+                // (4) Nichts ueberlappt.
+                for(unsigned i = 0; i < layout.entries.size(); ++i)
+                {
+                    for(unsigned j = i + 1; j < layout.entries.size(); ++j)
+                    {
+                        BOOST_TEST_CONTEXT(sc.what << " / Sitzplatz " << v << " / " << lang << " / Sektoren " << i
+                                                   << " und " << j)
+                        BOOST_TEST(!boxesOverlap(layout.entries[i].labelBox, layout.entries[j].labelBox));
+                    }
+                }
+                press(dev, PadButton::B);
+                BOOST_TEST_REQUIRE(!view(v).GetRing().IsOpen());
+            }
+        }
+    }
+    BOOST_TEST_MESSAGE("AUDIT: " << labels << " Beschriftungen gemessen, davon umgebrochen " << wrapped
+                                 << " (deutsch: " << germanWrapped << ")");
+    // Waere das 0, waere der ganze Fall wertlos - genau die stille Schrumpfung, an der ein
+    // Vorgaengernachweis dieses Projekts schon einmal gestorben ist.
+    BOOST_TEST(labels >= 1176u);
+    BOOST_TEST(wrapped == 0u);
 }
 
 // ============================================================================================
@@ -1745,6 +1874,1092 @@ BOOST_FIXTURE_TEST_CASE(EveryRingDoorSignIsTranslatedInTheClientsOwnLanguage, Pa
     BOOST_TEST_MESSAGE("AUDIT: " << complete << " von " << catalogs
                                  << " Katalogen tragen alle sieben Tuerschilder");
     BOOST_TEST(catalogs > 0u);
+}
+
+
+// ============================================================================================
+// WELLE 14 - BEFUND 1: DIE BAUHILFE ERSCHLAEGT DIE KARTE
+// ============================================================================================
+
+/// DER BEFUND, woertlich: "Sobald ich ein Gebaeude gebaut habe sieht es immer so aus. Ich wuerde
+/// das gerne mit dem Controller toggeln ob ich alles sehe oder nur den Indikator unter meinem
+/// Zeiger."
+///
+/// GEMESSEN wird hier NICHT der Zustand, sondern DAS GEZEICHNETE: die Faelle haengen sich in
+/// glVertexPointer/glColor4ub/glDrawArrays und rufen den PRODUKTIVEN Zeichner
+/// GameWorldView::DrawConstructionAid Knoten fuer Knoten - dieselbe Funktion, die
+/// GameWorldView::Draw je sichtbarem Knoten ruft, mitsamt ihrer Entscheidung
+/// (ShouldDrawConstructionAid). Ein Symbol, das aus dem Zeichenweg faellt, wird hier nicht
+/// mitgezaehlt.
+///
+/// WARUM DIE KNOTENSCHLEIFE HIER STEHT UND NICHT Draw() GERUFEN WIRD: GameWorldView::Draw ist im
+/// Testprozess nicht lauffaehig. Ein Dutzend GL-Funktionen ist im DummyRenderer nicht gemockt
+/// (glMatrixMode, glPushMatrix, glScissor, glEnable ...) und damit Nullzeiger, und danach wirft
+/// GameWorldViewer::InitTerrainRenderer, weil die Gelaendetexturen (TEX5.LBM) nicht in den
+/// Testdaten liegen. Die Schleife hier laeuft ueber dieselben Grenzen (GetFirstPt/GetLastPt),
+/// mit derselben Sichtbarkeitsprobe und derselben Umrechnung wie Draw.
+namespace {
+/// Die Knoten, auf denen der produktive Zeichner wirklich ein Bauhilfe-Symbol ausgibt.
+/// Setzt voraus, dass der Tap schon steht.
+std::vector<MapPoint> drawnAidNodes(PlayerView& pv)
+{
+    GameWorldView& v = pv.GetView();
+    // Genau das, was Draw() als erstes tut. Ohne den Aufruf stuende selPt auf dem Stand des
+    // letzten Bildes, und "nur am Zeiger" haette einen Zeiger von gestern.
+    v.UpdateSelection();
+    const GameWorldViewer& viewer = pv.GetViewer();
+    const TerrainRenderer& tr = viewer.GetTerrainRenderer();
+    const GameWorldBase& world = viewer.GetWorld();
+    std::vector<MapPoint> out;
+    for(int y = v.GetFirstPt().y; y <= v.GetLastPt().y; ++y)
+    {
+        for(int x = v.GetFirstPt().x; x <= v.GetLastPt().x; ++x)
+        {
+            Position curOffset;
+            const MapPoint curPt = tr.ConvertCoords(Position(x, y), &curOffset);
+            if(viewer.GetVisibility(curPt) != Visibility::Visible)
+                continue;
+            const DrawPoint curPos = world.GetNodePos(curPt) - v.GetOffset() + curOffset;
+            const std::size_t before = ringTap::batches.size();
+            v.DrawConstructionAid(curPt, curPos);
+            if(ringTap::batches.size() > before)
+                out.push_back(curPt);
+        }
+    }
+    return out;
+}
+
+/// Dasselbe, aber mit dem Tap davor und danach wieder ab.
+std::vector<MapPoint> measureAid(PlayerView& pv)
+{
+    RTTR_STUB_FUNCTION(glVertexPointer, ringTap::glVertexPointer);
+    RTTR_STUB_FUNCTION(glColor4ub, ringTap::glColor4ub);
+    RTTR_STUB_FUNCTION(glDrawArrays, ringTap::glDrawArrays);
+    ringTap::reset();
+    return drawnAidNodes(pv);
+}
+} // namespace
+
+/// DAS ABNAHMEKRITERIUM (a): DREI Zustaende, nur mit dem Gamepad, ueber den produktiven Weg -
+/// und im mittleren wird GENAU EIN Symbol gezeichnet, naemlich das auf dem Knoten unter dem
+/// Zeiger.
+///
+/// Und daneben die Besitzfrage: Spieler 1 schaltet SEINE Bauhilfe, Spieler 0 sieht unveraendert
+/// seine. Wird die Zuordnung entfernt (dskGameInterface::CycleConstructionAidFor auf primary()
+/// statt auf `view`), werden beide Haelften rot.
+BOOST_FIXTURE_TEST_CASE(TheConstructionAidHasThreeStepsAndTheMiddleOneDrawsExactlyOneSymbol, PadViewFixture<2>)
+{
+    const bool oldSetting = SETTINGS.ingame.showBQ;
+    const MapPoint spot = findBuildSpotFor(worldFixture.world, view(1).GetViewer(), BuildingQuality::Hut);
+    BOOST_TEST_REQUIRE(spot.isValid());
+    seatPad(*this, 11, 1);
+    aimPadAt(11, 1, spot);
+
+    // Einmal warmzeichnen: der erste DrawFull einer Kachel legt die Textur an. Das soll die
+    // Messung nicht mitzaehlen, und es soll nicht der Grund sein, warum ein Knoten "zeichnet".
+    gwv(1).SetBqMode(BqMode::All);
+    gwv(0).SetBqMode(BqMode::All);
+    drawnAidNodes(view(1));
+    drawnAidNodes(view(0));
+    // DER NACHBAR bleibt auf "alles" stehen - damit gleich messbar ist, dass ihm der Pad des
+    // anderen Sitzplatzes nichts wegnimmt.
+    const std::size_t neighbourBefore = measureAid(view(0)).size();
+    BOOST_TEST_REQUIRE(neighbourBefore > 1u);
+    // Ausgangslage von Spieler 1: aus. Das ist zugleich der Auslieferungszustand.
+    gwv(1).SetBqMode(BqMode::Off);
+
+    // --- STUFE "AUS": kein einziges Symbol ---
+    BOOST_TEST_REQUIRE((gwv(1).GetBqMode() == BqMode::Off));
+    BOOST_TEST(measureAid(view(1)).size() == 0u);
+
+    // --- DER PADWEG: Back, im Ring bis zum Schalter, A ---
+    press(11, PadButton::Back);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    const auto turnTo = [&](const unsigned id) {
+        for(unsigned i = 0; i < 16u; ++i)
+        {
+            const Window* const focused = view(1).GetFocus().GetFocused();
+            BOOST_TEST_REQUIRE(focused != static_cast<const Window*>(nullptr));
+            if(focused->GetID() == id)
+                return;
+            press(11, PadButton::DpadRight);
+        }
+        BOOST_FAIL("Sektor per Pad nicht erreichbar");
+    };
+    turnTo(iwPadSystemMenu::ID_CONSTRUCTION_AID);
+
+    // --- STUFE "NUR AM ZEIGER": GENAU EIN Symbol, und zwar SEINS ---
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE((gwv(1).GetBqMode() == BqMode::Cursor));
+    const std::vector<MapPoint> atCursor = measureAid(view(1));
+    BOOST_TEST_MESSAGE("AUDIT: Stufe 'nur am Zeiger' zeichnet " << atCursor.size() << " Symbol(e)");
+    BOOST_TEST_REQUIRE(atCursor.size() == 1u);
+    BOOST_TEST((atCursor.front() == gwv(1).GetSelectedPt()));
+    BOOST_TEST((atCursor.front() == spot));
+
+    // --- STUFE "ALLES": das, was der Auftraggeber auf dem Bildschirmabzug hatte ---
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE((gwv(1).GetBqMode() == BqMode::All));
+    const std::vector<MapPoint> all = measureAid(view(1));
+    BOOST_TEST_MESSAGE("AUDIT: Stufe 'alles' zeichnet " << all.size() << " Symbole");
+    // Deutlich mehr als eins - genau das ist der Befund. Und der Zeigerknoten ist darunter.
+    BOOST_TEST(all.size() > 10u);
+    BOOST_TEST(helpers::contains(all, spot));
+
+    // --- UND WIEDER AUS: der Umlauf schliesst sich ---
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE((gwv(1).GetBqMode() == BqMode::Off));
+    BOOST_TEST(measureAid(view(1)).size() == 0u);
+
+    // --- DER BESITZNACHWEIS: der Nachbar hat waehrend all dem nichts verloren ---
+    BOOST_TEST((gwv(0).GetBqMode() == BqMode::All));
+    BOOST_TEST(measureAid(view(0)).size() == neighbourBefore);
+
+    press(11, PadButton::B);
+    SETTINGS.ingame.showBQ = oldSetting;
+}
+
+/// DIE ANDERE HAELFTE DERSELBEN FRAGE: was Phase 9 ERZWINGT, ist jetzt die mittlere Stufe.
+///
+/// Genau dieser Zwang war die Ursache dafuer, dass es "immer so aussieht, sobald ich ein Gebaeude
+/// gebaut habe" - PadOpenActionWindow ruft ForceShowBQ bei jedem A auf Bauland. Der Zwang bleibt
+/// (die Lektion aus Phase 9 haengt daran), aber er schaltet jetzt das ein, was der Klartextkasten
+/// daneben beschreibt: EINEN Knoten.
+BOOST_FIXTURE_TEST_CASE(PressingAOnBuildLandForcesOnlyTheSymbolUnderThePointer, PadViewFixture<2>)
+{
+    const bool oldSetting = SETTINGS.ingame.showBQ;
+    const MapPoint spot = findBuildSpotFor(worldFixture.world, view(1).GetViewer(), BuildingQuality::Hut);
+    BOOST_TEST_REQUIRE(spot.isValid());
+    seatPad(*this, 11, 1);
+    aimPadAt(11, 1, spot);
+    gwv(1).SetBqMode(BqMode::All);
+    drawnAidNodes(view(1)); // warmzeichnen
+    // Zuruecksetzen OHNE ausdruecklichen Willen - sonst sperrte bqExplicitlyOff_ den Zwang, und
+    // der Fall maesse das Gegenteil dessen, was er messen will. CopyHudSettingsTo mit
+    // copyBQ == false loescht genau die drei Bauhilfefelder.
+    gwv(1).CopyHudSettingsTo(gwv(1), /*copyBQ*/ false);
+    BOOST_TEST_REQUIRE((gwv(1).GetBqMode() == BqMode::Off));
+
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    // DER FIX DES BEFUNDES: der Zwang ist "nur am Zeiger" und nicht "alles".
+    BOOST_TEST((gwv(1).GetBqMode() == BqMode::Cursor));
+    const std::vector<MapPoint> drawn = measureAid(view(1));
+    BOOST_TEST_MESSAGE("AUDIT: nach A auf Bauland zeichnet die Bauhilfe " << drawn.size() << " Symbol(e)");
+    BOOST_TEST_REQUIRE(drawn.size() == 1u);
+    BOOST_TEST((drawn.front() == spot));
+
+    press(11, PadButton::B);
+    SETTINGS.ingame.showBQ = oldSetting;
+}
+
+/// DIE GRENZE: DER MAUSSPIELER DARF NICHTS VERLIEREN.
+///
+/// Sein Knopf in der Leiste (ID_btConstructionAid) und seine Leertaste bleiben ZWEISTUFIG und
+/// schalten zwischen "aus" und "alles" - Bit fuer Bit das, was er heute erlebt. Die dritte Stufe
+/// haengt am Ringschalter des Padspielers, wo eine Beschriftung danebensteht, die den Zustand
+/// nennt; am Mausknopf ist es ein unbeschriftetes Symbol von 1996 mit einem Maustooltip.
+///
+/// Gemessen ueber die Kennung des Knopfes, nicht ueber seinen Text.
+BOOST_FIXTURE_TEST_CASE(TheMousePlayerKeepsHisTwoStepConstructionAidSwitch, PadViewFixture<2>)
+{
+    const bool oldSetting = SETTINGS.ingame.showBQ;
+    gwv(0).SetBqMode(BqMode::Off);
+    gwv(1).SetBqMode(BqMode::Off);
+
+    auto* const bt = dsk->GetCtrl<ctrlButton>(dskGameInterface::ID_btConstructionAid);
+    BOOST_TEST_REQUIRE(bt != static_cast<ctrlButton*>(nullptr));
+
+    // Der Knopf wirkt auf die HAUPTansicht - und zwar in ZWEI Schritten.
+    bt->Activate();
+    BOOST_TEST((gwv(0).GetBqMode() == BqMode::All));
+    BOOST_TEST(SETTINGS.ingame.showBQ == true);
+    // NICHT die mittlere Stufe: der Mausspieler behaelt genau sein altes Verhalten.
+    BOOST_TEST((gwv(0).GetBqMode() != BqMode::Cursor));
+    bt->Activate();
+    BOOST_TEST((gwv(0).GetBqMode() == BqMode::Off));
+    BOOST_TEST(SETTINGS.ingame.showBQ == false);
+    // Und der Nachbar bleibt unberuehrt - die Leiste gehoert ausdruecklich der Hauptansicht.
+    BOOST_TEST((gwv(1).GetBqMode() == BqMode::Off));
+
+    // DIE LEERTASTE, ebenfalls zweistufig und ebenfalls auf der Hauptansicht.
+    const KeyEvent ke(U' ');
+    BOOST_TEST_REQUIRE(dsk->Msg_KeyDown(ke));
+    BOOST_TEST((gwv(0).GetBqMode() == BqMode::All));
+    BOOST_TEST_REQUIRE(dsk->Msg_KeyDown(ke));
+    BOOST_TEST((gwv(0).GetBqMode() == BqMode::Off));
+
+    SETTINGS.ingame.showBQ = oldSetting;
+}
+
+// ============================================================================================
+// WELLE 14 - BEFUND 2: DIE SEITEN DES RINGS SIND UNSICHTBAR
+// ============================================================================================
+
+/// DER BEFUND, woertlich: "Es waere super, wenn du die einzelnen Seiten sichtbarer machst in dem
+/// Radial Menue. Punkte waere hier super. So wie bei Instagram Slides."
+///
+/// DAS ABNAHMEKRITERIUM (b): ein mehrseitiger Ring zeigt Punkte - einer je Seite, der aktuelle
+/// hervorgehoben. Gemessen am OpenGL-Aufruf: Zahl, Mittelpunkt, Radius und Farbe jedes Punktes
+/// werden aus den Eckpunkten zurueckgerechnet, die DrawRing hinausschickt.
+BOOST_FIXTURE_TEST_CASE(AMultiPageRingDrawsOneDotPerPageAndHighlightsTheCurrentOne, PadViewFixture<2>)
+{
+    const MapPoint spot = findBuildSpotFor(worldFixture.world, view(1).GetViewer(), BuildingQuality::Castle);
+    BOOST_TEST_REQUIRE(spot.isValid());
+    seatPad(*this, 11, 1);
+    aimPadAt(11, 1, spot);
+
+    // Der BAURING ist der mehrseitige - der Systemring hat gemessen genau eine Seite.
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    auto layout = dsk->LayoutRing(view(1));
+    BOOST_TEST_REQUIRE(!layout.empty());
+    BOOST_TEST_REQUIRE(layout.numPages > 1u);
+    BOOST_TEST_REQUIRE(!layout.axes.empty());
+    BOOST_TEST_MESSAGE("AUDIT: Bauring mit " << layout.entries.size() << " Sektoren auf Seite " << layout.page
+                                             << " von " << layout.numPages << ", rInner " << layout.rInner);
+
+    // EIN PUNKT JE STELLUNG JEDER ACHSE - und je Achse genau ein hervorgehobener.
+    unsigned expectedDots = 0;
+    for(unsigned a = 0; a < layout.axes.size(); ++a)
+    {
+        BOOST_TEST_MESSAGE("AUDIT: Achse " << a << ": Stellung " << layout.axes[a].index << " von "
+                                           << layout.axes[a].count);
+        BOOST_TEST(layout.axes[a].count > 1u);
+        expectedDots += layout.axes[a].count;
+    }
+    BOOST_TEST_REQUIRE(layout.pageDots.size() == expectedDots);
+    for(unsigned a = 0; a < layout.axes.size(); ++a)
+    {
+        unsigned numCurrent = 0;
+        unsigned seen = 0;
+        for(const dskGameInterface::RingPageDot& dot : layout.pageDots)
+        {
+            if(dot.axis != a)
+                continue;
+            if(dot.current)
+            {
+                ++numCurrent;
+                BOOST_TEST(seen == layout.axes[a].index);
+            }
+            ++seen;
+        }
+        BOOST_TEST_CONTEXT("Achse " << a)
+        {
+            BOOST_TEST(seen == layout.axes[a].count);
+            BOOST_TEST(numCurrent == 1u);
+        }
+    }
+    // Die letzte Achse IST die Seitenachse - das ist die Reihenfolge, in der RingTurnPage
+    // weiterzaehlt, und sie steht hier, damit sie nicht stillschweigend kippt.
+    BOOST_TEST(layout.axes.back().count == layout.numPages);
+    BOOST_TEST(layout.axes.back().index == layout.page);
+
+    const auto drawTapped = [&] {
+        dsk->DrawRing(view(1)); // warmzeichnen (Schrifttexturen)
+        ringTap::reset();
+        {
+            RTTR_STUB_FUNCTION(glVertexPointer, ringTap::glVertexPointer);
+            RTTR_STUB_FUNCTION(glColor4ub, ringTap::glColor4ub);
+            RTTR_STUB_FUNCTION(glDrawArrays, ringTap::glDrawArrays);
+            dsk->DrawRing(view(1));
+        }
+        std::vector<ringTap::Batch> fans;
+        for(const ringTap::Batch& b : ringTap::batches)
+        {
+            if(b.mode == GL_TRIANGLE_FAN)
+                fans.push_back(b);
+        }
+        return fans;
+    };
+
+    const std::vector<ringTap::Batch> fans = drawTapped();
+    // GENAU SO VIELE PUNKTE WIE STELLUNGEN - gemessen am Zeichenaufruf, nicht an der Rechnung.
+    BOOST_TEST_REQUIRE(fans.size() == expectedDots);
+
+    float currentDia = 0.f, idleDia = 0.f;
+    unsigned currentColor = 0, idleColor = 0;
+    for(std::size_t i = 0; i < fans.size(); ++i)
+    {
+        const ringTap::Batch& b = fans[i];
+        const dskGameInterface::RingPageDot& dot = layout.pageDots[i];
+        BOOST_TEST_CONTEXT("Seitenpunkt " << i)
+        {
+            // Erster Eckpunkt = Mittelpunkt des Faechers, der Rest der Rand.
+            BOOST_TEST_REQUIRE(b.verts.size() >= 4u);
+            const PointF c(static_cast<float>(dot.box.left) + static_cast<float>(dot.box.getSize().x) / 2.f,
+                           static_cast<float>(dot.box.top) + static_cast<float>(dot.box.getSize().y) / 2.f);
+            BOOST_TEST(b.verts[0].x == c.x, boost::test_tools::tolerance(0.5f));
+            BOOST_TEST(b.verts[0].y == c.y, boost::test_tools::tolerance(0.5f));
+            const float r = static_cast<float>(dot.box.getSize().x) / 2.f;
+            for(std::size_t k = 1; k < b.verts.size(); ++k)
+                BOOST_TEST(radiusOf(c, b.verts[k]) == r, boost::test_tools::tolerance(0.5f));
+            // DIE PUNKTE LIEGEN IM RING, nie darueber hinaus. Die Beschriftungen stehen seit
+            // Phase 13 AUSSERHALB von rOuter - mit Text kann hier also nichts kollidieren.
+            //
+            // Der Innenkreis ist das ZIEL und nicht die Schranke: bei vielen Achsen auf einem
+            // kleinen Ring wird der Block hoeher als die leere Mitte und liegt dann auf der
+            // Sektorfarbe. Am Zielgeraet passt er hinein - das misst
+            // TheDotBlockStaysInTheEmptyMiddleOnTheTargetDevice, und deshalb steht hier die
+            // Schranke, die IMMER gilt.
+            BOOST_TEST(radiusOf(PointF(layout.center), c) + r <= layout.rOuter);
+            const unsigned expected =
+              dot.current ? dskGameInterface::ringDotCurrentColor : dskGameInterface::ringDotIdleColor;
+            BOOST_TEST(b.color == expected);
+            if(dot.current)
+            {
+                currentDia = 2.f * r;
+                currentColor = b.color;
+            } else
+            {
+                idleDia = 2.f * r;
+                idleColor = b.color;
+            }
+        }
+    }
+
+    // DER UNTERSCHIED LIEGT AUF ZWEI KANAELEN: Groesse UND Helligkeit. TV-RECHERCHE.md 1.5 sagt
+    // ausdruecklich, dass feine Farbunterschiede aus drei Metern nicht tragen.
+    BOOST_TEST_MESSAGE("AUDIT: Punktdurchmesser aktuell " << currentDia << ", sonst " << idleDia);
+    BOOST_TEST(currentDia > idleDia);
+    BOOST_TEST(GetAlpha(currentColor) > GetAlpha(idleColor));
+    // NICHT IN SCHRIFTGROESSE: NormalFont ist 14 View-Punkte hoch und liegt damit selbst schon
+    // unter dem Komfortwert fuer drei Meter (PLAN.md). Ein Punkt in Schriftgroesse waere halb so
+    // gross wie noetig.
+    BOOST_TEST(currentDia > static_cast<float>(NormalFont->getHeight()));
+
+    // --- BLAETTERN: der hervorgehobene Punkt WANDERT MIT ---
+    const unsigned pageBefore = layout.page;
+    press(11, PadButton::RightShoulder);
+    layout = dsk->LayoutRing(view(1));
+    BOOST_TEST_REQUIRE(!layout.empty());
+    BOOST_TEST_REQUIRE(!layout.axes.empty());
+    BOOST_TEST(layout.axes.back().count == layout.numPages);
+    if(layout.numPages > 1u)
+        BOOST_TEST(layout.page != pageBefore);
+    unsigned expectedDots2 = 0;
+    for(const dskGameInterface::RingPageAxis& a : layout.axes)
+        expectedDots2 += a.count;
+    BOOST_TEST_REQUIRE(layout.pageDots.size() == expectedDots2);
+    const std::vector<ringTap::Batch> fans2 = drawTapped();
+    BOOST_TEST(fans2.size() == expectedDots2);
+    // Die Stellung, auf der der Spieler steht, ist die hervorgehobene - in JEDER Achse.
+    for(unsigned a = 0; a < layout.axes.size(); ++a)
+    {
+        unsigned seen = 0;
+        for(const dskGameInterface::RingPageDot& dot : layout.pageDots)
+        {
+            if(dot.axis != a)
+                continue;
+            BOOST_TEST(dot.current == (seen == layout.axes[a].index));
+            ++seen;
+        }
+    }
+
+    press(11, PadButton::B);
+    WINDOWMANAGER.Draw();
+}
+
+/// DIE ANDERE HAELFTE: WO ES NICHTS ZU BLAETTERN GIBT, STEHT AUCH KEIN PUNKT.
+///
+/// Ein einzelner Punkt ist kein Hinweis, sondern Rauschen - und der Systemring hat gemessen
+/// genau eine Seite. Das ist dieselbe Linie wie bei der Tastenhinweisleiste seit Phase 12: was
+/// nicht wirkt, wird auch nicht angezeigt.
+BOOST_FIXTURE_TEST_CASE(ASinglePageRingDrawsNoDotsAtAll, PadViewFixture<2>)
+{
+    const MapPoint flagPt = hqFlagOf(worldFixture.world, 1);
+    seatPad(*this, 11, 1);
+    aimPadAt(11, 1, flagPt);
+
+    press(11, PadButton::Back);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    const auto layout = dsk->LayoutRing(view(1));
+    BOOST_TEST_REQUIRE(!layout.empty());
+    BOOST_TEST_MESSAGE("AUDIT: Systemring hat " << layout.numPages << " Seite(n)");
+    BOOST_TEST_REQUIRE(layout.numPages == 1u);
+    BOOST_TEST(layout.pageDots.empty());
+
+    dsk->DrawRing(view(1));
+    ringTap::reset();
+    {
+        RTTR_STUB_FUNCTION(glVertexPointer, ringTap::glVertexPointer);
+        RTTR_STUB_FUNCTION(glColor4ub, ringTap::glColor4ub);
+        RTTR_STUB_FUNCTION(glDrawArrays, ringTap::glDrawArrays);
+        dsk->DrawRing(view(1));
+    }
+    unsigned fans = 0;
+    for(const ringTap::Batch& b : ringTap::batches)
+    {
+        if(b.mode == GL_TRIANGLE_FAN)
+            ++fans;
+    }
+    BOOST_TEST(fans == 0u);
+    // UND DIE LEISTE SAGT DASSELBE - dieselbe Quelle, dieselbe Antwort (Befund K1 der Welle 14).
+    BOOST_TEST(!dskGameInterface::RingHasPages(view(1)));
+    BOOST_TEST(dskGameInterface::RingPageAxes(view(1)).empty());
+    const auto hasHint = [](const brief::Brief& b, const PadButton button, const brief::KeyAction action) {
+        for(const brief::KeyHint& h : b.keys)
+        {
+            if(h.button == button && h.action == action)
+                return true;
+        }
+        return false;
+    };
+    BOOST_TEST(!hasHint(view(1).GetBrief(), PadButton::RightShoulder, brief::KeyAction::RingNextPage));
+
+    press(11, PadButton::B);
+    WINDOWMANAGER.Draw();
+}
+
+// ============================================================================================
+// WELLE 14 - BEFUND K1: DIE PUNKTE UND DIE LEISTE MUESSEN DIESELBE FRAGE BEANTWORTEN
+// ============================================================================================
+
+/// DER BEFUND, gemessen: der Pruefer ist den Bauring zwoelf Schritte mit RB abgefahren und hat
+/// bei jedem Schritt Punkte UND Leiste mitgelesen. Ergebnis: "Leiste versprach 12 mal RB
+/// Naechste Seite, davon 8 mal OHNE jeden Punkt." In zwei Dritteln der Zustaende sagte die
+/// Leiste "hier kannst du blaettern", RB WIRKTE auch - und die Punktreihe sagte durch ihre
+/// Abwesenheit das Gegenteil.
+///
+/// URSACHE, im Quelltext belegt: ZWEI Bedingungen fuer DIESELBE Frage. RingHasPages fragte
+/// `numPages > 1 || RingHasMultipleTabs`, die Punktbedingung nur `numPages > 1`. Genau der
+/// Befund K1 der Phase 13, den die Seitenpunkte eigentlich vermeiden sollten.
+///
+/// GEHEILT AN DER QUELLE und nicht an einer der beiden Seiten: dskGameInterface::RingPageAxes ist
+/// jetzt die einzige Stelle, an der die Frage beantwortet wird. Die Leiste fragt sie ueber
+/// RingHasPages, RingTurnPage dreht sie, die Punkte zeichnen sie.
+///
+/// DIESER FALL GEHT DENSELBEN WEG WIE DER PRUEFER: zwoelf Schritte mit RB, und bei jedem Schritt
+/// werden LEISTE und GEZEICHNETE PUNKTE verglichen - die Punkte am OpenGL-Aufruf und nicht an der
+/// Rechnung.
+BOOST_FIXTURE_TEST_CASE(InEveryStateOfTheRingTheDotsSayWhatTheKeyBarPromises, PadViewFixture<2>)
+{
+    const MapPoint spot = findBuildSpotFor(worldFixture.world, view(1).GetViewer(), BuildingQuality::Castle);
+    BOOST_TEST_REQUIRE(spot.isValid());
+    seatPad(*this, 11, 1);
+    aimPadAt(11, 1, spot);
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+
+    const auto hasHint = [](const brief::Brief& b, const PadButton button, const brief::KeyAction action) {
+        for(const brief::KeyHint& h : b.keys)
+        {
+            if(h.button == button && h.action == action)
+                return true;
+        }
+        return false;
+    };
+    /// Die wirklich gezeichneten Punkte - zurueckgerechnet aus den Eckpunkten, die DrawRing
+    /// hinausschickt. Eine Rechnung ist kein Zeichnen.
+    const auto drawnDots = [&] {
+        dsk->DrawRing(view(1)); // warmzeichnen (Schrifttexturen)
+        ringTap::reset();
+        {
+            RTTR_STUB_FUNCTION(glVertexPointer, ringTap::glVertexPointer);
+            RTTR_STUB_FUNCTION(glColor4ub, ringTap::glColor4ub);
+            RTTR_STUB_FUNCTION(glDrawArrays, ringTap::glDrawArrays);
+            dsk->DrawRing(view(1));
+        }
+        unsigned n = 0;
+        for(const ringTap::Batch& b : ringTap::batches)
+        {
+            if(b.mode == GL_TRIANGLE_FAN)
+                ++n;
+        }
+        return n;
+    };
+
+    unsigned steps = 0;
+    unsigned promisedAndSilent = 0;
+    unsigned promised = 0;
+    for(unsigned step = 0; step < 12u; ++step)
+    {
+        BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+        const auto layout = dsk->LayoutRing(view(1));
+        BOOST_TEST_REQUIRE(!layout.empty());
+        const bool barPromises =
+          hasHint(view(1).GetBrief(), PadButton::RightShoulder, brief::KeyAction::RingNextPage);
+        const unsigned dots = drawnDots();
+        BOOST_TEST_MESSAGE("AUDIT Schritt " << step << ": Seite " << layout.page << "/" << layout.numPages
+                                            << ", Achsen " << layout.axes.size() << ", Punkte GEZEICHNET " << dots
+                                            << ", Leiste nennt RB = " << barPromises);
+        BOOST_TEST_CONTEXT("Schritt " << step)
+        {
+            // DIE EINE ZUSICHERUNG, um die es geht: Versprechen und Anzeige stimmen ueberein.
+            BOOST_TEST(barPromises == (dots > 0u));
+            // Und beide stimmen mit der Wirkung ueberein - derselben Funktion, die RingTurnPage
+            // fragt.
+            BOOST_TEST(barPromises == dskGameInterface::RingHasPages(view(1)));
+            // Ein einzelner Punkt waere Rauschen: wo Punkte stehen, stehen mindestens zwei.
+            if(dots > 0u)
+                BOOST_TEST(dots >= 2u);
+        }
+        if(barPromises)
+        {
+            ++promised;
+            if(dots == 0u)
+                ++promisedAndSilent;
+        }
+        ++steps;
+        press(11, PadButton::RightShoulder);
+    }
+    BOOST_TEST_MESSAGE("AUDIT: " << steps << " Schritte, Leiste versprach " << promised
+                                 << " mal RB Naechste Seite, davon " << promisedAndSilent << " mal OHNE jeden Punkt");
+    BOOST_TEST(steps == 12u);
+    // Der Bauring an einem Burgplatz hat gemessen mehrere Reiter - hier MUSS die Leiste also
+    // versprechen, sonst maesse dieser Fall das Schweigen und nicht die Uebereinstimmung.
+    BOOST_TEST(promised == 12u);
+    // DIE ZAHL AUS DEM BEFUND: sie war 8, sie muss 0 sein.
+    BOOST_TEST(promisedAndSilent == 0u);
+
+    press(11, PadButton::B);
+    WINDOWMANAGER.Draw();
+}
+
+// ============================================================================================
+// WELLE 14 - BEFUND K2: DIE PUNKTE HATTEN EINEN DECKEL, ABER KEINEN BODEN
+// ============================================================================================
+
+/// DER BEFUND: die Zusicherung der Welle 14 ("der aktuelle Punkt ist groesser als die Schrift")
+/// ging bei fuenf Seiten ROT IN IHRER EIGENEN MESSUNG - `check currentDia > NormalFont->
+/// getHeight() has failed [11 <= 14]`. Die Formel d = min(28; 1,8*rInner/(1,5n-0,5)) deckelte
+/// nach OBEN und nicht nach unten; am Zielgeraet fiel der Punkt ab sechs Seiten unter
+/// Schriftgroesse, in der Testaufloesung schon ab vier. Die Zusicherung war damit keine
+/// Schranke, sondern eine Beobachtung, die nur galt, solange die Ringe klein blieben.
+///
+/// GEMESSEN WIRD DIE REINE RECHNUNG (dskGameInterface::LayoutRingDots) - dieselbe, die LayoutRing
+/// aufruft und deren Ergebnis DrawRing Kasten fuer Kasten zeichnet. Nur so lassen sich Achszahlen
+/// pruefen, die eine Testpartie nicht von selbst hergibt; dass der ZEICHNER genau diese Kaesten
+/// nimmt, misst der Fall daneben am OpenGL-Aufruf.
+BOOST_FIXTURE_TEST_CASE(NoDotEverShrinksBelowTheFontHeightNoMatterHowManyPagesThereAre, uiHelper::Fixture)
+{
+    const auto fontH = static_cast<float>(NormalFont->getHeight());
+    // Der Innenradius des Zielgeraets (4K, Fernsehmodus, vier Ansichten) und der der
+    // Testaufloesung - beide gemessen, und dazwischen ein absichtlich zu enger Ring.
+    const float radii[] = {61.5f, 42.f, 20.f};
+    unsigned checked = 0;
+    for(const float rInner : radii)
+    {
+        for(unsigned n = 2; n <= 24u; ++n)
+        {
+            std::vector<dskGameInterface::RingPageAxis> axes;
+            axes.push_back(dskGameInterface::RingPageAxis{n, n / 2u});
+            const std::vector<dskGameInterface::RingPageDot> dots =
+              dskGameInterface::LayoutRingDots(Position(500, 400), rInner, axes);
+            BOOST_TEST_REQUIRE(dots.size() == n);
+            float smallest = 1e9f;
+            unsigned numCurrent = 0;
+            for(const dskGameInterface::RingPageDot& d : dots)
+            {
+                smallest = std::min(smallest, static_cast<float>(d.box.getSize().x));
+                if(d.current)
+                {
+                    ++numCurrent;
+                    // DER BODEN, und zwar fuer den Punkt, auf den es ankommt.
+                    BOOST_TEST_CONTEXT("rInner " << rInner << ", " << n << " Stellungen")
+                    BOOST_TEST(static_cast<float>(d.box.getSize().x) >= fontH);
+                }
+                // Quadratisch - der Punkt ist der eingeschriebene Kreis.
+                BOOST_TEST(d.box.getSize().x == d.box.getSize().y);
+            }
+            BOOST_TEST(numCurrent == 1u);
+            // KEIN PAAR ueberlappt - der Umbruch in mehrere Reihen darf nicht dazu fuehren, dass
+            // zwei Punkte uebereinander liegen.
+            for(std::size_t i = 0; i < dots.size(); ++i)
+            {
+                for(std::size_t j = i + 1; j < dots.size(); ++j)
+                {
+                    BOOST_TEST_CONTEXT("rInner " << rInner << ", " << n << " Stellungen, Punkte " << i << "/" << j)
+                    BOOST_TEST(!boxesOverlap(dots[i].box, dots[j].box));
+                }
+            }
+            if(n == 2u || n == 5u || n == 12u || n == 24u)
+                BOOST_TEST_MESSAGE("AUDIT: rInner " << rInner << ", " << n << " Stellungen: kleinster Punkt "
+                                                    << smallest << ", Schrifthoehe " << fontH);
+            ++checked;
+        }
+    }
+    BOOST_TEST(checked == 69u);
+}
+
+/// DIE ANDERE HAELFTE VON K2: der Umbruch ist wirklich ein Umbruch und keine Behauptung.
+///
+/// Passt eine Reihe nicht mehr in den Innenkreis, entstehen ZWEI Reihen - die Punkte bekommen
+/// verschiedene y-Werte. Waere der Boden ohne Umbruch eingezogen worden, liefe die Reihe
+/// stattdessen aus dem Ring heraus.
+BOOST_FIXTURE_TEST_CASE(TooManyDotsForOneRowWrapIntoSeveralRowsInsteadOfLeavingTheRing, uiHelper::Fixture)
+{
+    const std::vector<dskGameInterface::RingPageDot> few =
+      dskGameInterface::LayoutRingDots(Position(500, 400), 61.5f, {dskGameInterface::RingPageAxis{3u, 0u}});
+    const std::vector<dskGameInterface::RingPageDot> many =
+      dskGameInterface::LayoutRingDots(Position(500, 400), 61.5f, {dskGameInterface::RingPageAxis{12u, 0u}});
+    const auto rowsOf = [](const std::vector<dskGameInterface::RingPageDot>& dots) {
+        std::vector<int> ys;
+        for(const dskGameInterface::RingPageDot& d : dots)
+        {
+            const int cy = d.box.top + static_cast<int>(d.box.getSize().y) / 2;
+            bool seen = false;
+            for(const int y : ys)
+                seen = seen || std::abs(y - cy) <= 2;
+            if(!seen)
+                ys.push_back(cy);
+        }
+        return ys.size();
+    };
+    BOOST_TEST_MESSAGE("AUDIT: 3 Stellungen ergeben " << rowsOf(few) << " Reihe(n), 12 Stellungen "
+                                                      << rowsOf(many));
+    BOOST_TEST(rowsOf(few) == 1u);
+    BOOST_TEST(rowsOf(many) > 1u);
+    // Und die breiteste Reihe bleibt im Innenkreis - sonst waere der Umbruch wirkungslos.
+    for(const dskGameInterface::RingPageDot& d : many)
+    {
+        BOOST_TEST(std::abs(d.box.left + static_cast<int>(d.box.getSize().x) / 2 - 500) <= static_cast<int>(61.5f));
+        BOOST_TEST(std::abs(d.box.right - 500) <= static_cast<int>(61.5f));
+    }
+}
+
+/// DIE ZUSAGE FUER DAS ZIELGERAET: dort liegt der ganze Block wirklich in der LEEREN MITTE.
+///
+/// Gemessen am Ring, wie er auf dem 55-Zoll-Fernseher mit vier Ansichten entsteht - nicht an
+/// einer Zahl aus dem Bericht.
+BOOST_FIXTURE_TEST_CASE(TheDotBlockStaysInTheEmptyMiddleOnTheTargetDevice, PadViewFixture<4>)
+{
+    const ScreenSetting restoreScreen;
+    ScreenSetting::use(3840, 2160, true);
+    restartDesktop();
+    const MapPoint spot = findBuildSpotFor(worldFixture.world, view(1).GetViewer(), BuildingQuality::Castle);
+    BOOST_TEST_REQUIRE(spot.isValid());
+    seatPad(*this, 11, 1);
+    aimPadAt(11, 1, spot);
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    const auto layout = dsk->LayoutRing(view(1));
+    BOOST_TEST_REQUIRE(!layout.empty());
+    BOOST_TEST_REQUIRE(!layout.pageDots.empty());
+    BOOST_TEST_MESSAGE("AUDIT ZIELGERAET: rInner " << layout.rInner << ", " << layout.axes.size() << " Achsen, "
+                                                   << layout.pageDots.size() << " Punkte");
+    for(const dskGameInterface::RingPageDot& d : layout.pageDots)
+    {
+        const PointF c(static_cast<float>(d.box.left) + static_cast<float>(d.box.getSize().x) / 2.f,
+                       static_cast<float>(d.box.top) + static_cast<float>(d.box.getSize().y) / 2.f);
+        BOOST_TEST(radiusOf(PointF(layout.center), c) + static_cast<float>(d.box.getSize().x) / 2.f
+                   <= layout.rInner);
+        // UND GROSS GENUG FUER DREI METER: der aktuelle Punkt traegt die Schrifthoehe.
+        if(d.current)
+            BOOST_TEST(static_cast<float>(d.box.getSize().x) >= static_cast<float>(NormalFont->getHeight()));
+    }
+    press(11, PadButton::B);
+    WINDOWMANAGER.Draw();
+}
+
+// ============================================================================================
+// WELLE 14 - BEFUND K3: DIE GEMEINSAME INI GEHOERT DEM HAUPTSITZPLATZ
+// ============================================================================================
+
+/// DER BEFUND, gemessen: GameWorldView::SetBqMode rief unbedingt SaveIngameSettingsValues, und
+/// das schreibt showBQ = (mode != Off) in SETTINGS - EINE Datei fuer ALLE Sitzplaetze. Ein
+/// Padspieler auf "nur am Zeiger" schrieb dort also ein "ja", und der Mausspieler fand beim
+/// naechsten Start "alles" vor. Das Leck gab es vorher schon; die dreistufige Bauhilfe macht es
+/// inhaltlich falsch, weil ein SPIELERBEZOGENER Zustand mit drei Stufen in ein GLOBALES Ja/Nein
+/// gequetscht wurde.
+///
+/// GEMESSEN UEBER DEN PRODUKTIVEN WEG: der Padspieler schaltet seine Bauhilfe so, wie er es im
+/// Spiel tut - Back, im Ring bis zum Schalter, A.
+BOOST_FIXTURE_TEST_CASE(APadPlayersConstructionAidNeverReachesTheSharedSettingsFile, PadViewFixture<2>)
+{
+    const bool oldSetting = SETTINGS.ingame.showBQ;
+    SETTINGS.ingame.showBQ = false; // der Auslieferungszustand, den der Mausspieler vorfindet
+    gwv(0).SetBqMode(BqMode::Off);
+    gwv(1).SetBqMode(BqMode::Off);
+    BOOST_TEST_REQUIRE(SETTINGS.ingame.showBQ == false);
+
+    // ZUERST DER MAUSSPIELER, damit gemessen ist, dass sein Weg ueberhaupt schreibt - sonst
+    // koennte die zweite Haelfte dieses Falles gruen sein, WEIL nirgends mehr etwas ankommt.
+    auto* const bt = dsk->GetCtrl<ctrlButton>(dskGameInterface::ID_btConstructionAid);
+    BOOST_TEST_REQUIRE(bt != static_cast<ctrlButton*>(nullptr));
+    bt->Activate();
+    BOOST_TEST((gwv(0).GetBqMode() == BqMode::All));
+    BOOST_TEST(SETTINGS.ingame.showBQ == true);
+    bt->Activate();
+    BOOST_TEST((gwv(0).GetBqMode() == BqMode::Off));
+    BOOST_TEST_REQUIRE(SETTINGS.ingame.showBQ == false);
+
+    seatPad(*this, 11, 1);
+    press(11, PadButton::Back);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    for(unsigned i = 0; i < 16u; ++i)
+    {
+        const Window* const focused = view(1).GetFocus().GetFocused();
+        BOOST_TEST_REQUIRE(focused != static_cast<const Window*>(nullptr));
+        if(focused->GetID() == iwPadSystemMenu::ID_CONSTRUCTION_AID)
+            break;
+        press(11, PadButton::DpadRight);
+    }
+
+    // --- STUFE "NUR AM ZEIGER" ---
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE((gwv(1).GetBqMode() == BqMode::Cursor));
+    BOOST_TEST_MESSAGE("AUDIT: nach 'nur am Zeiger' steht in der ini showBQ = " << SETTINGS.ingame.showBQ);
+    BOOST_TEST(SETTINGS.ingame.showBQ == false);
+    // --- STUFE "ALLES" ---
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE((gwv(1).GetBqMode() == BqMode::All));
+    BOOST_TEST(SETTINGS.ingame.showBQ == false);
+    // --- UND WIEDER AUS ---
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE((gwv(1).GetBqMode() == BqMode::Off));
+    BOOST_TEST(SETTINGS.ingame.showBQ == false);
+    press(11, PadButton::B);
+
+    // DER MAUSSPIELER HAT DABEI NICHTS VERLOREN - weder sein Bild noch seine Vorgabe.
+    BOOST_TEST((gwv(0).GetBqMode() == BqMode::Off));
+    BOOST_TEST(SETTINGS.ingame.showBQ == false);
+    BOOST_TEST(gwv(0).PersistsHudSettings());
+    BOOST_TEST(!gwv(1).PersistsHudSettings());
+
+    SETTINGS.ingame.showBQ = oldSetting;
+}
+
+
+// ============================================================================================
+// ZWEITE WELLE-14-RUNDE - BEFUND B1: DAS ZAEHLWERK HATTE EINEN ANSCHLAG
+// ============================================================================================
+
+/// DER BEFUND, gemessen: die Leiste versprach auf der LETZTEN Stellung ALLER Blaetterachsen
+/// weiter "RB Naechste Seite", und RB tat dort nichts. Der Mitschrieb an HEAD, aus dem Lauf:
+///
+///   DIAG RB Schritt 5: 1/3 | Sektoren 1 | Fokus 48320 | Punkte GEZEICHNET 3
+///   DIAG RB Schritt 6: 2/3 | Sektoren 4 | Fokus 52352 | Punkte GEZEICHNET 3
+///   DIAG RB Schritt 7: 2/3 | Sektoren 4 | Fokus 52352 | Punkte GEZEICHNET 3
+///   ... bis Schritt 16 Zeichen fuer Zeichen unveraendert
+///
+/// Elf Drucke, kein Zeichen. Das ist derselbe Massstab wie seit Phase 12: DIE LEISTE DARF NICHT
+/// VERSPRECHEN, WAS NICHT GESCHIEHT.
+///
+/// GEHEILT ALS UMLAUF und nicht als Schweigen der Leiste - die Begruendung steht bei
+/// dskGameInterface::RingTurnPage. Der Umlauf ist sichtbar, weil der hervorgehobene Punkt vor
+/// die erste Stellung zurueckspringt; die Leiste behaelt dafuer auf jeder Stellung denselben
+/// Inhalt.
+///
+/// GEMESSEN WIRD UEBER DEN PRODUKTIVEN WEG (Padereignis -> UpdateInput) und am GEZEICHNETEN
+/// Zustand, nicht an einer Absicht.
+BOOST_FIXTURE_TEST_CASE(TheRingCounterComesRoundInsteadOfPromisingAStepItNeverTakes, PadViewFixture<2>)
+{
+    const MapPoint spot = findBuildSpotFor(worldFixture.world, view(1).GetViewer(), BuildingQuality::Castle);
+    BOOST_TEST_REQUIRE(spot.isValid());
+    seatPad(*this, 11, 1);
+    aimPadAt(11, 1, spot);
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+
+    /// DER ZUSTAND, WIE IHN DER SPIELER SIEHT: jede Achsenstellung und jeder Strich, den DrawRing
+    /// wirklich hinausschickt - Sektoren wie Punkte, mit Farbe und Geometrie. Zwei gleiche
+    /// Zeichenketten heissen: auf dem Bildschirm hat sich nichts geruehrt.
+    const auto drawnState = [&] {
+        std::string out;
+        for(const dskGameInterface::RingPageAxis& a : dskGameInterface::RingPageAxes(view(1)))
+            out += std::to_string(a.index) + "/" + std::to_string(a.count) + " ";
+        dsk->DrawRing(view(1)); // warmzeichnen (Schrifttexturen)
+        ringTap::reset();
+        {
+            RTTR_STUB_FUNCTION(glVertexPointer, ringTap::glVertexPointer);
+            RTTR_STUB_FUNCTION(glColor4ub, ringTap::glColor4ub);
+            RTTR_STUB_FUNCTION(glDrawArrays, ringTap::glDrawArrays);
+            dsk->DrawRing(view(1));
+        }
+        std::string drawn;
+        for(const ringTap::Batch& b : ringTap::batches)
+        {
+            drawn += (b.mode == GL_TRIANGLE_FAN) ? "|P" : "|S";
+            drawn += std::to_string(b.color);
+            for(const PointF& v : b.verts)
+                drawn += "," + std::to_string(static_cast<int>(std::lround(v.x))) + ":"
+                         + std::to_string(static_cast<int>(std::lround(v.y)));
+        }
+        // Die Geometrie als EINE Zahl - sonst ist die Meldung eines roten Laufes seitenlang. Der
+        // Vergleich bleibt derselbe: verschiedene Striche geben verschiedene Zahlen.
+        out += "#" + std::to_string(std::hash<std::string>{}(drawn) % 1000000u);
+        return out;
+    };
+
+    std::vector<std::string> seen;
+    unsigned promised = 0;
+    unsigned deadPresses = 0;
+    for(unsigned step = 0; step < 16u; ++step)
+    {
+        BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+        const std::string before = drawnState();
+        seen.push_back(before);
+        if(ringHasHint(view(1).GetBrief(), PadButton::RightShoulder, brief::KeyAction::RingNextPage))
+            ++promised;
+        press(11, PadButton::RightShoulder);
+        const std::string after = drawnState();
+        BOOST_TEST_CONTEXT("Schritt " << step)
+        {
+            // DIE EINE ZUSICHERUNG: die Leiste verspricht RB, ALSO GESCHIEHT AUCH ETWAS.
+            BOOST_TEST(after != before);
+        }
+        if(after == before)
+            ++deadPresses;
+    }
+    BOOST_TEST_MESSAGE("AUDIT B1: 16 RB-Drucke, Leiste versprach " << promised << " mal, davon " << deadPresses
+                                                                   << " ohne jede Wirkung");
+    // Der Bauring an einem Burgplatz hat gemessen mehrere Achsen - die Leiste MUSS hier auf jeder
+    // Stellung versprechen, sonst maesse dieser Fall das Schweigen statt den Umlauf.
+    BOOST_TEST(promised == 16u);
+    BOOST_TEST(deadPresses == 0u);
+    // UND ES IST WIRKLICH EIN RING: der Anfangszustand kommt wieder. Ein Zaehlwerk, das 16
+    // Schritte lang nur neue Zustaende faende, waere kein Umlauf, sondern eine lange Kette.
+    const auto recurrences = static_cast<unsigned>(std::count(seen.begin() + 1, seen.end(), seen.front()));
+    BOOST_TEST_MESSAGE("AUDIT B1: der Anfangszustand kam in 16 Schritten " << recurrences << " mal wieder");
+    BOOST_TEST(recurrences >= 1u);
+
+    // UND ZURUECK: LB vom Anfang aus fuehrt auf die letzte Stellung, RB von dort wieder auf den
+    // Anfang. Der Umlauf gilt in BEIDEN Richtungen - sonst waere die eine Schulter eine Falle.
+    for(unsigned guard = 0; guard < 16u && drawnState() != seen.front(); ++guard)
+        press(11, PadButton::RightShoulder);
+    const std::string atStart = drawnState();
+    BOOST_TEST_REQUIRE(atStart == seen.front());
+    BOOST_TEST_REQUIRE(ringHasHint(view(1).GetBrief(), PadButton::LeftShoulder, brief::KeyAction::RingPrevPage));
+    press(11, PadButton::LeftShoulder);
+    BOOST_TEST(drawnState() != atStart);
+    press(11, PadButton::RightShoulder);
+    BOOST_TEST(drawnState() == atStart);
+
+    press(11, PadButton::B);
+    WINDOWMANAGER.Draw();
+}
+
+// ============================================================================================
+// ZWEITE WELLE-14-RUNDE - BEFUND B2: WO DIE PUNKTZAHL SPRINGT UND WO NICHT
+// ============================================================================================
+
+/// DER BEFUND, woertlich: "Beim Blaettern springt die Punktzahl 8 -> 6 -> 3 und die Reihenzahl
+/// 3 -> 2 -> 1." Nachgemessen an HEAD, und die Messung sagt genauer, WO das herkommt:
+///
+///   Schritt 0: 0/3 0/3 0/2 -> 8 Punkte, 3 Reihen
+///   Schritt 1: 0/3 0/3 1/2 -> 8 Punkte, 3 Reihen
+///   Schritt 2: 0/3 1/3 0/2 -> 8 Punkte, 3 Reihen
+///   Schritt 3: 0/3 1/3 1/2 -> 8 Punkte, 3 Reihen
+///   Schritt 4: 0/3 2/3     -> 6 Punkte, 2 Reihen
+///   Schritt 5: 1/3         -> 3 Punkte, 1 Reihe
+///
+/// INNERHALB EINER ACHSE springt gar nichts: die Stellung wandert (0/2 -> 1/2), die Punktzahl
+/// bleibt. Die Zahl springt AUSSCHLIESSLICH, wenn eine ganze ACHSE die Liste verlaesst:
+///   - Schritt 3 -> 4: der Burgreiter hat gemessen 4 Eintraege, also EINE Seite - die
+///     Seitenachse faellt weg (8 -> 6).
+///   - Schritt 4 -> 5: der Flaggenreiter traegt gar keinen inneren Reiter - die innere
+///     Reiterachse faellt weg (6 -> 3).
+/// Beides ist der BESTAND des Fensters und keine Rechnung, die man stetiger machen koennte: wie
+/// viele Seiten der Nachbarreiter haette, waere erst zu erfahren, indem man ihn WAEHREND des
+/// Zeichnens umschaltet (FocusPath::Collect sammelt nur Sichtbares) - und eine Reihe mit einem
+/// einzigen Punkt waere Rauschen statt Anzeige.
+///
+/// STETIG IST ALSO GENAU DAS, WAS DER AUFTRAGGEBER GEMEINT HAT ("bei Instagram BLEIBT die
+/// Punktzahl stehen, waehrend nur der hervorgehobene Punkt wandert"), UND DIESER FALL BEWACHT
+/// ES: solange die Achsenliste ihre Gestalt behaelt, bleibt JEDER gezeichnete Punkt auf seiner
+/// Stelle - es wechselt nur, welcher hervorgehoben ist.
+BOOST_FIXTURE_TEST_CASE(WhileTheAxesKeepTheirShapeEveryDotKeepsItsPlaceAndOnlyTheHighlightMoves,
+                        PadViewFixture<2>)
+{
+    const MapPoint spot = findBuildSpotFor(worldFixture.world, view(1).GetViewer(), BuildingQuality::Castle);
+    BOOST_TEST_REQUIRE(spot.isValid());
+    seatPad(*this, 11, 1);
+    aimPadAt(11, 1, spot);
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+
+    /// DIE GESTALT der Achsenliste: so viele Achsen, jede mit so vielen Stellungen. OHNE die
+    /// Stellung selbst - genau die darf sich ja bewegen.
+    const auto shapeOf = [&] {
+        std::string out;
+        for(const dskGameInterface::RingPageAxis& a : dskGameInterface::RingPageAxes(view(1)))
+            out += std::to_string(a.count) + " ";
+        return out;
+    };
+    /// DIE WIRKLICH GEZEICHNETEN PUNKTE - Mittelpunkt aus dem ersten Eckpunkt des
+    /// Dreiecksfaechers. Eine Rechnung ist kein Zeichnen.
+    const auto drawnDotCenters = [&] {
+        // GEMESSEN RELATIV ZUR RINGMITTE. Der GANZE Ring wandert beim Blaettern senkrecht, weil
+        // der Klartextkasten aus Phase 9 je nach gewaehltem Eintrag verschieden viele Zeilen
+        // traegt und LayoutRing den Ring ueber diesen Kasten setzt (gemessen: die Mitte springt
+        // um bis zu 28 Punkte). Das ist eine Frage der RINGLAGE und nicht der Punktreihe; hier
+        // wird gemessen, ob sich die REIHE IN SICH umbaut.
+        dsk->DrawRing(view(1)); // warmzeichnen
+        ringTap::reset();
+        {
+            RTTR_STUB_FUNCTION(glVertexPointer, ringTap::glVertexPointer);
+            RTTR_STUB_FUNCTION(glColor4ub, ringTap::glColor4ub);
+            RTTR_STUB_FUNCTION(glDrawArrays, ringTap::glDrawArrays);
+            dsk->DrawRing(view(1));
+        }
+        const Position center = dsk->LayoutRing(view(1)).center;
+        std::vector<Position> out;
+        for(const ringTap::Batch& b : ringTap::batches)
+        {
+            if(b.mode != GL_TRIANGLE_FAN || b.verts.empty())
+                continue;
+            out.push_back(Position(static_cast<int>(std::lround(b.verts.front().x)) - center.x,
+                                   static_cast<int>(std::lround(b.verts.front().y)) - center.y));
+        }
+        return out;
+    };
+
+    std::string shape = shapeOf();
+    std::vector<Position> dots = drawnDotCenters();
+    Position center = dsk->LayoutRing(view(1)).center;
+    int biggestCenterJump = 0;
+    unsigned sameShapeSteps = 0;
+    unsigned shapeChanges = 0;
+    for(unsigned step = 0; step < 16u; ++step)
+    {
+        press(11, PadButton::RightShoulder);
+        const Position newCenter = dsk->LayoutRing(view(1)).center;
+        biggestCenterJump = std::max(biggestCenterJump, std::abs(newCenter.y - center.y));
+        center = newCenter;
+        const std::string newShape = shapeOf();
+        const std::vector<Position> newDots = drawnDotCenters();
+        if(newShape == shape)
+        {
+            ++sameShapeSteps;
+            BOOST_TEST_CONTEXT("Schritt " << step << ", Achsengestalt '" << shape << "'")
+            {
+                // DIE ZAHL STEHT STILL...
+                BOOST_TEST_REQUIRE(newDots.size() == dots.size());
+                for(std::size_t i = 0; i < newDots.size(); ++i)
+                {
+                    // ...UND JEDER PUNKT AUCH. Ein Punkt darf groesser oder kleiner werden (das
+                    // IST die Hervorhebung), aber seine Spalte und seine Reihe bleiben stehen.
+                    BOOST_TEST_CONTEXT("Punkt " << i)
+                    {
+                        BOOST_TEST(std::abs(newDots[i].x - dots[i].x) <= 1);
+                        BOOST_TEST(std::abs(newDots[i].y - dots[i].y) <= 1);
+                    }
+                }
+            }
+        } else
+            ++shapeChanges;
+        shape = newShape;
+        dots = newDots;
+    }
+    BOOST_TEST_MESSAGE("AUDIT B2: der groesste Sprung der RINGMITTE (Klartextkasten, Phase 9) war "
+                       << biggestCenterJump << " Punkte");
+    BOOST_TEST_MESSAGE("AUDIT B2: von 16 Schritten liessen " << sameShapeSteps << " die Achsengestalt stehen, "
+                                                             << shapeChanges << " aenderten sie");
+    // Dieser Ring hat gemessen beides - sonst maesse der Fall nur eine Haelfte.
+    BOOST_TEST(sameShapeSteps > 0u);
+    BOOST_TEST(shapeChanges > 0u);
+
+    press(11, PadButton::B);
+    WINDOWMANAGER.Draw();
+}
+
+// ============================================================================================
+// ZWEITE WELLE-14-RUNDE - BEFUND B3: DER RING FIEL AUF EINEN EINZIGEN SEKTOR
+// ============================================================================================
+
+/// DER BEFUND, gemessen: der Bauring fiel beim Blaettern zweimal auf layout.entries.size() == 1.
+/// Ein Ring mit einem Sektor ist kein Ring - er ist ein Kreis mit einem Knopf darin, und der
+/// Spieler hat dafuer geblaettert.
+///
+/// URSACHE, im Quelltext belegt und hier gemessen: RingPageCtrls schnitt in vollen Achtergruppen,
+/// und der REST bekam eine eigene Seite. Der Huettenreiter hat gemessen 9 Eintraege - Seite 1 mit
+/// acht Sektoren, Seite 2 mit einem. Jetzt wird gleichmaessig verteilt (5 und 4); die SEITENZAHL
+/// bleibt dieselbe, es aendert sich nur, WO geschnitten wird.
+///
+/// DER ZWEITE FALL BLEIBT UND WIRD HIER BENANNT: der Flaggenreiter des Aktionsfensters hat
+/// gemessen genau EINEN Eintrag und damit genau EINE Seite. Da ist nichts aufzuteilen - das ist
+/// der Bestand des Fensters. Dieser Fall bewacht deshalb genau die Aussage, die die Aufteilung
+/// halten kann: WO GEBLAETTERT WIRD, TRAEGT KEINE SEITE NUR EINEN SEKTOR.
+BOOST_FIXTURE_TEST_CASE(NoPageOfAPagedRingIsLeftWithASingleSector, PadViewFixture<2>)
+{
+    const MapPoint spot = findBuildSpotFor(worldFixture.world, view(1).GetViewer(), BuildingQuality::Castle);
+    BOOST_TEST_REQUIRE(spot.isValid());
+    seatPad(*this, 11, 1);
+    aimPadAt(11, 1, spot);
+    press(11, PadButton::A);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+
+    unsigned pagedStates = 0;
+    unsigned lonelySectors = 0;
+    unsigned smallestPagedRing = 99u;
+    for(unsigned step = 0; step < 16u; ++step)
+    {
+        BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+        const auto layout = dsk->LayoutRing(view(1));
+        BOOST_TEST_REQUIRE(!layout.empty());
+        // GEMESSEN AM GEZEICHNETEN: so viele Sektoren gehen wirklich als Dreiecksstreifen hinaus.
+        dsk->DrawRing(view(1));
+        ringTap::reset();
+        {
+            RTTR_STUB_FUNCTION(glVertexPointer, ringTap::glVertexPointer);
+            RTTR_STUB_FUNCTION(glColor4ub, ringTap::glColor4ub);
+            RTTR_STUB_FUNCTION(glDrawArrays, ringTap::glDrawArrays);
+            dsk->DrawRing(view(1));
+        }
+        const auto drawnSectors = static_cast<unsigned>(ringTap::sectors().size());
+        BOOST_TEST_REQUIRE(drawnSectors == layout.entries.size());
+        if(layout.numPages > 1u)
+        {
+            ++pagedStates;
+            smallestPagedRing = std::min(smallestPagedRing, drawnSectors);
+            BOOST_TEST_CONTEXT("Schritt " << step << ", Seite " << layout.page << "/" << layout.numPages)
+            {
+                // DIE ZUSICHERUNG: eine Seite, fuer die geblaettert werden muss, traegt mehr als
+                // einen Sektor.
+                BOOST_TEST(drawnSectors >= 2u);
+            }
+            if(drawnSectors < 2u)
+                ++lonelySectors;
+        }
+        press(11, PadButton::RightShoulder);
+    }
+    BOOST_TEST_MESSAGE("AUDIT B3: " << pagedStates << " geblaetterte Zustaende, kleinster Ring darin "
+                                    << smallestPagedRing << " Sektoren, einsame Sektoren " << lonelySectors);
+    BOOST_TEST(pagedStates > 0u);
+    BOOST_TEST(lonelySectors == 0u);
+
+    press(11, PadButton::B);
+    WINDOWMANAGER.Draw();
+}
+
+/// DIE AUFTEILUNG ALS REINE RECHNUNG - dieselbe Regel, die RingPageCtrls anwendet, ueber alle
+/// Eintragszahlen von 1 bis 40 durchgemessen statt ueber die zwei oder drei Faelle, die eine
+/// Testpartie hergibt. Genau daran ist eine Zusicherung der Welle 14 schon einmal gescheitert
+/// (Befund K2): sie hielt fuer die gemessenen Faelle und war daneben falsch.
+BOOST_AUTO_TEST_CASE(TheEvenPageSplitNeverLeavesARemainderPageOfOne)
+{
+    const unsigned perPage = padring::Ring::SectorsPerPage;
+    for(unsigned n = 1; n <= 40u; ++n)
+    {
+        const unsigned numPages = std::max(1u, (n + perPage - 1) / perPage);
+        const unsigned base = n / numPages;
+        const unsigned rem = n % numPages;
+        unsigned total = 0;
+        unsigned smallest = 99u;
+        for(unsigned page = 0; page < numPages; ++page)
+        {
+            const unsigned begin = page * base + std::min(page, rem);
+            const unsigned count = base + (page < rem ? 1u : 0u);
+            BOOST_TEST_CONTEXT(n << " Eintraege, Seite " << page << " von " << numPages)
+            {
+                // LUECKENLOS UND UEBERSCHNEIDUNGSFREI: die Seiten teilen die Eintraege auf.
+                BOOST_TEST(begin == total);
+                // KEINE SEITE UEBER DEM SEKTORDECKEL.
+                BOOST_TEST(count <= perPage);
+                // UND KEINE EINSAME SEITE, wo es ueberhaupt etwas zu blaettern gibt.
+                if(numPages > 1u)
+                    BOOST_TEST(count >= 2u);
+            }
+            total += count;
+            smallest = std::min(smallest, count);
+        }
+        BOOST_TEST_CONTEXT(n << " Eintraege")
+        BOOST_TEST(total == n);
+        if(n == 9u || n == 17u || n == 25u)
+            BOOST_TEST_MESSAGE("AUDIT B3: " << n << " Eintraege auf " << numPages << " Seiten, kleinste Seite "
+                                            << smallest);
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()

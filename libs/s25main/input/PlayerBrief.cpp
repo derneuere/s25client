@@ -475,6 +475,21 @@ const char* PadButtonLabel(const PadButton button)
     return "";
 }
 
+KeyAction ActionMenuAction(const ActionMenuKind kind)
+{
+    switch(kind)
+    {
+        case ActionMenuKind::Build: return KeyAction::OpenBuildMenu;
+        case ActionMenuKind::Road: return KeyAction::OpenRoadMenu;
+        case ActionMenuKind::Attack: return KeyAction::OpenAttackMenu;
+        case ActionMenuKind::Flag: return KeyAction::OpenFlagMenu;
+        case ActionMenuKind::Trade: return KeyAction::OpenTradeWindow;
+        case ActionMenuKind::None:
+        case ActionMenuKind::Generic: break;
+    }
+    return KeyAction::OpenActionMenu;
+}
+
 const char* KeyLabel(const KeyAction action)
 {
     // KURZ, und das ist gemessen und keine Geschmacksfrage: die Zeile hat in einer Viertel-
@@ -489,6 +504,21 @@ const char* KeyLabel(const KeyAction action)
         case KeyAction::OpenWindow: return _("Open it");
         case KeyAction::StartRoad: return _("Road");
         case KeyAction::OpenActionMenu: return _("Actions");
+        // BEFUND K5 (Text): "Build menu" und nicht "Build" - der Klartextkasten daneben sagt woertlich
+        // "Drueck A fuer das Baumenue", und zwei Woerter fuer denselben Knopf waren genau der
+        // Befund. "Road" ist ausserdem schon vergeben (KeyAction::StartRoad, A auf einer eigenen
+        // Flagge); zwei Knoepfe mit demselben Wort waeren die naechste Verwechslung.
+        //
+        // ALLE FUENF STEHEN SCHON IM KATALOG, und zwar mit genau den Woertern, die der
+        // Klartextkasten daneben benutzt: "Baumenue", "Strassenmenue", "Angriffsmenue",
+        // "Flaggenmenue", "Handel". Nachgesehen und nicht angenommen - es gibt fuer diesen
+        // Befund also keine einzige neue Zeichenkette und keine ungeuebersetzte Leiste in
+        // irgendeiner Sprache. Genau das macht das Auffaechern hier billiger als das Umbenennen.
+        case KeyAction::OpenBuildMenu: return _("Build menu");
+        case KeyAction::OpenRoadMenu: return _("Road menu");
+        case KeyAction::OpenAttackMenu: return _("Attack menu");
+        case KeyAction::OpenFlagMenu: return _("Flag menu");
+        case KeyAction::OpenTradeWindow: return _("Trade");
         case KeyAction::PlaceFlag: return _("Flag");
         case KeyAction::StartWaterway: return _("Waterway");
         case KeyAction::EnterWindow: return _("Into the window");
@@ -725,9 +755,10 @@ std::vector<KeyHint> HintsFor(const KeyContext& ctx)
         add(PadButton::A, KeyAction::OpenWindow);
     else if(ctx.verdict == NodeVerdict::OwnFlag || ctx.verdict == NodeVerdict::OwnHQFlag)
         add(PadButton::A, KeyAction::StartRoad);
-    else if(ctx.canOpenActionMenu)
-        add(PadButton::A, KeyAction::OpenActionMenu);
-    const bool aOpensActions = !out.empty() && out.front().action == KeyAction::OpenActionMenu;
+    else if(ctx.actionMenu != ActionMenuKind::None)
+        add(PadButton::A, ActionMenuAction(ctx.actionMenu));
+    const bool aOpensActions =
+      !out.empty() && ctx.actionMenu != ActionMenuKind::None && out.front().action == ActionMenuAction(ctx.actionMenu);
 
     if(ctx.canPlaceFlag)
         add(PadButton::X, KeyAction::PlaceFlag);
@@ -746,8 +777,8 @@ std::vector<KeyHint> HintsFor(const KeyContext& ctx)
     // RB steht nur da, wo es etwas tut, das A nicht schon tut. Auf einer eigenen Flagge ist das
     // der Fall - dort faengt A den Strassenbau an und kommt gar nicht bis zum Aktionsfenster.
     // Genau diese Stelle hat der Auftraggeber gesucht: hier liegen Geologe und Spaeher.
-    if(ctx.canOpenActionMenu && !aOpensActions)
-        add(PadButton::RightShoulder, KeyAction::OpenActionMenu);
+    if(ctx.actionMenu != ActionMenuKind::None && !aOpensActions)
+        add(PadButton::RightShoulder, ActionMenuAction(ctx.actionMenu));
 
     if(ctx.canStartWaterway)
         add(PadButton::LeftShoulder, KeyAction::StartWaterway);

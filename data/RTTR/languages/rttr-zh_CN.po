@@ -801,6 +801,18 @@ msgstr ""
 msgid "Build a waterway"
 msgstr ""
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: all"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: here"
+msgstr ""
+
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "Build aid: off"
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwAction.cpp:302
 #: libs/s25main/ingameWindows/iwAction.cpp:304
 #, fuzzy
@@ -1133,11 +1145,6 @@ msgstr "建设辅助模式"
 #: libs/s25main/addons/AddonMilitaryAid.h:21
 msgid "Construction aid only"
 msgstr "仅建筑辅助"
-
-#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
-#, fuzzy
-msgid "Construction aid: off"
-msgstr "建设辅助模式"
 
 #: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
 #, fuzzy
@@ -5169,6 +5176,10 @@ msgstr "网站编程"
 msgid "Well"
 msgstr "水井"
 
+#: libs/s25main/ingameWindows/iwPadSystemMenu.cpp
+msgid "What fits on a spot - a flag, a hut, a house, a castle or a mine. Three steps: off, only under your pointer, or on every spot of the map."
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwHelp.cpp:17
 msgid "What is this?"
 msgstr "这是什么?"
@@ -5507,6 +5518,10 @@ msgstr "雪地"
 
 #~ msgid "Coming soon"
 #~ msgstr "即将推出"
+
+#, fuzzy
+#~ msgid "Construction aid: off"
+#~ msgstr "建设辅助模式"
 
 #~ msgid "Directory does not exist: %s\n"
 #~ msgstr "文件目录不存在: %s\n"

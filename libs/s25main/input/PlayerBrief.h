@@ -46,6 +46,22 @@ namespace brief {
 /// dem Code vergleichen kann, luegt frueher oder spaeter. Jeder Wert hier hat in
 /// tests/s25Main/splitscreen/testPadKeyHints.cpp eine Zusicherung, die den Knopf ueber den
 /// PRODUKTIVEN Weg drueckt und die Wirkung misst.
+/// WAS DER AKTIONSKNOPF AN DIESEM KNOTEN OEFFNET.
+///
+/// Abgeleitet aus dskGameInterface::ActionOptions und aus nichts sonst. `Generic` ist die
+/// ehrliche Antwort, wenn das Fenster MEHRERE Handlungen zugleich anbietet - dann ist "Aktionen"
+/// nicht unscharf, sondern richtig. `None` heisst: dieser Knopf oeffnet hier nichts.
+enum class ActionMenuKind
+{
+    None,
+    Generic,
+    Build,
+    Road,
+    Attack,
+    Flag,
+    Trade
+};
+
 enum class KeyAction
 {
     /// A in der Welt: das Fenster des Objekts unter dem Zeiger (Schiff, eigenes Gebaeude,
@@ -53,8 +69,29 @@ enum class KeyAction
     OpenWindow,
     /// A auf einer eigenen Flagge: der Strassenbau faengt an.
     StartRoad,
-    /// A oder RB: das Aktionsfenster geht auf.
+    /// A oder RB: das Aktionsfenster geht auf, und es ist nicht auf EINE Bedeutung festzulegen -
+    /// hier bleibt das Sammelwort richtig.
+    ///
+    /// BEFUND K5 DER WELLE 14: bis hierher war das der EINZIGE Wert fuer diesen Knopf, und er
+    /// stand gemessen in fuenf verschiedenen Bedeutungen auf dem Schirm - Baumenue, reiner
+    /// Flaggenplatz, eigene Strasse, feindliches Militaergebaeude, eigene Flagge ueber RB. Auf
+    /// einem Bauplatz sagte die Leiste "A Aktionen", waehrend der Klartextkasten im SELBEN Bild
+    /// "Drueck A fuer das Baumenue" sagte: zwei Woerter fuer denselben Knopf, und der
+    /// Auftraggeber ist Anfaenger. Global auf "Baumenue" umzubenennen waere in vier der fuenf
+    /// Lagen eine NEUE Luege gewesen; deshalb faechert sich der Wert jetzt auf, und zwar aus
+    /// derselben ActionOptions, die RefreshBrief ohnehin schon rechnet (KeyContext::actionMenu).
     OpenActionMenu,
+    /// A auf Bauland: das BAUMENUE. Woertlich das Wort, das der Klartextkasten daneben benutzt.
+    OpenBuildMenu,
+    /// A auf einer eigenen Strasse: das Strassenmenue (aufreissen, ausbauen).
+    OpenRoadMenu,
+    /// A an einem fremden Militaergebaeude: die Angriffswahl.
+    OpenAttackMenu,
+    /// RB auf einer eigenen Flagge: das Flaggenmenue (Geologe, Spaeher, abreissen).
+    OpenFlagMenu,
+    /// A an einem verbuendeten Lagerhaus: das HANDELSfenster - dort gibt es gar kein
+    /// Aktionsfenster (dskGameInterface::PadOpenActionWindow, Zweig tradeWarehouse).
+    OpenTradeWindow,
     /// X: eine Flagge setzen. Das EINZIGE Kommando, das in der Welt an einem Knopf haengt.
     PlaceFlag,
     /// LB an einer eigenen Wasserflagge: der Wasserweg faengt an.
@@ -531,8 +568,13 @@ struct KeyContext
     /// Unter dem Zeiger laesst sich ein Objektfenster oeffnen (Schiff, eigenes Gebaeude, eigene
     /// Baustelle) - dskGameInterface::CanOpenObjectWindow.
     bool canOpenObjectWindow = false;
-    /// Das Aktionsfenster haette hier etwas anzubieten (ActionOptions::hasAction).
-    bool canOpenActionMenu = false;
+    /// WAS DER KNOPF HIER WIRKLICH OEFFNET - und damit zugleich die Frage, OB er etwas oeffnet
+    /// (`None` heisst nein). EIN Feld und nicht zwei: ein zusaetzliches `canOpenActionMenu`
+    /// koennte neben dieser Angabe veralten, und genau das war Befund K1 an anderer Stelle.
+    ///
+    /// Gesetzt in dskGameInterface::RefreshBrief aus derselben ActionOptions, aus der auch
+    /// PadOpenActionWindow entscheidet - keine zweite Rechnung, keine abgeschriebene Bedingung.
+    ActionMenuKind actionMenu = ActionMenuKind::None;
     /// Hier kann eine Flagge stehen (ActionOptions::tabs.setflag) - dieselbe Bedingung, unter
     /// der das Aktionsfenster seinen Knopf "Fahne setzen" anbietet.
     bool canPlaceFlag = false;
@@ -604,6 +646,10 @@ std::vector<KeyHint> HintsFor(const KeyContext& ctx);
 
 /// Der uebersetzte Text zu einer Tastenwirkung - kurz, weil er auf eine Zeile muss.
 const char* KeyLabel(KeyAction action);
+/// WELCHE TASTENWIRKUNG zu dieser Art Aktionsfenster gehoert - die eine Uebersetzung zwischen
+/// beiden Aufzaehlungen, damit sie nicht an zwei Stellen steht (Befund K5). `None` ergibt
+/// OpenActionMenu; der Aufrufer fragt vorher, ob ueberhaupt etwas zu oeffnen ist.
+KeyAction ActionMenuAction(ActionMenuKind kind);
 
 /// Der Name der Taste, wie er auf einem XInput-Pad steht. BEWUSST NICHT uebersetzt: es ist die
 /// Beschriftung eines Geraets und keine Sprache. Auf einem DualSense oder einem Switch-Pad

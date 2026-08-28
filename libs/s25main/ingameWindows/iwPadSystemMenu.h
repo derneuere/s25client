@@ -5,6 +5,7 @@
 #pragma once
 
 #include "IngameWindow.h"
+#include "world/GameWorldView.h"
 
 class dskGameInterface;
 class PlayerView;
@@ -81,7 +82,8 @@ private:
     PlayerView& view_;
     /// Zuletzt geschriebener Zustand der beiden Umschalter. Nur, damit Msg_PaintBefore nicht
     /// jeden Frame Zeichenketten neu baut.
-    bool lastShowBQ_;
+    /// WELLE 14: der MODUS, nicht mehr ein Ja/Nein - es gibt drei Beschriftungen.
+    BqMode lastShowBQ_;
     bool lastShowNames_;
     bool lastShowProductivity_;
     bool lastWatchOnly_;

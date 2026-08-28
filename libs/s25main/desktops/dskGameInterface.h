@@ -45,6 +45,7 @@ class NWFInfo;
 class GameWorldBase;
 class GameCommandFactory;
 class nobBaseWarehouse;
+class ctrlTab;
 
 class dskGameInterface :
     public Desktop,
@@ -412,6 +413,14 @@ public:
     /// Bauhilfe (BQ-Symbole) dieser Ansicht an/aus. REINE ANZEIGE - kein GameCommand, kein
     /// Netzverkehr, kein Simulationszustand; die Begruendung steht an der Umsetzung.
     void ToggleConstructionAidFor(PlayerView& view);
+    /// DER DREISTUFIGE UMLAUF der Bauhilfe - aus, nur am Zeiger, alles (Welle 14).
+    ///
+    /// Haengt am RINGSCHALTER des Padspielers, nicht am Mausknopf: der Ring traegt eine
+    /// Beschriftung, die den Zustand nennt ("Bauhilfe: am Zeiger"), der Mausknopf ist ein
+    /// unbeschriftetes Symbol von 1996. Ein dritter Zustand hinter einem Symbol ohne Beschriftung
+    /// waere fuer den Mausspieler ein Verlust, kein Gewinn - er bleibt deshalb bei aus <-> alles.
+    /// Ebenfalls reine Anzeige.
+    void CycleConstructionAidFor(PlayerView& view);
     /// Gebaeudenamen und Auslastung dieser Ansicht an/aus. Ebenfalls reine Anzeige.
     /// Bleibt fuer die KNOPFLEISTE des Mausspielers stehen - dort gibt es nur einen Knopf.
     void ToggleNamesAndProductivityFor(PlayerView& view);
@@ -455,9 +464,29 @@ public:
     /// einem 55-Zoll-Fernseher ist der Helligkeitsunterschied das, was traegt - Farbtoene
     /// allein sind es nicht (TV-RECHERCHE.md). Oeffentlich, weil ein Nachweis sie am
     /// Zeichenaufruf wiederfinden muss.
+    /// Die Kennungen der KNOPFLEISTE. Oeffentlich aus demselben Grund wie bei iwPadSystemMenu:
+    /// ein Nachweis darf nicht auf uebersetzten Text zielen, sondern auf die Kennung - und der
+    /// Knopf der Bauhilfe ist seit Welle 14 ausdruecklich zu bewachen (der MAUSSPIELER darf
+    /// nichts verlieren, waehrend der Padspieler eine dritte Stufe bekommt).
+    enum ButtonBarId
+    {
+        ID_btMap,
+        ID_btOptions,
+        ID_btConstructionAid,
+        ID_btPost,
+        ID_txtNumMsg
+    };
+
     static constexpr unsigned ringSectorColor = 0xC8102040;
     static constexpr unsigned ringSelectedColor = 0xF0F0D060;
     static constexpr unsigned ringLockedColor = 0x60101820;
+    /// DIE SEITENPUNKTE (Welle 14, Befund 2). Dieselbe Farbe wie der gewaehlte Sektor, damit
+    /// "hell und gelb heisst: hier stehst du" im ganzen Ring EINE Bedeutung hat. Der Unterschied
+    /// zwischen aktuell und nicht aktuell liegt auf ZWEI Kanaelen - Groesse UND Helligkeit -,
+    /// weil TV-RECHERCHE.md 1.5 ausdruecklich sagt, dass feine Farbunterschiede aus drei Metern
+    /// nicht tragen.
+    static constexpr unsigned ringDotCurrentColor = 0xF0F0D060;
+    static constexpr unsigned ringDotIdleColor = 0x78F0D060;
 
     /// Ein Eintrag des Rings, in Sektorreihenfolge.
     struct RingEntry
@@ -491,6 +520,43 @@ public:
         /// Bildes. Leeres Rechteck heisst: dieser Eintrag zeichnet nichts.
         Rect labelBox;
     };
+    /// EINE BLAETTERACHSE DES RINGS - ein Rad des Zaehlwerks, das LB und RB weiterdrehen.
+    ///
+    /// WARUM ES DIESEN BEGRIFF GIBT (Befund K1 der Welle 14, gemessen): die Leiste versprach
+    /// zwoelf Zustaende lang "RB Naechste Seite", und in acht davon stand kein einziger Punkt.
+    /// Ursache waren ZWEI Bedingungen fuer DIESELBE Frage - die Leiste fragte "mehr als eine
+    /// Seite ODER mehr als ein Reiter", die Punkte nur "mehr als eine Seite". Genau die Sorte
+    /// Auseinanderlaufen, die dieser Ring seit Phase 13 vermeiden soll.
+    ///
+    /// Jetzt gibt es EINE Quelle: RingPageAxes. Die Leiste fragt sie ("ist ueberhaupt eine Achse
+    /// da?"), RingTurnPage dreht sie, und die Punkte zeichnen sie. Eine Achse je Reiterebene
+    /// (aussen nach innen) und zuletzt die Seitenachse - woertlich die Reihenfolge, in der
+    /// RingTurnPage weiterzaehlt (innen zuerst, Ueberlauf nach aussen).
+    struct RingPageAxis
+    {
+        /// So viele Stellungen hat dieses Rad. Achsen mit nur EINER Stellung stehen gar nicht
+        /// erst in der Liste - sie sind nichts zum Blaettern.
+        unsigned count = 1;
+        /// Auf dieser Stellung steht der Spieler.
+        unsigned index = 0;
+        /// DAS RAD SELBST, damit RingTurnPage es drehen kann, OHNE die Achsen ein zweites Mal
+        /// zu suchen (Befund B1 der zweiten Welle-14-Runde). nullptr heisst: die SEITENACHSE -
+        /// sie wird ueber padring::Ring::SetPage gedreht und hat keinen Reiter.
+        ctrlTab* tab = nullptr;
+    };
+    /// EIN SEITENPUNKT in der leeren Ringmitte - die Seitenanzeige, nach der der Auftraggeber
+    /// gefragt hat ("Punkte waere hier super. So wie bei Instagram Slides.").
+    struct RingPageDot
+    {
+        /// GENAU DER KASTEN, in den gezeichnet wird - dieselbe Zahl, die ein Nachweis liest.
+        /// Der Punkt ist der eingeschriebene Kreis dieses Quadrats.
+        Rect box;
+        /// Auf dieser Seite steht der Spieler gerade.
+        bool current = false;
+        /// Zu welcher Blaetterachse dieser Punkt gehoert (Index in RingPageAxes). Damit kann ein
+        /// Nachweis Reiterreihe und Seitenreihe auseinanderhalten, ohne sie nachzurechnen.
+        unsigned axis = 0;
+    };
     /// ALLES, was DrawRing zeichnet.
     struct RingLayout
     {
@@ -500,6 +566,21 @@ public:
         std::vector<RingEntry> entries;
         unsigned page = 0;
         unsigned numPages = 1;
+        /// Die Blaetterachsen dieses Rings, aussen nach innen und zuletzt die Seiten. LEER heisst
+        /// woertlich: LB und RB tun hier nichts, und die Leiste nennt sie deshalb auch nicht.
+        std::vector<RingPageAxis> axes;
+        /// EIN PUNKT JE STELLUNG JEDER ACHSE, achsenweise hintereinander; je Achse traegt genau
+        /// einer current == true.
+        ///
+        /// LEER GENAU DANN, WENN ES NICHTS ZU BLAETTERN GIBT - dieselbe Frage, aus der die
+        /// Tastenhinweisleiste ihr Versprechen zieht (RingHasPages, und beide lesen RingPageAxes).
+        /// Ein einzelner Punkt ist kein Hinweis, sondern Rauschen; eine Achse mit einer Stellung
+        /// erzeugt deshalb gar keine.
+        ///
+        /// Gerechnet in LayoutRingDots und NICHT im Zeichner: sonst gaebe es die Lage zweimal, und
+        /// die eine koennte neben der anderen veralten. Dieselbe Linie wie RingEntry::labelBox
+        /// (Befund K1 der Phase 13).
+        std::vector<RingPageDot> pageDots;
         /// Die freie Flaeche, in der der Ring MIT seinen Beschriftungen liegt: Viewport,
         /// geschnitten mit der Safe Area, oberhalb des Klartextkastens. Nichts darf hier heraus.
         Rect freeArea;
@@ -519,6 +600,14 @@ public:
     /// Setzt icon, labelLines und labelBox EINES Eintrags. Herausgezogen, damit die Textlage
     /// eine eigene, benannte Rechnung ist und nicht im Zeichner steckt (Befund K1).
     static void LayoutRingLabel(const RingLayout& layout, RingEntry& e);
+    /// DIE PUNKTREIHEN, als reine Rechnung ohne Ansicht, ohne Fenster und ohne Grafik.
+    ///
+    /// Herausgezogen aus demselben Grund wie LayoutRingLabel: ein Nachweis kann sie mit JEDER
+    /// Achsenzahl fuettern und die gezeichnete Groesse messen, statt auf die zwei oder drei
+    /// Faelle zu warten, die eine Testpartie zufaellig hergibt. Genau daran ist die Zusicherung
+    /// der Welle 14 gescheitert (Befund K2): sie hielt fuer fuenf Seiten und war ab sechs falsch.
+    static std::vector<RingPageDot> LayoutRingDots(Position center, float rInner,
+                                                  const std::vector<RingPageAxis>& axes);
     /// DIE SCHLEIFE, DIE WIRKLICH ZEICHNET. Statisch, ohne Ansicht, ohne Verzweigung.
     static void EmitRing(const RingLayout& layout,
                          const std::function<void(const RingEntry&)>& emitSector,
@@ -535,18 +624,28 @@ public:
     bool RingOnPadButton(PlayerView& view, PadButton button, bool down);
     /// Zielrichtung fortschreiben und den Fokus auf den getroffenen Sektor setzen.
     void RingOnPadMove(PlayerView& view, const Position& delta);
-    /// Gibt es im Wurzelfenster ueberhaupt einen Reiter mit mehr als einem Blatt? Woertlich
-    /// die zweite Haelfte der Frage, die RingTurnPage beantwortet - und deshalb dieselbe
-    /// Funktion und keine Abschrift: die Leiste darf LB/RB nur nennen, wo sie wirken.
-    static bool RingHasMultipleTabs(const PlayerView& view);
-    /// GIBT ES UEBERHAUPT ETWAS ZU BLAETTERN? Mehr als eine Seite oder mehr als ein Reiter.
+    /// DIE BLAETTERACHSEN DIESES RINGS - die EINE Quelle, aus der alles kommt, was mit LB und RB
+    /// zu tun hat.
     ///
-    /// DIE EINE Frage, an der LB und RB haengen - und zwar an BEIDEN Enden: RingTurnPage tut
-    /// nichts, wenn sie nein sagt, und die Tastenhinweisleiste nennt die Schultern nicht, wenn
-    /// sie nein sagt. Verschmolzen und nicht abgeschrieben (Befund K2/4A); vorher stand die
-    /// Bedingung nur in der Leiste, und die Wirkung kannte sie nicht.
+    /// Eine Achse je Reiterebene mit mehr als einem Blatt (aussen nach innen), dahinter die
+    /// Seitenachse, wenn die Eintraege der aktuellen Reiterlage nicht auf eine Seite passen.
+    /// Achsen mit einer einzigen Stellung fallen heraus.
+    ///
+    /// DREI Verbraucher, und keiner von ihnen rechnet die Frage ein zweites Mal:
+    ///   - RingHasPages (und damit die Tastenhinweisleiste) fragt, ob die Liste leer ist,
+    ///   - RingTurnPage dreht genau dieses Zaehlwerk,
+    ///   - LayoutRing macht daraus die Punktreihen.
+    /// Vorher gab es die Frage zweimal, und die Punkte kannten nur die halbe Antwort (K1).
+    static std::vector<RingPageAxis> RingPageAxes(const PlayerView& view);
+    /// GIBT ES UEBERHAUPT ETWAS ZU BLAETTERN?
+    ///
+    /// DIE EINE Frage, an der LB und RB haengen - und zwar an DREI Enden: RingTurnPage tut
+    /// nichts, wenn sie nein sagt, die Tastenhinweisleiste nennt die Schultern nicht, wenn sie
+    /// nein sagt, und die Punktreihe bleibt leer, wenn sie nein sagt. Verschmolzen und nicht
+    /// abgeschrieben (Befund K2/4A der Phase 13 und K1 der Welle 14).
     static bool RingHasPages(const PlayerView& view);
-    /// Eine Seite weiter (dir > 0) oder zurueck. Am Seitenende wechselt der Reiter.
+    /// Eine Seite weiter (dir > 0) oder zurueck. Am Seitenende wechselt der Reiter, und am Ende
+    /// ALLER Achsen LAEUFT DAS ZAEHLWERK UM (Befund B1).
     void RingTurnPage(PlayerView& view, int dir);
     /// Einen Sektor weiter (Steuerkreuz).
     void RingTurnSector(PlayerView& view, int dir);

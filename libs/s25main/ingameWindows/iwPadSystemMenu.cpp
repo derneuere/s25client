@@ -26,7 +26,7 @@ iwPadSystemMenu::iwPadSystemMenu(dskGameInterface& dsk, PlayerView& view, const 
     : IngameWindow(CGI_PADMENU, pos,
                    Extent(btnSize.x + 2 * margin, numButtons * (btnSize.y + gap) - gap + 2 * margin), _("Menu"),
                    LOADER.GetImageN("resource", 41)),
-      dsk_(dsk), view_(view), lastShowBQ_(view.GetView().IsShowingBQ()),
+      dsk_(dsk), view_(view), lastShowBQ_(view.GetView().GetBqMode()),
       lastShowNames_(view.GetView().IsShowingNames()),
       lastShowProductivity_(view.GetView().IsShowingProductivity()), lastWatchOnly_(view.IsWatchOnly())
 {
@@ -42,8 +42,13 @@ iwPadSystemMenu::iwPadSystemMenu(dskGameInterface& dsk, PlayerView& view, const 
                   _("Your messages: why a mine stopped, where ore was found, who is attacking - and the diary of the "
                     "campaign."));
     p.y += btnSize.y + gap;
-    AddTextButton(ID_CONSTRUCTION_AID, p, btnSize, TextureColor::Green2, "", NormalFont,
-                  _("Draws a symbol on every spot: what fits there - a flag, a hut, a house, a castle or a mine."));
+    AddTextButton(
+      ID_CONSTRUCTION_AID, p, btnSize, TextureColor::Green2, "", NormalFont,
+      // WELLE 14: der Satz nennt jetzt die DREI Stufen. Er ist der einzige Ort, an dem ein
+      // Anfaenger erfaehrt, dass es die mittlere ueberhaupt gibt - der Ringsektor traegt nur
+      // den Zustandsnamen, der Kasten darunter traegt die Erklaerung (brief::ForControl).
+      _("What fits on a spot - a flag, a hut, a house, a castle or a mine. Three steps: off, only under "
+        "your pointer, or on every spot of the map."));
     p.y += btnSize.y + gap;
     AddTextButton(ID_NAMES, p, btnSize, TextureColor::Green2, "", NormalFont,
                   _("Writes the name of every building onto the map. Useful while you are still learning "
@@ -65,7 +70,7 @@ iwPadSystemMenu::iwPadSystemMenu(dskGameInterface& dsk, PlayerView& view, const 
 
 void iwPadSystemMenu::UpdateToggleLabels()
 {
-    lastShowBQ_ = view_.GetView().IsShowingBQ();
+    lastShowBQ_ = view_.GetView().GetBqMode();
     lastShowNames_ = view_.GetView().IsShowingNames();
     lastShowProductivity_ = view_.GetView().IsShowingProductivity();
     lastWatchOnly_ = view_.IsWatchOnly();
@@ -73,8 +78,22 @@ void iwPadSystemMenu::UpdateToggleLabels()
     // 115 Punkte bei acht Sektoren). Der erklaerende Satz steht weiterhin im Klartextkasten
     // darunter - er kommt ueber den Tooltip dieses Knopfes dorthin (brief::ForControl) und ist
     // damit dieselbe Zeichenkette wie die des Mauspfades.
+    // DREI Beschriftungen und nicht zwei (Welle 14). Sie nennen den ZUSTAND, weil der Spieler
+    // sonst raten muss, wo im Umlauf er gerade steht - bei zwei Stufen genuegte "an/aus", bei
+    // drei nicht mehr.
+    //
+    // BEFUND K4 DER WELLE 14, gemessen: "Construction aid: here" ist 264 Punkte breit,
+    // "Bauhilfe: am Zeiger" 228 und "Bauhilfe: ueberall" 204. Bei 1280x720 im Fernsehmodus mit
+    // VIER Ansichten ist neben dem Ring Platz fuer 184 - zwei deutsche Tuerschilder brachen dort
+    // um. Die Nachbarschilder desselben Menues heissen "Names: on" und "Output: off", also EIN
+    // kurzes Hauptwort; die Bauhilfe war der Ausreisser. Sie heisst deshalb jetzt genauso kurz.
+    // Gemessen passen alle drei damit in EINE Zeile, an allen vier Sitzplaetzen, auf beiden
+    // Fernsehgroessen und in sieben Sprachen (testPadRing:
+    // NoRingLabelBreaksOnAnyTelevisionSizeAtFourSeats).
     GetCtrl<ctrlTextButton>(ID_CONSTRUCTION_AID)
-      ->SetText(lastShowBQ_ ? _("Construction aid: on") : _("Construction aid: off"));
+      ->SetText(lastShowBQ_ == BqMode::Off    ? _("Build aid: off") :
+                lastShowBQ_ == BqMode::Cursor ? _("Build aid: here") :
+                                                _("Build aid: all"));
     GetCtrl<ctrlTextButton>(ID_NAMES)->SetText(lastShowNames_ ? _("Names: on") : _("Names: off"));
     GetCtrl<ctrlTextButton>(ID_PRODUCTIVITY)
       ->SetText(lastShowProductivity_ ? _("Output: on") : _("Output: off"));
@@ -99,7 +118,7 @@ void iwPadSystemMenu::Msg_PaintBefore()
     // "Anzeigeoptionen" im Aktionsfenster, erzwungene Bauhilfe beim Oeffnen des Baumenues).
     // Stuende die Beschriftung nur beim Bau fest, behauptete das Menue danach das Gegenteil
     // dessen, was der Spieler sieht.
-    if(lastShowBQ_ != view_.GetView().IsShowingBQ() || lastShowNames_ != view_.GetView().IsShowingNames()
+    if(lastShowBQ_ != view_.GetView().GetBqMode() || lastShowNames_ != view_.GetView().IsShowingNames()
        || lastShowProductivity_ != view_.GetView().IsShowingProductivity()
        || lastWatchOnly_ != view_.IsWatchOnly())
         UpdateToggleLabels();
@@ -122,8 +141,11 @@ void iwPadSystemMenu::Msg_ButtonClick(const unsigned ctrl_id)
         // Die beiden ANZEIGESCHALTER lassen das Menue stehen: der Spieler soll die
         // Beschriftung umspringen sehen (das ist die Rueckmeldung, dass etwas passiert ist -
         // die Symbole selbst liegen unter dem Menue) und gleich noch den zweiten legen koennen.
+        // DREISTUFIG, nicht zweistufig (Welle 14): aus -> nur am Zeiger -> alles -> aus.
+        // Woertlich der Wunsch des Auftraggebers. Der MAUSknopf bleibt zweistufig; die
+        // Begruendung steht an dskGameInterface::CycleConstructionAidFor.
         case ID_CONSTRUCTION_AID:
-            dsk_.ToggleConstructionAidFor(view_);
+            dsk_.CycleConstructionAidFor(view_);
             UpdateToggleLabels();
             break;
         case ID_NAMES:

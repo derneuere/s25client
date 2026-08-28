@@ -508,7 +508,10 @@ BOOST_FIXTURE_TEST_CASE(OnAnOwnFlagEveryHintedButtonReallyDoesWhatTheHintSays, H
     BOOST_TEST_MESSAGE("AUDIT: Leiste auf eigener Flagge = " << dumpKeys(b));
     BOOST_TEST_REQUIRE(!b.keys.empty());
     BOOST_TEST(hasHint(b, PadButton::A, brief::KeyAction::StartRoad));
-    BOOST_TEST(hasHint(b, PadButton::RightShoulder, brief::KeyAction::OpenActionMenu));
+    // BEFUND K5 DER WELLE 14: die Leiste nennt jetzt, WAS aufgeht - hier das Flaggenmenue,
+    // woertlich das Wort, das der Klartextkasten daneben schon benutzt ("Druek RB fuer das
+    // Flaggenmenue"). Vorher stand hier "Aktionen", und zwar in fuenf verschiedenen Lagen.
+    BOOST_TEST(hasHint(b, PadButton::RightShoulder, brief::KeyAction::OpenFlagMenu));
     BOOST_TEST(hasHint(b, PadButton::Back, brief::KeyAction::SystemMenu));
     // Was NICHT dasteht, darf auch nicht dastehen: auf einem Knoten mit Flagge passt keine
     // zweite (ComputeActionOptions::tabs.setflag ist dort falsch), und der Wasserweg beginnt
@@ -572,7 +575,7 @@ BOOST_FIXTURE_TEST_CASE(TheOpenHintAppearsExactlyWhereAReallyOpensAWindow, HintF
     // (b) Auf freiem eigenem Bauland: A oeffnet das Aktionsfenster.
     padSteerTo(11, 1, buildPt);
     BOOST_TEST_MESSAGE("AUDIT: Leiste auf freiem Bauland = " << dumpKeys(view(1).GetBrief()));
-    BOOST_TEST_REQUIRE(hasHint(view(1).GetBrief(), PadButton::A, brief::KeyAction::OpenActionMenu));
+    BOOST_TEST_REQUIRE(hasHint(view(1).GetBrief(), PadButton::A, brief::KeyAction::OpenBuildMenu));
     // Und RB steht dort NICHT nochmal - es taete dasselbe wie A.
     BOOST_TEST(!namesButton(view(1).GetBrief(), PadButton::RightShoulder));
     press(11, padHint::Act);
@@ -958,12 +961,12 @@ BOOST_FIXTURE_TEST_CASE(TwoSeatsOnDifferentGroundReadDifferentHints, HintFixture
     BOOST_TEST(b0.title != b1.title);
 
     // Sitz 0 steht auf Bauland: A baut, X setzt eine Flagge, RB ist nicht noetig.
-    BOOST_TEST(hasHint(b0, PadButton::A, brief::KeyAction::OpenActionMenu));
+    BOOST_TEST(hasHint(b0, PadButton::A, brief::KeyAction::OpenBuildMenu));
     BOOST_TEST(hasHint(b0, PadButton::X, brief::KeyAction::PlaceFlag));
     BOOST_TEST(!namesButton(b0, PadButton::RightShoulder));
     // Sitz 1 steht auf seiner Flagge: A baut eine Strasse, RB oeffnet das Flaggenmenue.
     BOOST_TEST(hasHint(b1, PadButton::A, brief::KeyAction::StartRoad));
-    BOOST_TEST(hasHint(b1, PadButton::RightShoulder, brief::KeyAction::OpenActionMenu));
+    BOOST_TEST(hasHint(b1, PadButton::RightShoulder, brief::KeyAction::OpenFlagMenu));
     BOOST_TEST(!namesButton(b1, PadButton::X));
 
     // Und die Trennung haelt auch, wenn EINER von beiden seinen RING oeffnet: nur SEINE Leiste
@@ -974,7 +977,7 @@ BOOST_FIXTURE_TEST_CASE(TwoSeatsOnDifferentGroundReadDifferentHints, HintFixture
     BOOST_TEST(!view(0).GetRing().IsOpen());
     BOOST_TEST(hasHint(view(1).GetBrief(), PadButton::B, brief::KeyAction::CloseRing));
     BOOST_TEST(!hasHint(view(0).GetBrief(), PadButton::B, brief::KeyAction::CloseRing));
-    BOOST_TEST(hasHint(view(0).GetBrief(), PadButton::A, brief::KeyAction::OpenActionMenu));
+    BOOST_TEST(hasHint(view(0).GetBrief(), PadButton::A, brief::KeyAction::OpenBuildMenu));
     closeActionWindow(*this, view(1));
 }
 
@@ -2669,6 +2672,112 @@ BOOST_FIXTURE_TEST_CASE(OnTheFlagButtonRowTheBarSaysExactlyWhatEveryDpadPressDoe
     BOOST_TEST(sawGeologist);
 
     closeActionWindow(*this, view(1));
+}
+
+// ============================================================================================
+// WELLE 14 - BEFUND K5: ZWEI WOERTER FUER DENSELBEN KNOPF
+// ============================================================================================
+
+/// DER BEFUND, im selben Augenblick gemessen: die Leiste sagte "A Aktionen", der Klartextkasten
+/// darunter "Drueck A fuer das Baumenue". Keine Luege, aber fuer einen Anfaenger zwei Namen fuer
+/// denselben Knopf - und der Auftraggeber IST Anfaenger.
+///
+/// WARUM NICHT EINFACH UMBENANNT: gemessen stand dieselbe Beschriftung in fuenf Lagen
+/// (Bauplatz, reiner Flaggenplatz, eigene Strasse, feindliches Militaergebaeude, eigene Flagge
+/// ueber RB). "Baumenue" waere in vier davon eine NEUE Luege gewesen. Aufgefaechert wird deshalb
+/// aus DERSELBEN ActionOptions, aus der PadOpenActionWindow entscheidet, welches Fenster wirklich
+/// aufgeht (KeyContext::actionMenu) - kein zweites Regelwerk.
+///
+/// GEMESSEN WIRD DIE DECKUNG: das Wort der Leiste muss im Satz des Kastens VORKOMMEN. Nicht
+/// "es klingt aehnlich", sondern dieselbe Zeichenkette, und zwar auf DEUTSCH - der Sprache des
+/// Auftraggebers.
+BOOST_FIXTURE_TEST_CASE(TheKeyBarUsesTheSameWordForTheButtonAsThePlainTextBox, HintFixture<2>)
+{
+    const rttr::test::LocaleResetter german("de");
+    GameWorld& world = worldFixture.world;
+    const MapPoint flagPt = findPlainFlagSpot(world, view(1).GetViewer());
+    BOOST_TEST_REQUIRE(flagPt.isValid());
+    world.SetFlag(flagPt, 1);
+    const MapPoint buildPt = findBuildSpot(world, view(1).GetViewer(), BuildingQuality::Hut);
+    BOOST_TEST_REQUIRE(buildPt.isValid());
+
+    pads.connect(11);
+    step(16);
+    BOOST_TEST_REQUIRE(dsk->GetPadRouter().AssignSlot(11, 1));
+    step(16);
+
+    /// Das Wort, das die Leiste fuer DIESE Taste zeigt - gelesen aus dem Block, der gezeichnet
+    /// wird, nicht aus einer Tabelle im Nachweis.
+    const auto wordFor = [&](const PadButton button) {
+        std::string out;
+        for(const brief::KeyHint& h : view(1).GetBrief().keys)
+        {
+            if(h.button == button)
+                out = brief::KeyLabel(h.action);
+        }
+        return out;
+    };
+
+    // --- (a) AUF BAULAND: A oeffnet das Baumenue, und beide sagen "Baumenue" ---
+    padSteerTo(11, 1, buildPt);
+    step(16);
+    const std::string barBuild = wordFor(PadButton::A);
+    const std::string boxBuild = view(1).GetBrief().joined();
+    BOOST_TEST_MESSAGE("AUDIT: Leiste = " << dumpKeys(view(1).GetBrief()));
+    BOOST_TEST_MESSAGE("AUDIT: Leiste sagt zu A \"" << barBuild << "\", Kasten sagt \"" << boxBuild << "\"");
+    BOOST_TEST(hasHint(view(1).GetBrief(), PadButton::A, brief::KeyAction::OpenBuildMenu));
+    BOOST_TEST_REQUIRE(!barBuild.empty());
+    // Der deutsche Katalog ist wirklich geladen - sonst maesse dieser Fall Englisch gegen
+    // Englisch und waere wertlos.
+    BOOST_TEST_REQUIRE(barBuild != "Build menu");
+    BOOST_TEST(boxBuild.find(barBuild) != std::string::npos);
+    // Und A tut dort auch wirklich das, was das Wort sagt.
+    press(11, padHint::Act);
+    BOOST_TEST(view(1).actionwindow != static_cast<iwAction*>(nullptr));
+    closeActionWindow(*this, view(1));
+
+    // --- (b) AUF DER EIGENEN FLAGGE: RB oeffnet das Flaggenmenue, und beide sagen dasselbe ---
+    padSteerTo(11, 1, flagPt);
+    step(16);
+    const std::string barFlag = wordFor(PadButton::RightShoulder);
+    const std::string boxFlag = view(1).GetBrief().joined();
+    BOOST_TEST_MESSAGE("AUDIT: Leiste sagt zu RB \"" << barFlag << "\", Kasten sagt \"" << boxFlag << "\"");
+    BOOST_TEST(hasHint(view(1).GetBrief(), PadButton::RightShoulder, brief::KeyAction::OpenFlagMenu));
+    BOOST_TEST_REQUIRE(!barFlag.empty());
+    BOOST_TEST_REQUIRE(barFlag != "Flag menu");
+    BOOST_TEST(boxFlag.find(barFlag) != std::string::npos);
+    // Und A heisst dort weiterhin etwas ANDERES - es faengt den Strassenbau an und oeffnet kein
+    // Menue. Zwei Knoepfe mit demselben Wort waeren die naechste Verwechslung.
+    BOOST_TEST(hasHint(view(1).GetBrief(), PadButton::A, brief::KeyAction::StartRoad));
+    BOOST_TEST(wordFor(PadButton::A) != barFlag);
+}
+
+/// DIE GRENZE DESSELBEN BEFUNDES, ausgesprochen statt vorausgesetzt: wo das Fenster MEHRERE
+/// Handlungen zugleich anbietet, bleibt das Sammelwort "Aktionen" stehen. Es ist dort nicht
+/// unscharf, sondern die einzige Beschriftung, die nicht luegt - und genau deshalb wurde nicht
+/// global umbenannt.
+BOOST_AUTO_TEST_CASE(WhereSeveralActionsMeetAtOnceTheBarKeepsTheCollectiveWord)
+{
+    brief::KeyContext keys;
+    keys.actionMenu = brief::ActionMenuKind::Generic;
+    const std::vector<brief::KeyHint> hints = brief::HintsFor(keys);
+    bool found = false;
+    for(const brief::KeyHint& h : hints)
+    {
+        if(h.button == PadButton::A)
+        {
+            found = true;
+            BOOST_TEST((h.action == brief::KeyAction::OpenActionMenu));
+        }
+    }
+    BOOST_TEST(found);
+    // Und die Uebersetzung zwischen beiden Aufzaehlungen steht an genau EINER Stelle.
+    BOOST_TEST((brief::ActionMenuAction(brief::ActionMenuKind::Build) == brief::KeyAction::OpenBuildMenu));
+    BOOST_TEST((brief::ActionMenuAction(brief::ActionMenuKind::Road) == brief::KeyAction::OpenRoadMenu));
+    BOOST_TEST((brief::ActionMenuAction(brief::ActionMenuKind::Attack) == brief::KeyAction::OpenAttackMenu));
+    BOOST_TEST((brief::ActionMenuAction(brief::ActionMenuKind::Flag) == brief::KeyAction::OpenFlagMenu));
+    BOOST_TEST((brief::ActionMenuAction(brief::ActionMenuKind::Trade) == brief::KeyAction::OpenTradeWindow));
+    BOOST_TEST((brief::ActionMenuAction(brief::ActionMenuKind::Generic) == brief::KeyAction::OpenActionMenu));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

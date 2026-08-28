@@ -820,15 +820,34 @@ BOOST_FIXTURE_TEST_CASE(TheForcedBuildingAidNeverReachesTheSettingsFile, PadView
     gwv(1).ToggleShowNames();
     BOOST_TEST(SETTINGS.ingame.showBQ == false);
 
-    // Gegenprobe: der ausdrueckliche Wille eines Menschen wird sehr wohl gespeichert - sonst
-    // waere die Trennung eine Sperre statt einer Trennung. Er schaltet dabei die erzwungene
-    // Bauhilfe ab; ein Knopf, der sichtbar nichts tut, waere die naechste Beschwerde.
+    // WELLE 14, BEFUND K3 - HIER STAND DAS GEGENTEIL, UND ES WAR DAS LECK.
+    //
+    // Bis zu dieser Runde verlangte dieser Fall, dass der PADSPIELER in Ansicht 1 mit
+    // ToggleShowBQ SETTINGS.ingame.showBQ auf true setzt. Gemessen richtig - aber genau das ist
+    // das Leck: SETTINGS ist EINE Datei fuer ALLE Sitzplaetze, und der Mausspieler fand die
+    // Bauhilfe beim naechsten Start eingeschaltet vor, ohne sie je angefasst zu haben. Mit der
+    // dreistufigen Bauhilfe wird daraus ein inhaltlicher Fehler: der Padspieler auf "nur am
+    // Zeiger" schriebe ein "ja", und zurueck kaeme "alles" - eine Stufe, die sein Nachbar nie
+    // gewaehlt hat und die dessen zweistufiger Knopf gar nicht meint.
+    //
+    // DIE NEUE REGEL, gemessen an beiden Enden: NUR die Hauptansicht schreibt.
     gwv(1).ToggleShowBQ();
     BOOST_TEST(!gwv(1).IsShowingBQ());
     BOOST_TEST(SETTINGS.ingame.showBQ == false);
     gwv(1).ToggleShowBQ();
-    BOOST_TEST(gwv(1).IsShowingBQ());
+    BOOST_TEST(gwv(1).IsShowingBQ()); // sein Bild aendert sich sehr wohl ...
+    BOOST_TEST(SETTINGS.ingame.showBQ == false); // ... die gemeinsame Vorgabe aber nicht
+    BOOST_TEST(!gwv(1).PersistsHudSettings());
+
+    // UND DIE ANDERE HAELFTE, sonst waere die Trennung eine Sperre: der Besitzer der Vorgabe -
+    // die Hauptansicht, an der Mausknopf und Leertaste haengen - schreibt sie weiter.
+    BOOST_TEST(gwv(0).PersistsHudSettings());
+    gwv(0).SetBqMode(BqMode::Off);
+    BOOST_TEST(SETTINGS.ingame.showBQ == false);
+    gwv(0).ToggleShowBQ();
+    BOOST_TEST(gwv(0).IsShowingBQ());
     BOOST_TEST(SETTINGS.ingame.showBQ == true);
+    gwv(0).SetBqMode(BqMode::Off);
 
     SETTINGS.ingame.showBQ = false;
     view(1).actionwindow->Close();
@@ -853,15 +872,20 @@ BOOST_FIXTURE_TEST_CASE(OneHudToggleWritesAllThreeSettingsAtOnce, PadViewFixture
     const bool oldNames = SETTINGS.ingame.showNames;
     const bool oldProd = SETTINGS.ingame.showProductivity;
 
+    // WELLE 14: gemessen wird das an der HAUPTANSICHT, denn seit Befund K3 schreibt nur sie
+    // ueberhaupt (GameWorldView::persistsHudSettings_). Der Mechanismus selbst ist unveraendert
+    // und der Grund fuer forcedBqMode_ damit auch - er wird hier weiter festgehalten.
     SETTINGS.ingame.showBQ = false;
-    gwv(1).ToggleShowBQ(); // ausdruecklicher Wille eines Menschen - der DARF gespeichert werden
+    gwv(0).SetBqMode(BqMode::Off);
+    gwv(0).ToggleShowBQ(); // ausdruecklicher Wille eines Menschen - der DARF gespeichert werden
     BOOST_TEST(SETTINGS.ingame.showBQ == true);
 
     // Jemand stellt die Einstellung von aussen zurueck ...
     SETTINGS.ingame.showBQ = false;
     // ... und ein Umschalter, der mit der Bauhilfe GAR NICHTS zu tun hat, schreibt sie wieder.
-    gwv(1).ToggleShowNames();
+    gwv(0).ToggleShowNames();
     BOOST_TEST(SETTINGS.ingame.showBQ == true);
+    gwv(0).SetBqMode(BqMode::Off);
 
     SETTINGS.ingame.showBQ = oldBQ;
     SETTINGS.ingame.showNames = oldNames;

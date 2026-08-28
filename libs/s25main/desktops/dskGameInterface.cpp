@@ -95,19 +95,11 @@
 #include "s25util/Log.h"
 #include <glad/glad.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <utility>
 
 namespace {
-enum
-{
-    ID_btMap,
-    ID_btOptions,
-    ID_btConstructionAid,
-    ID_btPost,
-    ID_txtNumMsg
-};
-
 /// Size of buttons on lower bar
 constexpr Extent btSize = Extent(37, 32);
 /// Offsets of the buttons relative to the "border" graphics on the lower bar
@@ -210,6 +202,13 @@ std::vector<std::unique_ptr<PlayerView>> dskGameInterface::CreateViews(const uns
     for(unsigned i = 0; i < playerIds.size(); ++i)
     {
         result.push_back(std::make_unique<PlayerView>(i, playerIds[i], world, viewports[i]));
+        // BEFUND K3 der Welle 14: die ini gehoert dem HAUPTSITZPLATZ. Jede weitere Ansicht ist
+        // ein zweiter Mensch am selben Rechner; seine Anzeigewahl gilt fuer diese Partie und
+        // nicht fuer die naechste des Nachbarn. Begruendung an GameWorldView::persistsHudSettings_.
+        // Fuer Einzelspieler, Replay und Netzwerkpartie entsteht genau eine Ansicht - dieser
+        // Zweig laeuft dort nie, und es aendert sich nichts.
+        if(i != 0)
+            result.back()->GetView().StopPersistingHudSettings();
         if(startZoom != 1.f) //-V550
             result.back()->GetView().SetZoomFactor(startZoom, false);
     }
@@ -678,6 +677,13 @@ void dskGameInterface::ToggleConstructionAidFor(PlayerView& view)
     // sieht den Wert nie - der Determinismus des Lockstep ist nicht beruehrt. Genau deshalb
     // darf dieser Schalter ueberhaupt am Fensterknopf haengen und braucht keinen Kommandopfad.
     view.GetView().ToggleShowBQ();
+}
+
+void dskGameInterface::CycleConstructionAidFor(PlayerView& view)
+{
+    // Ebenfalls reine Anzeige - GameWorldView::bqMode_ wird ausschliesslich im Zeichner gelesen
+    // (ShouldDrawConstructionAid). Kein GameCommand, kein Netzverkehr, kein Simulationszustand.
+    view.GetView().CycleBqMode();
 }
 
 void dskGameInterface::ToggleNamesAndProductivityFor(PlayerView& view)
@@ -1556,7 +1562,42 @@ void dskGameInterface::RefreshBrief(PlayerView& view)
     // Bedingung, unter der PadOpenActionWindow oeffnet statt abzulehnen, und tabs.setflag die,
     // unter der iwAction seinen Knopf "Fahne setzen" ueberhaupt anbietet.
     const ActionOptions opts = ComputeActionOptions(view, pt);
-    keys.canOpenActionMenu = opts.hasAction() || opts.tradeWarehouse != nullptr;
+    // BEFUND K5 DER WELLE 14: die Leiste sagte "A Aktionen", der Klartextkasten im selben Bild
+    // "Drueck A fuer das Baumenue". Zwei Woerter fuer denselben Knopf, und der Auftraggeber ist
+    // Anfaenger. GEMESSEN stand dieselbe Beschriftung in fuenf Lagen; ein globales Umbenennen
+    // auf "Baumenue" waere in vier davon eine NEUE Luege gewesen.
+    //
+    // Also wird die Beschriftung AUFGEFAECHERT, und zwar aus DIESER ActionOptions - derselben,
+    // aus der PadOpenActionWindow gleich entscheidet, welches Fenster wirklich aufgeht. Kein
+    // zweites Regelwerk, keine abgeschriebene Bedingung.
+    //
+    // ZWEI ENTSCHEIDUNGEN, die hier ausgesprochen gehoeren:
+    //  - `setflag` zaehlt fuer die Benennung NICHT mit. Dieselbe Leiste bietet dafuer schon X an
+    //    ("X Flagge"); die Flagge waere sonst zweimal versprochen, einmal davon unter falschem
+    //    Namen. Auf einem reinen Flaggenplatz bleibt es deshalb bei "Aktionen" - dort erwaehnt
+    //    der Kasten A ohnehin nicht, und DIESER Befund gehoert einer eigenen Runde.
+    //  - Sind MEHRERE Handlungen zugleich moeglich, bleibt "Aktionen" stehen. Das ist keine
+    //    Unschaerfe, sondern die einzige Beschriftung, die dann nicht luegt.
+    if(opts.tradeWarehouse)
+        keys.actionMenu = brief::ActionMenuKind::Trade;
+    else if(opts.hasAction())
+    {
+        const bool build = opts.tabs.build;
+        const bool road = opts.tabs.cutroad || opts.tabs.upgradeRoad;
+        const bool attack = opts.tabs.attack || opts.tabs.sea_attack;
+        const bool flag = opts.tabs.flag;
+        const unsigned n = unsigned(build) + unsigned(road) + unsigned(attack) + unsigned(flag);
+        if(n != 1u)
+            keys.actionMenu = brief::ActionMenuKind::Generic;
+        else if(build)
+            keys.actionMenu = brief::ActionMenuKind::Build;
+        else if(road)
+            keys.actionMenu = brief::ActionMenuKind::Road;
+        else if(attack)
+            keys.actionMenu = brief::ActionMenuKind::Attack;
+        else
+            keys.actionMenu = brief::ActionMenuKind::Flag;
+    }
     keys.canPlaceFlag = opts.tabs.setflag;
     keys.canOpenObjectWindow = CanOpenObjectWindow(view, pt);
     // Der Wasserweg haengt an GENAU derselben Bedingung wie PadStartRoad(waterRoad = true):
@@ -3443,12 +3484,31 @@ std::vector<FocusPath::Candidate> dskGameInterface::RingCandidates(const PlayerV
 std::vector<Window*> dskGameInterface::RingPageCtrls(const PlayerView& view, unsigned& numPages)
 {
     const std::vector<FocusPath::Candidate> all = RingCandidates(view);
-    numPages = std::max(1u, (static_cast<unsigned>(all.size()) + padring::Ring::SectorsPerPage - 1)
-                              / padring::Ring::SectorsPerPage);
+    const auto n = static_cast<unsigned>(all.size());
+    numPages = std::max(1u, (n + padring::Ring::SectorsPerPage - 1) / padring::Ring::SectorsPerPage);
     const unsigned page = std::min(view.GetRing().GetPage(), numPages - 1);
-    const unsigned begin = page * padring::Ring::SectorsPerPage;
+    // --- BEFUND B3 DER ZWEITEN WELLE-14-RUNDE, gemessen ---------------------------------------
+    //
+    // Hier wurde in vollen Achtergruppen geschnitten, und der REST bekam eine eigene Seite. Am
+    // Bauring der Huetten (gemessen 9 Eintraege) hiess das: Seite 1 mit acht Sektoren, Seite 2
+    // mit GENAU EINEM. Ein Ring mit einem Sektor ist kein Ring - er ist ein Kreis mit einem Knopf
+    // darin, und der Spieler hat dafuer einmal geblaettert.
+    //
+    // JETZT WIRD GLEICHMAESSIG VERTEILT: aus 9 werden 5 und 4 statt 8 und 1. Die SEITENZAHL
+    // aendert sich dabei nicht (sie bleibt die Obergrenze von n/8), also aendert sich auch an den
+    // Blaetterachsen, an der Punktreihe und an der Leiste nichts - es ist ausschliesslich die
+    // Frage, wo geschnitten wird. Dieselbe Ueberlegung, aus der LayoutRingDots seine Reihen
+    // gleichmaessig fuellt, statt die letzte verhungern zu lassen.
+    //
+    // WAS DAS NICHT HEILT (gemessen, und deshalb hier benannt): ein Reiter, der von sich aus nur
+    // EINEN Eintrag hat - der Flaggenreiter des Aktionsfensters hat gemessen genau einen -, bleibt
+    // ein Ring mit einem Sektor. Das ist der Bestand des Fensters und keine Frage der Aufteilung.
+    const unsigned base = n / numPages;
+    const unsigned rem = n % numPages;
+    const unsigned begin = page * base + std::min(page, rem);
+    const unsigned count = base + (page < rem ? 1u : 0u);
     std::vector<Window*> out;
-    for(unsigned i = begin; i < all.size() && i < begin + padring::Ring::SectorsPerPage; ++i)
+    for(unsigned i = begin; i < all.size() && i < begin + count; ++i)
         out.push_back(all[i].ctrl);
     return out;
 }
@@ -3591,6 +3651,145 @@ void dskGameInterface::LayoutRingLabel(const RingLayout& layout, RingEntry& e)
     e.labelLines = std::move(lines);
 }
 
+// DIE PUNKTREIHEN - eine reine Rechnung, und die einzige Stelle, an der die Lage der Punkte
+// entsteht (der Zeichner liest sie nur ab).
+//
+// WOHIN: in die MITTE. Sie ist gemessen vollstaendig leer - am Zielgeraet (4K, Fernsehmodus,
+// vier Ansichten) ein Kreis von 123 View-Punkten Durchmesser - und sie ist ausdruecklich
+// funktionsfrei (der "nevermind"-Bereich, padring::Ring). Beschriftungen stehen seit Phase 13
+// AUSSERHALB von rOuter; mit dem Text kollidiert hier also nichts.
+//
+// EINE REIHE JE ACHSE, von oben nach unten in der Lesereihenfolge: zuerst die aeusseren Reiter,
+// dann die inneren, zuletzt die Seiten. Das ist genau die Ordnung, in der RingTurnPage
+// weiterzaehlt, nur von der anderen Seite gelesen - das Zaehlwerk dreht innen zuerst.
+//
+// WARUM NICHT EINE EINZIGE, DURCHLAUFENDE REIHE (die Instagram-Metapher in Reinform): sie liesse
+// sich nicht ohne Nebenwirkung berechnen. Die Eintraege eines NICHT gewaehlten Reiters sind
+// unsichtbar (ctrlTab::SetSelection macht die Gruppe unsichtbar), und FocusPath::Collect sammelt
+// nur Sichtbares. Wie viele Seiten der Nachbarreiter haette, waere also erst zu erfahren, indem
+// man ihn waehrend des Zeichnens umschaltet - ein Zustandswechsel im Layout. Deshalb bleibt die
+// Reiterreihe eine EIGENE Reihe.
+//
+// WAS DAVON STETIG IST UND WAS NICHT - GEMESSEN, nicht behauptet (Befund B2 der zweiten
+// Welle-14-Runde; die vorige Runde hat hier schlicht "die Instagram-Stetigkeit ist hergestellt"
+// geschrieben, und der Nachpruefer hat gemessen, dass das zu viel gesagt war):
+//   STETIG IST: solange die Achsenliste ihre GESTALT behaelt, bleibt jede Reihe genau so lang,
+//   wie sie war, und jeder Punkt behaelt seine Stelle in der Reihe - es wechselt nur, welcher
+//   hervorgehoben ist. Genau das hat der Auftraggeber gemeint ("bei Instagram BLEIBT die
+//   Punktzahl stehen, waehrend nur der hervorgehobene Punkt wandert"), und genau das bewacht
+//   testPadRing::WhileTheAxesKeepTheirShapeEveryDotKeepsItsPlaceAndOnlyTheHighlightMoves.
+//   NICHT STETIG IST: die GESAMTZAHL der Punkte, wenn eine ganze ACHSE die Liste betritt oder
+//   verlaesst. Gemessen am Bauring: 8 -> 6, weil der Burgreiter mit 4 Eintraegen nur EINE Seite
+//   hat und die Seitenachse damit wegfaellt; 6 -> 3, weil der Flaggenreiter gar keinen inneren
+//   Reiter traegt. Das ist der BESTAND des Fensters. Es liesse sich nur beheben, indem man
+//   entweder Reihen mit einem einzigen Punkt zeichnet (Rauschen statt Anzeige) oder die Nachbarn
+//   waehrend des Zeichnens umschaltet (siehe oben) - beides ist schlechter als der Sprung.
+//   AUCH NICHT STETIG, und das ist eine Frage der RINGLAGE und nicht der Punkte: die ganze
+//   Ringmitte wandert beim Blaettern senkrecht um bis zu 28 Punkte, weil der Klartextkasten aus
+//   Phase 9 je nach gewaehltem Eintrag verschieden viele Zeilen traegt und LayoutRing den Ring
+//   ueber diesen Kasten setzt. Gemessen und hier benannt; angefasst wird es nicht, denn es
+//   beruehrt den Kasten aus Phase 9 und den ganzen Ring, nicht die Seitenanzeige.
+//
+// WIE GROSS - MIT DECKEL UND MIT BODEN (Befund K2 der Welle 14):
+//   Deckel 28 View-Punkte: am Zielgeraet 56 physische Pixel und 17,8 mm, also im Komfortband
+//   von TV-RECHERCHE.md (16,5-20,3 mm aus drei Metern).
+//   Boden = Schrifthoehe: NormalFont ist 14 View-Punkte hoch und liegt damit als SCHRIFT schon
+//   unter dem Komfortwert (10,2 Bogenminuten). Ein Punkt unter Schriftgroesse ist auf dem Sofa
+//   nicht mehr zu zaehlen. Die Welle-14-Formel hatte nur den Deckel; ihre Zusicherung
+//   ("groesser als die Schrift") war deshalb keine Schranke, sondern eine Beobachtung, die ab
+//   sechs Seiten am Zielgeraet und ab vier in der Testaufloesung nicht mehr galt.
+// Was dann nicht mehr in eine Reihe passt, wird UMGEBROCHEN und nicht verkleinert - dieselbe
+// Entscheidung wie bei den Tuerschildern des Rings und aus demselben Grund (TV-RECHERCHE.md 6.2:
+// im Splitscreen WENIGER Bedienoberflaeche, nicht kleinere).
+//
+// DIE EINE GRENZE, DIE DABEI FALLEN KANN: bei sehr vielen Achsen auf einem sehr kleinen Ring
+// wird der Block hoeher als der Innenkreis und liegt dann ueber der Sektorfarbe. Das ist die
+// Entartung und nicht der Normalfall - am Zielgeraet passt er gemessen in die leere Mitte -, und
+// zwischen "unsichtbarer Punkt" und "Punkt auf der Sektorfarbe" ist die Wahl nicht schwer.
+std::vector<dskGameInterface::RingPageDot>
+dskGameInterface::LayoutRingDots(const Position center, const float rInner, const std::vector<RingPageAxis>& axes)
+{
+    std::vector<RingPageDot> out;
+    if(axes.empty() || rInner <= 0.f)
+        return out;
+    constexpr float dotMax = 28.f;
+    const auto dotMin = static_cast<float>(NormalFont->getHeight());
+    // 0,9 des Innendurchmessers - der Rest bleibt als Luft zum Sektorrand stehen.
+    const float usableW = 1.8f * rInner;
+    unsigned widest = 1;
+    for(const RingPageAxis& a : axes)
+        widest = std::max(widest, a.count);
+    // Eine gemeinsame Groesse fuer ALLE Reihen: zwei verschieden grosse Punktsorten uebereinander
+    // laesen sich als Rangfolge, die es nicht gibt.
+    float d = std::max(dotMin, std::min(dotMax, usableW / (1.5f * static_cast<float>(widest) - 0.5f)));
+    // Wie viele Punkte passen nebeneinander? d * (1,5k - 0,5) <= usableW.
+    const auto rowWidthOf = [usableW](const float dia) {
+        return std::max(1u, static_cast<unsigned>((usableW / dia + 0.5f) / 1.5f));
+    };
+    const auto rowsOf = [&axes](const unsigned perRow) {
+        unsigned rows = 0;
+        for(const RingPageAxis& a : axes)
+            rows += (a.count + perRow - 1) / perRow;
+        return rows;
+    };
+    // DER BLOCK MUSS IN DEN KREIS, NICHT NUR JEDE REIHE IN IHRE BREITE. Der aeusserste Punkt ist
+    // der einer Ecke; sein Mittelpunkt liegt bei 0,75*d*(k-1) seitlich und 0,75*d*(rows-1) hoch,
+    // dazu sein eigener Halbmesser d/2. Daraus faellt die groesste zulaessige Punktgroesse
+    // geradeheraus - und weil ein kleinerer Punkt MEHR in eine Reihe laesst und damit WENIGER
+    // Reihen braucht, laeuft die Rechnung in die richtige Richtung und steht nach wenigen
+    // Durchgaengen. Der Boden bleibt der Boden: lieber ein Punkt auf der Sektorfarbe als einer,
+    // den auf drei Metern niemand sieht.
+    for(int pass = 0; pass < 4; ++pass)
+    {
+        const unsigned k = rowWidthOf(d);
+        const unsigned rows = rowsOf(k);
+        const float dx = 0.75f * static_cast<float>(std::min(k, widest) - 1u);
+        const float dy = 0.75f * static_cast<float>(rows - 1u);
+        const float fit = rInner / (std::sqrt(dx * dx + dy * dy) + 0.5f);
+        const float next = std::max(dotMin, std::min(d, fit));
+        if(next >= d)
+            break;
+        d = next;
+    }
+    const float pitch = 1.5f * d; // Punkt plus halbe Luecke
+    const unsigned perRow = rowWidthOf(d);
+    const unsigned totalRows = rowsOf(perRow);
+    float y = static_cast<float>(center.y) - static_cast<float>(totalRows) * pitch / 2.f + pitch / 2.f;
+
+    for(unsigned ax = 0; ax < axes.size(); ++ax)
+    {
+        const RingPageAxis& a = axes[ax];
+        const unsigned rows = (a.count + perRow - 1) / perRow;
+        // Gleichmaessig verteilen statt die letzte Reihe verhungern zu lassen.
+        const unsigned inRow = (a.count + rows - 1) / rows;
+        for(unsigned r = 0; r < rows; ++r)
+        {
+            const unsigned first = r * inRow;
+            const unsigned n = std::min(inRow, a.count - first);
+            const float total = static_cast<float>(n) * d + static_cast<float>(n - 1) * (d * 0.5f);
+            float x = static_cast<float>(center.x) - total / 2.f;
+            for(unsigned i = 0; i < n; ++i)
+            {
+                RingPageDot dot;
+                dot.axis = ax;
+                dot.current = (first + i == a.index);
+                // Jeder Punkt bekommt dieselbe SPALTE der Breite d; der kleinere sitzt darin
+                // mittig. Sonst wanderte die Reihe beim Blaettern seitlich, und der Spieler saehe
+                // eine Bewegung, die nichts bedeutet.
+                const float dia = dot.current ? d : d * 0.64f;
+                const auto side = static_cast<unsigned>(std::lround(dia));
+                dot.box = Rect(Position(static_cast<int>(std::lround(x + d / 2.f - dia / 2.f)),
+                                        static_cast<int>(std::lround(y - dia / 2.f))),
+                               Extent(side, side));
+                out.push_back(dot);
+                x += d * 1.5f;
+            }
+            y += pitch;
+        }
+    }
+    return out;
+}
+
 dskGameInterface::RingLayout dskGameInterface::LayoutRing(const PlayerView& view) const
 {
     RingLayout out;
@@ -3636,19 +3835,57 @@ dskGameInterface::RingLayout dskGameInterface::LayoutRing(const PlayerView& view
     // Viewport ist es der Unterschied zwischen einem umgebrochenen Wort und einem ganzen.
     // Kleiner schreiben waere die eine Loesung, die hier nicht geht - der Spieler sitzt drei
     // Meter vor dem Bild (TV-RECHERCHE.md 6.2: im Splitscreen WENIGER UI, nicht kleineres).
+    //
+    // BEFUND K4 DER WELLE 14, gemessen: 0,34 war eine ZAHL AUS EINER MESSUNG VON DAMALS - "das
+    // laengste deutsche Tuerschild (Hauptauswahl, 144 Punkte) passt auf einem 400 Punkte breiten
+    // Testviewport". Die Welle 14 hat ein laengeres Schild dazugestellt ("Bauhilfe: am Zeiger"),
+    // und prompt brach es bei 1280x720 mit vier Ansichten um: freie Flaeche 576, Ring 195, also
+    // 184 Punkte je Seite fuer ein Wort, das mehr braucht. Eine feste Zahl kann das nicht wissen.
+    //
+    // JETZT WIRD GEFRAGT STATT GERATEN: der Ring nimmt nur so viel Breite, dass das LAENGSTE
+    // wirklich vorhandene Schild dieser Seite daneben in EINE Zeile passt - mit derselben Schrift
+    // und demselben Abstand, mit denen LayoutRingLabel gleich rechnet. Das ist der Satz
+    // "der Ring weicht seinem Text" als Rechnung statt als Absicht.
+    //
+    // ZWEI GRENZEN bleiben: nach oben die bisherigen 0,34 (der Ring wird durch diese Aenderung
+    // nirgends GROESSER, auf dem Zielgeraet aendert sich gemessen gar nichts), nach unten 0,20 -
+    // ein Ring, der fuer ein sehr langes Wort auf einen Faden schrumpft, waere die schlechtere
+    // Antwort als ein Umbruch. Er ist die einzige Tuer zu den Symbolschaltern.
     bool anyText = false;
+    int maxLabelW = 0;
     for(const Window* const ctrl : ctrls)
     {
-        if(!ctrl->GetRingIcon() && !ctrl->GetRingLabel().empty())
-            anyText = true;
+        if(ctrl->GetRingIcon())
+            continue;
+        const std::string label = ctrl->GetRingLabel();
+        if(label.empty())
+            continue;
+        anyText = true;
+        maxLabelW = std::max(maxLabelW, static_cast<int>(NormalFont->getWidth(label)));
     }
-    const float widthShare = anyText ? 0.34f : 0.5f;
-    const float diameter =
-      std::min({300.f, 0.85f * static_cast<float>(freeH), widthShare * static_cast<float>(freeW)});
+    // 6 ist der Abstand zwischen Ringkante und Wort (LayoutRingLabel::gap) - dieselbe Zahl,
+    // nicht eine zweite.
+    const float textFit = static_cast<float>(freeW - 2 * (maxLabelW + 6));
+    const float widthLimit =
+      anyText ? std::max(0.20f * static_cast<float>(freeW), std::min(0.34f * static_cast<float>(freeW), textFit)) :
+                0.5f * static_cast<float>(freeW);
+    const float diameter = std::min({300.f, 0.85f * static_cast<float>(freeH), widthLimit});
     out.rOuter = diameter / 2.f;
     // 0,42 laesst innen Platz fuer den Knoten, um den es geht - die Mitte ist bewusst LEER und
     // ohne Aktion (Steam Inputs "nevermind"-Bereich).
     out.rInner = out.rOuter * 0.42f;
+
+    // --- DIE SEITENPUNKTE (Welle 14, Befund 2) ------------------------------------------------
+    //
+    // DER BEFUND, woertlich: "Es waere super, wenn du die einzelnen Seiten sichtbarer machst in
+    // dem Radial Menue. Punkte waere hier super. So wie bei Instagram Slides."
+    //
+    // GEZEIGT WIRD DAS GANZE ZAEHLWERK und nicht nur sein unterstes Rad - das ist die Korrektur
+    // zu Befund K1 der Welle 14. Die Achsen kommen aus DERSELBEN Funktion, aus der die
+    // Tastenhinweisleiste ihr Versprechen zieht (RingPageAxes -> RingHasPages); es gibt keine
+    // zweite Bedingung mehr, die neben der ersten veralten koennte.
+    out.axes = RingPageAxes(view);
+    out.pageDots = LayoutRingDots(out.center, out.rInner, out.axes);
 
     const std::vector<padring::Sector> sectors = padring::MakeSectors(static_cast<unsigned>(ctrls.size()));
     const Window* const focused = view.GetFocus().GetFocused();
@@ -3743,6 +3980,43 @@ void dskGameInterface::DrawRing(const PlayerView& view) const
               }
           }
       });
+    // --- DIE SEITENPUNKTE -----------------------------------------------------------------
+    //
+    // KEINE VERZWEIGUNG UND KEINE RECHNUNG: die Schleife laeuft ueber genau das, was LayoutRing
+    // hingelegt hat, und liest Kasten und Farbe ab. Ist die Liste leer (eine Seite), zeichnet
+    // sie nichts.
+    //
+    // GEZEICHNET ALS DREIECKSFAECHER und nicht als Streifen - zwei gemessene Gruende:
+    //  1. glDrawArrays ist im DummyRenderer gemockt und der MODUS ist ein Parameter. Ein
+    //     Nachweis kann Mittelpunkt, Radius und Farbe jedes Punktes zurueckrechnen, genau wie
+    //     testPadRing es fuer die Sektoren tut.
+    //  2. Der vorhandene Sektornachweis filtert auf GL_TRIANGLE_STRIP und verlangt, dass es
+    //     genau so viele davon gibt wie Ringeintraege. Punkte als Streifen machten ihn rot,
+    //     ohne dass am Ring etwas falsch waere.
+    // Sonst dieselbe Folge wie beim Sektor (BindTexture(0) statt glDisable - der ist im
+    // Testprozess ein Nullzeiger).
+    for(const RingPageDot& dot : layout.pageDots)
+    {
+        constexpr int steps = 16;
+        const PointF c(static_cast<float>(dot.box.left) + static_cast<float>(dot.box.getSize().x) / 2.f,
+                       static_cast<float>(dot.box.top) + static_cast<float>(dot.box.getSize().y) / 2.f);
+        const float r = static_cast<float>(dot.box.getSize().x) / 2.f;
+        verts.clear();
+        verts.push_back(c);
+        for(int i = 0; i <= steps; ++i)
+        {
+            const auto a = 2.f * 3.14159265358979f * static_cast<float>(i) / steps;
+            verts.push_back(PointF(c.x + r * std::cos(a), c.y + r * std::sin(a)));
+        }
+        tex.assign(verts.size(), PointF(0.f, 0.f));
+        const unsigned color = dot.current ? ringDotCurrentColor : ringDotIdleColor;
+        glVertexPointer(2, GL_FLOAT, 0, verts.data());
+        glTexCoordPointer(2, GL_FLOAT, 0, tex.data());
+        VIDEODRIVER.BindTexture(0);
+        glColor4ub(static_cast<GLubyte>(GetRed(color)), static_cast<GLubyte>(GetGreen(color)),
+                   static_cast<GLubyte>(GetBlue(color)), static_cast<GLubyte>(GetAlpha(color)));
+        glDrawArrays(GL_TRIANGLE_FAN, 0, static_cast<GLsizei>(verts.size()));
+    }
     // Die Farbe zuruecksetzen: glColor ist globaler Zustand.
     glColor4ub(255, 255, 255, 255);
 }
@@ -3772,24 +4046,43 @@ void collectTabs(Window& wnd, std::vector<ctrlTab*>& out)
 }
 } // namespace
 
-bool dskGameInterface::RingHasMultipleTabs(const PlayerView& view)
+std::vector<dskGameInterface::RingPageAxis> dskGameInterface::RingPageAxes(const PlayerView& view)
 {
+    std::vector<RingPageAxis> out;
     std::vector<ctrlTab*> tabs;
     if(Window* const root = view.GetFocus().GetRoot())
         collectTabs(*root, tabs);
-    for(const ctrlTab* const tab : tabs)
+    // Aussen nach innen - collectTabs steigt in dieser Richtung ab.
+    for(ctrlTab* const tab : tabs)
     {
-        if(tab->GetNumTabs() > 1)
-            return true;
+        const unsigned short numTabs = tab->GetNumTabs();
+        if(numTabs <= 1)
+            continue; // ein einziges Blatt ist nichts zum Blaettern
+        RingPageAxis axis;
+        axis.count = numTabs;
+        axis.tab = tab;
+        for(unsigned short i = 0; i < numTabs; ++i)
+        {
+            if(tab->GetTabIdAt(i) == tab->GetCurrentTab())
+                axis.index = i;
+        }
+        out.push_back(axis);
     }
-    return false;
+    unsigned numPages = 1;
+    RingPageCtrls(view, numPages);
+    if(numPages > 1)
+    {
+        RingPageAxis axis;
+        axis.count = numPages;
+        axis.index = std::min(view.GetRing().GetPage(), numPages - 1);
+        out.push_back(axis);
+    }
+    return out;
 }
 
 bool dskGameInterface::RingHasPages(const PlayerView& view)
 {
-    unsigned numPages = 1;
-    RingPageCtrls(view, numPages);
-    return numPages > 1 || RingHasMultipleTabs(view);
+    return !RingPageAxes(view).empty();
 }
 
 void dskGameInterface::RingTurnPage(PlayerView& view, const int dir)
@@ -3804,49 +4097,87 @@ void dskGameInterface::RingTurnPage(PlayerView& view, const int dir)
     // Befund.
     //
     // GEHEILT WIRD AN DER WIRKUNG, NICHT AN DER LEISTE, und mit DERSELBEN Funktion, aus der die
-    // Leiste ihr `ringHasPages` nimmt (dskGameInterface::RefreshBrief). Damit koennen Hinweis
+    // Leiste ihr `ringHasPages` nimmt (RingPageAxes ueber RingHasPages). Damit koennen Hinweis
     // und Wirkung nicht mehr auseinanderlaufen - sie sind dieselbe Frage.
-    if(!RingHasPages(view))
+    //
+    // --- BEFUND B1 DER ZWEITEN WELLE-14-RUNDE, gemessen ---------------------------------------
+    //
+    // Auf der LETZTEN Stellung ALLER Achsen versprach die Leiste weiter "RB Naechste Seite", und
+    // RB tat nichts. Gemessen am produktiven Weg (Bauring an einem Burgplatz): ab dem sechsten
+    // RB-Druck blieben Achsenstellung, Sektorzahl, Fokus und Punktzahl elf Schritte lang Zeichen
+    // fuer Zeichen gleich. Ursache: dieses Zaehlwerk hatte einen ANSCHLAG. Der Ueberlaufzweig
+    // suchte einen Reiter, der noch weiterkonnte; fand er keinen, setzte er nur noch die
+    // Seitenachse zurueck - und die stand bei einem einseitigen Reiter ohnehin schon auf 0.
+    //
+    // GEWAEHLT: DAS ZAEHLWERK LAEUFT UM (a). Verworfen wurde (b), die Leiste dort RB nicht mehr
+    // nennen zu lassen. Drei gemessene Gruende:
+    //   1. Der Umlauf ist SICHTBAR, und zwar genau durch das, was der Auftraggeber bestellt hat:
+    //      der hervorgehobene Punkt springt vor die erste Stellung zurueck. Der Einwand gegen
+    //      einen Umlauf ("ein Umlauf ohne sichtbares Zeichen verwirrt") trifft diesen Ring also
+    //      nicht - die Punktreihe IST das Zeichen, und sie kommt aus derselben Quelle.
+    //   2. (b) liesse die Leiste beim Blaettern ihren Inhalt wechseln: auf der letzten Stellung
+    //      verschwaende RB und auf der ersten kaeme es wieder. Bei einer Achse mit zwei
+    //      Stellungen flackerte der Hinweis bei JEDEM Druck. Eine Leiste, die sich unter dem
+    //      Daumen umbaut, ist fuer einen Anfaenger auf dem Sofa schwerer zu lesen als eine, die
+    //      steht.
+    //   3. (b) liesse den Anfaenger am Ende des Rings ohne Vorwaertstaste stehen. Er kaeme nur
+    //      noch mit LB weiter - also mit der Taste, die er noch nicht benutzt hat.
+    // Der Umlauf ist ausserdem die EINE Regel statt zweier: RB geht immer einen Schritt weiter,
+    // LB immer einen zurueck, und das gilt auf jeder Stellung.
+    //
+    // EINE Stelle, EINE Quelle: gedreht wird genau die Achsenliste, die auch die Leiste fragt und
+    // die Punkte zeichnen. Der Reiter steht seit B1 IM Achseneintrag (RingPageAxis::tab); die
+    // zweite Reitersuche, die hier stand, ist damit fort.
+    const std::vector<RingPageAxis> axes = RingPageAxes(view);
+    if(axes.empty())
         return;
+    // WELCHES RAD TRAEGT DEN SCHRITT? Das INNERSTE, das ihn ohne Ueberlauf tragen kann - ein
+    // Zaehlwerk, von innen nach aussen gelesen. Das ist woertlich die Reihenfolge von vorher.
+    int carry = static_cast<int>(axes.size()) - 1;
+    for(; carry >= 0; --carry)
+    {
+        const int next = static_cast<int>(axes[carry].index) + dir;
+        if(next >= 0 && next < static_cast<int>(axes[carry].count))
+            break;
+    }
+    const bool wrap = carry < 0; // ALLE Raeder standen am Ende: das Zaehlwerk laeuft um
+    if(wrap)
+    {
+        // Beim Umlauf geht JEDES Reiterrad auf seinen Anfang (bzw. bei LB auf sein Ende). Die
+        // Liste wird dabei nach jedem Schritt NEU gelesen: ein aeusserer Reiter bringt beim
+        // Umschalten andere innere Reiter herbei, und ein Zeiger auf ein Rad von vorher waere
+        // dann ein Rad, das gar nicht mehr im Weg liegt. Die Schleife steht, sobald kein Rad
+        // mehr falsch steht - jeder Durchgang stellt das aeusserste falsche richtig, und ein
+        // einmal richtig stehendes aeusseres Rad wird von keinem inneren mehr verstellt.
+        for(int guard = 0; guard < 8; ++guard)
+        {
+            bool changed = false;
+            for(const RingPageAxis& ax : RingPageAxes(view))
+            {
+                if(!ax.tab)
+                    continue; // die Seitenachse kommt unten, nach dem letzten Reiterwechsel
+                const unsigned target = dir > 0 ? 0u : ax.count - 1u;
+                if(ax.index == target)
+                    continue;
+                ax.tab->SetSelection(static_cast<unsigned short>(target), true);
+                changed = true;
+                break;
+            }
+            if(!changed)
+                break;
+        }
+    } else if(ctrlTab* const tab = axes[carry].tab)
+        tab->SetSelection(static_cast<unsigned short>(static_cast<int>(axes[carry].index) + dir), true);
+
+    // ZULETZT DIE SEITENACHSE, und zwar mit der Stellungszahl des JETZT gewaehlten Reiters -
+    // ein anderer Reiter hat andere Eintraege und damit andere Seiten.
     padring::Ring& ring = view.GetRing();
     unsigned numPages = 1;
     RingPageCtrls(view, numPages);
-    const int next = static_cast<int>(std::min(ring.GetPage(), numPages - 1)) + dir;
-    if(next >= 0 && next < static_cast<int>(numPages))
-    {
-        ring.SetPage(static_cast<unsigned>(next));
-    } else
-    {
-        // Seitenende: der naechste REITER. Ein Zaehlwerk von innen nach aussen - laeuft der
-        // innerste ueber, rueckt der naechstaeussere weiter. Dass es UEBERHAUPT etwas zu
-        // blaettern gibt, ist oben schon entschieden (RingHasPages); ein Ring ohne Ausweg waere
-        // die Falle, die Phase 11 und 12 je einmal gebaut haben - der Ausweg ist hier aber B
-        // bzw. Back und nicht die Schulter.
-        std::vector<ctrlTab*> tabs;
-        if(Window* const root = view.GetFocus().GetRoot())
-            collectTabs(*root, tabs);
-        for(auto it = tabs.rbegin(); it != tabs.rend(); ++it)
-        {
-            ctrlTab& tab = **it;
-            const unsigned short numTabs = tab.GetNumTabs();
-            if(numTabs <= 1)
-                continue;
-            unsigned short cur = 0;
-            for(unsigned short i = 0; i < numTabs; ++i)
-            {
-                if(tab.GetTabIdAt(i) == tab.GetCurrentTab())
-                    cur = i;
-            }
-            const int nextTab = static_cast<int>(cur) + dir;
-            if(nextTab < 0 || nextTab >= static_cast<int>(numTabs))
-                continue; // dieser Reiter laeuft ueber: der naechstaeussere ist dran
-            tab.SetSelection(static_cast<unsigned short>(nextTab), true);
-            break;
-        }
-        unsigned newPages = 1;
-        RingPageCtrls(view, newPages);
-        ring.SetPage(dir > 0 ? 0u : newPages - 1);
-    }
+    const bool pageCarries = !wrap && !axes[carry].tab;
+    const unsigned page = pageCarries ? static_cast<unsigned>(static_cast<int>(axes[carry].index) + dir) :
+                                        (dir > 0 ? 0u : numPages - 1u);
+    ring.SetPage(std::min(page, numPages - 1u));
     // Nach dem Blaettern steht der Fokus auf dem ERSTEN Eintrag der neuen Seite - also oben.
     // Der Zeiger steht dabei wieder in der Mitte (Ring::SetPage), denn eine stehengebliebene
     // Zielrichtung waere eine Auswahl, die der Spieler auf dieser Seite nie getroffen hat.
@@ -4001,11 +4332,11 @@ void dskGameInterface::EnterWatchOnly(PlayerView& view)
     // Bildschirmelementen sind ganze zwei geschaltet, und der Klartextkasten (bis zu neun
     // Zeilen, also ein Viertel der Hoehe einer Viertel-Ansicht) hatte gar keinen Schalter.
     GameWorldView& gwv2 = view.GetView();
-    view.watchOnlySaved.showBQ = gwv2.IsShowingBQ();
+    view.watchOnlySaved.showBQ = gwv2.GetBqMode();
     view.watchOnlySaved.showNames = gwv2.IsShowingNames();
     view.watchOnlySaved.showProductivity = gwv2.IsShowingProductivity();
     if(gwv2.IsShowingBQ())
-        gwv2.ToggleShowBQ(); // setzt zugleich bqExplicitlyOff_, sonst kaeme sie beim naechsten A zurueck
+        gwv2.SetBqMode(BqMode::Off); // setzt zugleich bqExplicitlyOff_, sonst kaeme sie beim naechsten A zurueck
     if(gwv2.IsShowingNames())
         gwv2.ToggleShowNames();
     if(gwv2.IsShowingProductivity())
@@ -4024,8 +4355,10 @@ void dskGameInterface::LeaveWatchOnly(PlayerView& view)
     view.SetWatchOnly(false);
     // GENAU die Werte von vorher zurueck. Der Kasten verspricht "B bringt alles zurueck", und
     // ein Hinweis, der luegt, ist schlimmer als keiner.
-    if(gwv2.IsShowingBQ() != view.watchOnlySaved.showBQ)
-        gwv2.ToggleShowBQ();
+    // GENAU der Modus von vorher, nicht nur "war an" - sonst kaeme ein Spieler, der bei "nur am
+    // Zeiger" stand, mit "alles" zurueck.
+    if(gwv2.GetBqMode() != view.watchOnlySaved.showBQ)
+        gwv2.SetBqMode(view.watchOnlySaved.showBQ);
     if(gwv2.IsShowingNames() != view.watchOnlySaved.showNames)
         gwv2.ToggleShowNames();
     if(gwv2.IsShowingProductivity() != view.watchOnlySaved.showProductivity)
