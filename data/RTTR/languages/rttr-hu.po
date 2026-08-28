@@ -2202,6 +2202,9 @@ msgstr "Itt találod birodalmad teljes árukészletének és összes lakosának 
 msgid "Hi, I'm an artifical player and I'm not very good yet!"
 msgstr "Szia, én egy mesterséges játékos vagyok, és még nem vagyok túl ügyes!"
 
+msgid "Hides every symbol and every text of this seat, so you can just look at your land. The camera and the zoom keep working. B brings everything back."
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwLobbyServerInfo.cpp:37
 msgid "Host:"
 msgstr "Kiszolgáló:"
@@ -2414,6 +2417,9 @@ msgstr "Ugrás kész (%1$.3g másodperc)."
 msgid "Jump to X:Y"
 msgstr "Ugrás ide: X:Y"
 
+msgid "Just watch"
+msgstr ""
+
 #: libs/s25main/input/PlayerBrief.cpp:125
 msgid "Keep moving until this line tells you that something fits."
 msgstr ""
@@ -2450,6 +2456,9 @@ msgstr "Nyelv:"
 #, fuzzy
 msgid "Leatherworks"
 msgstr "Fémműves műhely"
+
+msgid "Left stick"
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwPlayReplay.cpp:54
 msgid "Length"
@@ -3027,6 +3036,12 @@ msgstr ""
 msgid "Names and output: on"
 msgstr ""
 
+msgid "Names: off"
+msgstr ""
+
+msgid "Names: on"
+msgstr ""
+
 #: libs/s25main/addons/AddonCatapultGraphics.h:19
 msgid "Nation-specific catapult graphics"
 msgstr "Nemzet-specifikus katapultgrafikák"
@@ -3384,6 +3399,12 @@ msgstr "Vázlatos térkép"
 msgid "Output mineral"
 msgstr "Kimenő ásvány"
 
+msgid "Output: off"
+msgstr ""
+
+msgid "Output: on"
+msgstr ""
+
 #: libs/s25main/desktops/dskSelectMap.cpp:106
 msgid "Own maps"
 msgstr "Saját térképek"
@@ -3516,6 +3537,9 @@ msgstr "Add meg a játék nevét"
 msgid "Please wait..."
 msgstr "Kis türelmet..."
 
+msgid "Point"
+msgstr ""
+
 msgid "Point your allies here"
 msgstr ""
 
@@ -3553,6 +3577,9 @@ msgid "Presses wine, which only the temple uses."
 msgstr ""
 
 msgid "Previous"
+msgstr ""
+
+msgid "Previous page"
 msgstr ""
 
 #: libs/s25main/gameData/JobConsts.cpp:40
@@ -4355,6 +4382,9 @@ msgstr "Kő"
 msgid "Stop storage"
 msgstr "Raktározás leállítása"
 
+msgid "Stop watching"
+msgstr ""
+
 #: libs/s25main/gameData/BuildingConsts.cpp:39
 msgid "Storehouse"
 msgstr "Raktár"
@@ -4853,6 +4883,9 @@ msgstr "A törzsfőnökök összegyűltek az asztal körül..."
 msgid "Tsunami"
 msgstr "Cunami"
 
+msgid "Turn"
+msgstr ""
+
 #: libs/s25main/desktops/dskSelectMap.cpp:78
 msgid "Type"
 msgstr "Típus"
@@ -5146,6 +5179,9 @@ msgstr ""
 msgid "What you can do with the road under the pointer."
 msgstr ""
 
+msgid "What you see on the map"
+msgstr ""
+
 #: libs/s25main/desktops/dskOptions.cpp:298
 msgid "Window pinning"
 msgstr "Ablak rögzítése"
@@ -5193,6 +5229,12 @@ msgid "Writes the name and the output of every building onto the map."
 msgstr ""
 
 msgid "Writes the name and the workload above every building. The workload tells you which of your works stand idle."
+msgstr ""
+
+msgid "Writes the name of every building onto the map. Useful while you are still learning which building is which."
+msgstr ""
+
+msgid "Writes the output of every building onto the map: how busy it is, how many soldiers are inside, how far a construction site has come."
 msgstr ""
 
 #: libs/s25main/network/ClientError.cpp:14

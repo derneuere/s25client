@@ -514,6 +514,32 @@ const char* KeyLabel(const KeyAction action)
         // von Knopf zu Knopf wandert - das einzige, was sich dabei bewegt.
         case KeyAction::MoveFocus: return _("Move");
         case KeyAction::CancelChoice: return _("Discard");
+        // "Turn" steht im Katalog bisher NICHT (nachgesehen).
+        case KeyAction::TurnRing: return _("Turn");
+        // "Next" und "Previous" stehen schon oben fuer die FOKUSSTATION. Im Ring geht es um
+        // die SEITE, und ein Spieler, der beide Zustaende nacheinander sieht, muss den
+        // Unterschied lesen koennen - deshalb hier eigene Woerter.
+        case KeyAction::RingNextPage: return _("Next page");
+        case KeyAction::RingPrevPage: return _("Previous page");
+        // B schliesst im Ring wirklich das Fenster dahinter (RingOnPadButton -> CloseRing mit
+        // closeWindow), nicht nur den Fokus. Also dasselbe Wort wie beim Fensterschliessen.
+        case KeyAction::CloseRing: return _("Close it");
+        case KeyAction::LeaveWatchOnly: return _("Stop watching");
+        // Was der Stick im Ring TUT, ist zeigen - der Fokus faellt auf den Sektor, in den er
+        // zeigt (dskGameInterface::RingSyncFocus). "Waehlen" waere A und damit falsch.
+        case KeyAction::AimRing: return _("Point");
+    }
+    return "";
+}
+
+const char* KeyInputLabel(const KeyHint& hint)
+{
+    switch(hint.input)
+    {
+        case KeyInput::Button: return PadButtonLabel(hint.button);
+        // NICHT "LeftStick": das ist in PadButtonLabel der Stickklick (L3). Hier ist die ACHSE
+        // gemeint, und ein Spieler, der beides nacheinander liest, muss den Unterschied sehen.
+        case KeyInput::LeftStickAxis: return _("Left stick");
     }
     return "";
 }
@@ -535,7 +561,7 @@ std::string KeyLine(const std::vector<KeyHint>& keys)
         {
             if(cur != it)
                 out += '/';
-            out += PadButtonLabel(cur->button);
+            out += KeyInputLabel(*cur);
         }
         out += ' ';
         out += KeyLabel(it->action);
@@ -548,9 +574,58 @@ std::vector<KeyHint> HintsFor(const KeyContext& ctx)
 {
     std::vector<KeyHint> out;
     const auto add = [&out](const PadButton button, const KeyAction action) {
-        out.push_back(KeyHint{button, action});
+        out.push_back(KeyHint{button, action, KeyInput::Button});
+    };
+    const auto addStick = [&out](const KeyAction action) {
+        out.push_back(KeyHint{PadButton{}, action, KeyInput::LeftStickAxis});
     };
 
+    // BEIM ZUSCHAUEN ist genau ein Knopf belegt - dskGameInterface::OnPadButton kehrt fuer
+    // jeden anderen wirkungslos zurueck. Diese eine Zeile IST der sichtbare Ausgang.
+    if(ctx.watchOnly)
+    {
+        add(PadButton::B, KeyAction::LeaveWatchOnly);
+        return out;
+    }
+    // DER RING - Phase 13. Er wird VOR dem Fenster gefragt, weil OnPadButton ihn vor dem Fokus
+    // fragt; die Reihenfolge hier ist woertlich die Reihenfolge dort.
+    if(ctx.ringOpen)
+    {
+        // DER LINKE STICK ZUERST - Befund K2/4E. Er ist das Hauptzeigemittel des Rings, und er
+        // stand nirgends: die Leiste konnte ihn konstruktiv nicht nennen, weil ein
+        // Stickausschlag kein PadButton ist. Jetzt kann sie es (KeyInput::LeftStickAxis), und
+        // damit steht der Eingang, mit dem der Spieler den Ring ueberhaupt bedient, an erster
+        // Stelle - dort, wo ein Anfaenger zuerst hinsieht.
+        addStick(KeyAction::AimRing);
+        // A loest den gewaehlten Sektor aus - dieselbe Frage wie im Fenster (Window::CanActivate),
+        // denn es ist derselbe Aufruf (FocusPath::Activate).
+        if(ctx.focusCanActivate)
+            add(PadButton::A, KeyAction::Choose);
+        // DAS GANZE STEUERKREUZ, nicht die Haelfte davon - Befund K2/4C und 4D. Gemessen
+        // wirkten alle VIER Richtungen (RingOnPadButton: Left und Up einen Sektor zurueck,
+        // Right und Down einen weiter), genannt waren nur Left und Right. KeyLine zieht die
+        // vier zu einem Eintrag zusammen ("Left/Right/Up/Down Drehen"), die WERTE bleiben
+        // getrennt, damit ein Nachweis jede Richtung einzeln druecken kann.
+        add(PadButton::DpadLeft, KeyAction::TurnRing);
+        add(PadButton::DpadRight, KeyAction::TurnRing);
+        add(PadButton::DpadUp, KeyAction::TurnRing);
+        add(PadButton::DpadDown, KeyAction::TurnRing);
+        // LB und RB blaettern - aber nur, wenn es ueberhaupt etwas zu blaettern gibt. Ein
+        // einseitiger Ring (das Systemmenue) nennt sie deshalb nicht, UND dort tun sie seit
+        // Befund K2/4A auch wirklich nichts mehr: dskGameInterface::RingTurnPage fragt fuer
+        // seine Wirkung dieselbe Funktion, aus der `ringHasPages` kommt.
+        if(ctx.ringHasPages)
+        {
+            add(PadButton::RightShoulder, KeyAction::RingNextPage);
+            add(PadButton::LeftShoulder, KeyAction::RingPrevPage);
+        }
+        // B UND BACK schliessen den Ring samt Fenster - beide, und beide werden genannt
+        // (Befund K2/4B: Back wirkte ungenannt). RingOnPadButton behandelt sie in EINEM Zweig,
+        // die Leiste nennt sie in EINEM Eintrag: "B/Back Schliessen".
+        add(PadButton::B, KeyAction::CloseRing);
+        add(PadButton::Back, KeyAction::CloseRing);
+        return out;
+    }
     // Die drei Zustaende sind GENAU die drei Zweige von RefreshBrief und damit genau die
     // Reihenfolge, in der dskGameInterface::OnPadButton entscheidet. Eine vierte Ableitung gibt
     // es bewusst nicht: sie koennte neben der ersten veralten.

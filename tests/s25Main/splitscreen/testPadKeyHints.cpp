@@ -142,8 +142,12 @@ brief::FlagMenuButtons hqFlagButtons()
 /// Was die Leiste zu DIESER Taste sagt - oder nullopt, wenn sie sie nicht nennt.
 std::optional<brief::KeyAction> actionFor(const brief::Brief& b, const PadButton button)
 {
-    const auto it = std::find_if(b.keys.begin(), b.keys.end(),
-                                 [button](const brief::KeyHint& h) { return h.button == button; });
+    // `h.input == Button` gehoert dazu, seit die Leiste auch den linken STICK nennen kann
+    // (Befund K2/4E): bei einem Stickhinweis traegt `button` keine Bedeutung, und ohne diese
+    // Frage haelte ein Nachweis den Stick fuer PadButton::A.
+    const auto it = std::find_if(b.keys.begin(), b.keys.end(), [button](const brief::KeyHint& h) {
+        return h.input == brief::KeyInput::Button && h.button == button;
+    });
     if(it == b.keys.end())
         return std::nullopt;
     return it->action;
@@ -158,8 +162,9 @@ bool hasHint(const brief::Brief& b, const PadButton button, const brief::KeyActi
 /// Ist diese Taste ueberhaupt genannt - egal mit welcher Wirkung?
 bool namesButton(const brief::Brief& b, const PadButton button)
 {
-    return std::any_of(b.keys.begin(), b.keys.end(),
-                       [button](const brief::KeyHint& h) { return h.button == button; });
+    return std::any_of(b.keys.begin(), b.keys.end(), [button](const brief::KeyHint& h) {
+        return h.input == brief::KeyInput::Button && h.button == button;
+    });
 }
 
 /// Die Leiste als Protokollzeile - fuer BOOST_TEST_MESSAGE, nicht fuer Zusicherungen.
@@ -170,7 +175,7 @@ std::string dumpKeys(const brief::Brief& b)
     {
         if(!out.empty())
             out += " | ";
-        out += brief::PadButtonLabel(h.button);
+        out += brief::KeyInputLabel(h);
         out += "=";
         out += std::to_string(static_cast<int>(h.action));
     }
@@ -246,6 +251,11 @@ ctrlButton* flagTabButton(PlayerView& view, const unsigned btId)
 template<class T_Fixture>
 void closeActionWindow(T_Fixture& f, PlayerView& view)
 {
+    // PHASE 13: das Aktionsfenster ist der Ring. Ihn hier mit zu schliessen ist keine Kosmetik -
+    // ein stehengebliebener Ringzustand verschluckt jede weitere Weltflanke dieses Sitzplatzes,
+    // und der naechste Abschnitt des Falls maesse dann etwas voellig anderes als er glaubt.
+    if(view.GetRing().IsOpen())
+        f.dsk->CloseRing(view, /*closeWindow*/ true);
     if(iwAction* const wnd = view.actionwindow)
     {
         if(!wnd->ShouldBeClosed())
@@ -299,13 +309,68 @@ struct HintFixture : PadViewFixture<T_numViews, T_numPlayers>
     void focusToCtrl(const PadDeviceId dev, const unsigned viewIdx, const Window* const target)
     {
         BOOST_TEST_REQUIRE(target != static_cast<const Window*>(nullptr));
+        // PHASE 13: im KREISMENUE wandert der Fokus mit dem Steuerkreuz (ein Sektor weiter),
+        // waehrend die Schultern die SEITE wechseln; in einem gewoehnlichen Fenster ist es
+        // umgekehrt. Gefragt wird der Ringzustand selbst - derselbe Wert, den auch
+        // dskGameInterface::OnPadButton liest.
         for(unsigned i = 0; i < 40u; ++i)
         {
             if(this->view(viewIdx).GetFocus().GetFocused() == target)
                 return;
-            this->press(dev, PadButton::RightShoulder);
+            this->press(dev, this->view(viewIdx).GetRing().IsOpen() ? PadButton::DpadRight :
+                                                                      PadButton::RightShoulder);
         }
         BOOST_FAIL("Das Control ist per Pad nicht erreichbar");
+    }
+
+    /// DEN RING BLAETTERN, bis das gesuchte Control ein Sektor ist - und dann darauf drehen.
+    ///
+    /// Der Ring zeigt nur eine Seite auf einmal, und die Reiter des Fensters SIND die weiteren
+    /// Seiten (RingTurnPage). Ein Control, das auf einem anderen Reiter liegt, ist also nicht
+    /// durch Drehen erreichbar, sondern durch Blaettern - woertlich die Tiefe, die
+    /// CONTROLLER-UX.md Regel 3 vorschreibt (kein verschachtelter Ring, Tiefe durch LB/RB).
+    /// Beides zusammen ist der volle produktive Weg zu jedem Knopf eines Ringfensters.
+    void ringPageToCtrl(const PadDeviceId dev, const unsigned viewIdx, const Window* const target)
+    {
+        BOOST_TEST_REQUIRE(target != static_cast<const Window*>(nullptr));
+        BOOST_TEST_REQUIRE(this->view(viewIdx).GetRing().IsOpen());
+        for(unsigned page = 0; page < 40u; ++page)
+        {
+            unsigned numPages = 1;
+            const std::vector<Window*> ctrls = dskGameInterface::RingPageCtrls(this->view(viewIdx), numPages);
+            if(std::find(ctrls.begin(), ctrls.end(), target) != ctrls.end())
+            {
+                focusToCtrl(dev, viewIdx, target);
+                return;
+            }
+            this->press(dev, PadButton::RightShoulder);
+        }
+        BOOST_FAIL("Das Control ist auch durch Blaettern nicht erreichbar");
+    }
+
+    /// Ein GEWOEHNLICHES Fenster dieses Sitzplatzes, geoeffnet ueber den vollen produktiven Weg
+    /// und danach OHNE Fokus - der Zustand "ein Fenster steht offen, der Spieler ist in der
+    /// Welt".
+    ///
+    /// PHASE 13: dafuer taugt das Aktionsfenster nicht mehr. Es ist jetzt ein Ring, wird sofort
+    /// betreten und ist fuer seinen Sitzplatz modal. Das Postfenster ist ein gewoehnliches
+    /// Fenster geblieben und traegt diese Faelle unveraendert.
+    IngameWindow* openPlainWindowByPad(const PadDeviceId dev, const unsigned viewIdx)
+    {
+        this->press(dev, PadButton::Back);
+        IngameWindow* const menu = WINDOWMANAGER.FindNonModalWindow(CGI_PADMENU, viewIdx);
+        BOOST_TEST_REQUIRE(menu != static_cast<IngameWindow*>(nullptr));
+        focusToCtrl(dev, viewIdx, menu->GetCtrl<Window>(iwPadSystemMenu::ID_POST));
+        this->press(dev, PadButton::A);
+        IngameWindow* const wnd = WINDOWMANAGER.FindNonModalWindow(CGI_POSTOFFICE, viewIdx);
+        BOOST_TEST_REQUIRE(wnd != static_cast<IngameWindow*>(nullptr));
+        BOOST_TEST_REQUIRE(!this->view(viewIdx).GetRing().IsOpen());
+        // B in einem gewoehnlichen Fenster gibt nur den Fokus ab - die Staffelung, die es dort
+        // weiterhin gibt.
+        this->press(dev, PadButton::B);
+        BOOST_TEST_REQUIRE(!this->view(viewIdx).GetFocus().IsActive());
+        BOOST_TEST_REQUIRE(!wnd->ShouldBeClosed());
+        return wnd;
     }
 
     /// Der volle Padweg zum Musiklautstaerkeregler: Back, Hauptauswahl, Einstellungen, Y hinein.
@@ -549,9 +614,16 @@ BOOST_FIXTURE_TEST_CASE(TheFlagHintOnlyStandsWhereAFlagReallyAppears, PadGameFix
 // 2. DER ZUSTAND, IN DEM DER AUFTRAGGEBER STECKENGEBLIEBEN IST
 // ============================================================================================
 
-/// Aktionsfenster offen, Fokus noch in der Welt: der einzige Weg hinein ist Y, und das stand
-/// bisher nirgends. Jetzt steht es da - und der Knopf tut es auch.
-BOOST_FIXTURE_TEST_CASE(WithTheActionWindowOpenTheHintNamesTheButtonThatGoesInside, HintFixture<2>)
+/// PHASE 13: das Aktionsfenster IST der Ring, und der Ring wird sofort betreten - Y hat hier
+/// nichts mehr zu tun.
+///
+/// Was der Fall vorher mass: "Fenster offen, Fokus noch in der Welt, der einzige Weg hinein ist
+/// Y, und das stand nirgends". Diesen Zustand gibt es nicht mehr; ihn weiter zu pruefen hiesse,
+/// einen Weg zu sichern, den kein Spieler mehr geht. Der MASSSTAB bleibt aber woertlich
+/// derselbe und ist genau das, was hier steht: die Leiste sagt, was IM RING gilt - nicht, was
+/// im Fenster galt. Eine Leiste, die hier "Y Ins Fenster" oder "RB Weiter" verspraeche, waere
+/// die Sorte Luege, die Phase 12 dreimal ausbauen musste.
+BOOST_FIXTURE_TEST_CASE(WithTheRingOpenTheBarNamesTheRingKeysAndNotTheWindowKeys, HintFixture<2>)
 {
     GameWorld& world = worldFixture.world;
     const MapPoint flagPt = findPlainFlagSpot(world, view(1).GetViewer());
@@ -569,24 +641,41 @@ BOOST_FIXTURE_TEST_CASE(WithTheActionWindowOpenTheHintNamesTheButtonThatGoesInsi
 
     press(11, padHint::OpenActions);
     BOOST_TEST_REQUIRE(view(1).actionwindow != static_cast<iwAction*>(nullptr));
-    // Der Fokus ist NOCH NICHT drin - genau der Punkt.
-    BOOST_TEST_REQUIRE(!view(1).GetFocus().IsActive());
+    // Der Ring ist offen UND betreten - in EINEM Druck.
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
+    BOOST_TEST(view(1).GetFocus().GetRoot() == static_cast<Window*>(view(1).actionwindow));
 
     const brief::Brief& b = view(1).GetBrief();
-    BOOST_TEST_MESSAGE("AUDIT: Leiste mit offenem Aktionsfenster = " << dumpKeys(b));
-    BOOST_TEST(hasHint(b, PadButton::Y, brief::KeyAction::EnterWindow));
-    BOOST_TEST(hasHint(b, PadButton::B, brief::KeyAction::CloseWindow));
+    BOOST_TEST_MESSAGE("AUDIT: Leiste mit offenem Ring = " << dumpKeys(b));
+    // Was der Ring wirklich kann: A loest aus, das Steuerkreuz dreht, B schliesst.
+    BOOST_TEST(hasHint(b, PadButton::A, brief::KeyAction::Choose));
+    BOOST_TEST(hasHint(b, PadButton::DpadLeft, brief::KeyAction::TurnRing));
+    BOOST_TEST(hasHint(b, PadButton::DpadRight, brief::KeyAction::TurnRing));
+    BOOST_TEST(hasHint(b, PadButton::B, brief::KeyAction::CloseRing));
+    // Und was er NICHT kann, steht auch nicht da.
+    BOOST_TEST(!namesButton(b, PadButton::Y));
+    BOOST_TEST(!hasHint(b, PadButton::RightShoulder, brief::KeyAction::NextControl));
+    BOOST_TEST(!hasHint(b, PadButton::B, brief::KeyAction::LeaveFocus));
 
-    // Und Y tut es wirklich.
-    press(11, padHint::Enter);
-    BOOST_TEST(view(1).GetFocus().IsActive());
-    BOOST_TEST(view(1).GetFocus().GetRoot() == static_cast<Window*>(view(1).actionwindow));
+    // GEDRUECKT UND GEMESSEN: das Steuerkreuz dreht den Ring wirklich.
+    const Window* const before = view(1).GetFocus().GetFocused();
+    press(11, PadButton::DpadRight);
+    BOOST_TEST(view(1).GetFocus().GetFocused() != before);
+    // ... und B schliesst wirklich alles.
+    press(11, padHint::Back);
+    BOOST_TEST(!view(1).GetRing().IsOpen());
+    BOOST_TEST(!view(1).GetFocus().IsActive());
 
     closeActionWindow(*this, view(1));
 }
 
 /// Im Fenster wechselt die Leiste: A waehlt, RB geht weiter, B gibt den Fokus ab. Alle drei
 /// gedrueckt und gemessen.
+///
+/// PHASE 13: gemessen wird das an einem GEWOEHNLICHEN Fenster (dem Postfenster), denn das
+/// Aktionsfenster ist jetzt ein Ring und hat eine eigene Belegung - der Fall darueber misst
+/// die. Die Fensterbelegung gilt unveraendert weiter, sie hat nur einen anderen Traeger.
 BOOST_FIXTURE_TEST_CASE(InsideAWindowTheHintsFollowTheFocusAndNotTheWorld, HintFixture<2>)
 {
     GameWorld& world = worldFixture.world;
@@ -599,13 +688,17 @@ BOOST_FIXTURE_TEST_CASE(InsideAWindowTheHintsFollowTheFocusAndNotTheWorld, HintF
     BOOST_TEST_REQUIRE(dsk->GetPadRouter().AssignSlot(11, 1));
     step(16);
     padSteerTo(11, 1, flagPt);
-    press(11, padHint::OpenActions);
-    press(11, padHint::Enter);
+    // Der volle produktive Weg zu einem gewoehnlichen Fenster: Back oeffnet den System-Ring,
+    // sein Postsektor oeffnet das Postfenster, und dort steht der Fokus.
+    press(11, PadButton::Back);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    focusToCtrl(11, 1, WINDOWMANAGER.FindNonModalWindow(CGI_PADMENU, 1)
+                         ->GetCtrl<Window>(iwPadSystemMenu::ID_POST));
+    press(11, PadButton::A);
+    IngameWindow* const postWnd = WINDOWMANAGER.FindNonModalWindow(CGI_POSTOFFICE, 1);
+    BOOST_TEST_REQUIRE(postWnd != static_cast<IngameWindow*>(nullptr));
+    BOOST_TEST_REQUIRE(!view(1).GetRing().IsOpen());
     BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
-    // EINE STATION WEITER, und das ist seit Befund P3 noetig: die erste Station nach Y ist der
-    // SCHON GEWAEHLTE Reiterkopf, und dort tut A nichts - die Leiste nennt ihn dort deshalb
-    // auch nicht mehr. Der eigene Nachweis dazu steht in Abschnitt 26.
-    press(11, PadButton::RightShoulder);
 
     const brief::Brief& b = view(1).GetBrief();
     BOOST_TEST_MESSAGE("AUDIT: Leiste im Fenster = " << dumpKeys(b));
@@ -624,7 +717,9 @@ BOOST_FIXTURE_TEST_CASE(InsideAWindowTheHintsFollowTheFocusAndNotTheWorld, HintF
     press(11, padHint::Back);
     BOOST_TEST(!view(1).GetFocus().IsActive());
 
-    closeActionWindow(*this, view(1));
+    if(!postWnd->ShouldBeClosed())
+        postWnd->Close();
+    WINDOWMANAGER.Draw();
 }
 
 // ============================================================================================
@@ -711,16 +806,16 @@ BOOST_FIXTURE_TEST_CASE(TheGeologistButtonExplainsItselfInPlainText, HintFixture
     ctrlButton* const geologist = flagTabButton(view(1), kFlagBtGeologist);
     BOOST_TEST_REQUIRE(geologist != static_cast<ctrlButton*>(nullptr));
 
-    press(11, padHint::Enter);
+    // PHASE 13: der Ring ist offen und betreten - kein Y noetig, und der Fokus steht auf einem
+    // SEKTOR und nicht auf einem Reiterkopf. Der Kopftext des Flaggenmenues, den Phase 12
+    // gebaut hat, faellt damit auf dem Ringweg weg: er zaehlte auf, welche Knoepfe der Reiter
+    // hat - und genau die stehen jetzt gleichzeitig als Sektoren im Bild. Die Rechnung selbst
+    // (brief::ForFlagMenu) bleibt und wird weiterhin gemessen; siehe Abschnitt 22.
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
     BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
-    // Schon der REITERKOPF sagt jetzt etwas: er heisst im Katalog "Fahne setzen" - genau wie der
-    // Reiter, der eine Flagge SETZT. Und was er aufzaehlt, sind die Knoepfe, die hier wirklich
-    // stehen (Befund N6) - an dieser gewoehnlichen Flagge also alle vier.
-    BOOST_TEST(view(1).GetBrief().title == brief::ForFlagMenu(plainFlagButtons()).title);
-    BOOST_TEST(view(1).GetBrief().joined() == brief::ForFlagMenu(plainFlagButtons()).joined());
 
     for(unsigned presses = 0; presses < 32u && view(1).GetFocus().GetFocused() != geologist; ++presses)
-        press(11, PadButton::RightShoulder);
+        press(11, PadButton::DpadRight);
     BOOST_TEST_REQUIRE(view(1).GetFocus().GetFocused() == static_cast<Window*>(geologist));
 
     const brief::Brief& b = view(1).GetBrief();
@@ -738,7 +833,8 @@ BOOST_FIXTURE_TEST_CASE(TheGeologistButtonExplainsItselfInPlainText, HintFixture
     // Der Nachbarknopf sagt etwas ANDERES - sonst waere der Text eine Attrappe.
     ctrlButton* const scout = flagTabButton(view(1), kFlagBtScout);
     BOOST_TEST_REQUIRE(scout != static_cast<ctrlButton*>(nullptr));
-    press(11, PadButton::RightShoulder);
+    for(unsigned presses = 0; presses < 32u && view(1).GetFocus().GetFocused() != scout; ++presses)
+        press(11, PadButton::DpadRight);
     BOOST_TEST_REQUIRE(view(1).GetFocus().GetFocused() == static_cast<Window*>(scout));
     BOOST_TEST(view(1).GetBrief().title == brief::ForAction(brief::ActionBrief::SendScout).title);
     BOOST_TEST(view(1).GetBrief().title != expected.title);
@@ -769,9 +865,9 @@ BOOST_FIXTURE_TEST_CASE(EveryButtonOfTheFlagTabCarriesItsOwnSentences, HintFixtu
     {
         ctrlButton* const bt = flagTabButton(view(1), btId);
         BOOST_TEST_REQUIRE(bt != static_cast<ctrlButton*>(nullptr));
-        // Der Fokus faehrt ueber die Schulter dorthin - der echte Weg.
+        // Der Fokus dreht sich ueber das Steuerkreuz dorthin - der echte Weg IM RING.
         for(unsigned i = 0; i < 32u && view(1).GetFocus().GetFocused() != bt; ++i)
-            press(11, PadButton::RightShoulder);
+            press(11, PadButton::DpadRight);
         BOOST_TEST_REQUIRE(view(1).GetFocus().GetFocused() == static_cast<Window*>(bt));
         const brief::Brief& b = view(1).GetBrief();
         BOOST_TEST_CONTEXT("Knopf " << btId)
@@ -870,11 +966,15 @@ BOOST_FIXTURE_TEST_CASE(TwoSeatsOnDifferentGroundReadDifferentHints, HintFixture
     BOOST_TEST(hasHint(b1, PadButton::RightShoulder, brief::KeyAction::OpenActionMenu));
     BOOST_TEST(!namesButton(b1, PadButton::X));
 
-    // Und die Trennung haelt auch, wenn EINER von beiden ein Fenster oeffnet.
+    // Und die Trennung haelt auch, wenn EINER von beiden seinen RING oeffnet: nur SEINE Leiste
+    // wechselt in die Ringbelegung, die des Nachbarn bleibt die der Welt.
     press(11, padHint::OpenActions);
     step(16);
-    BOOST_TEST(namesButton(view(1).GetBrief(), PadButton::Y));
-    BOOST_TEST(!namesButton(view(0).GetBrief(), PadButton::Y));
+    BOOST_TEST(view(1).GetRing().IsOpen());
+    BOOST_TEST(!view(0).GetRing().IsOpen());
+    BOOST_TEST(hasHint(view(1).GetBrief(), PadButton::B, brief::KeyAction::CloseRing));
+    BOOST_TEST(!hasHint(view(0).GetBrief(), PadButton::B, brief::KeyAction::CloseRing));
+    BOOST_TEST(hasHint(view(0).GetBrief(), PadButton::A, brief::KeyAction::OpenActionMenu));
     closeActionWindow(*this, view(1));
 }
 
@@ -1103,25 +1203,19 @@ BOOST_FIXTURE_TEST_CASE(TheWatchWindowNoLongerPromisesThatBClosesIt, HintFixture
     press(11, padHint::OpenActions);
     iwAction* const action = view(1).actionwindow;
     BOOST_TEST_REQUIRE(action != static_cast<iwAction*>(nullptr));
-    press(11, padHint::Enter);
+    // PHASE 13: das Aktionsfenster IST der Ring, und er ist sofort betreten - Y ist hier
+    // wirkungslos. Der Reiterkopf "Anzeige" ist kein Sektor mehr, sondern eine SEITE: er wird
+    // mit RB angeblaettert, nicht angesteuert und mit A umgeschaltet. Das ist derselbe Weg,
+    // den der Spieler geht, und der Gegenstand dieses Falls (was die Leiste ueber das
+    // Beobachtungsfenster behauptet) bleibt woertlich derselbe.
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
     BOOST_TEST_REQUIRE(view(1).GetFocus().GetRoot() == static_cast<Window*>(action));
 
-    // Den Reiterkopf "Anzeige" ueber seine REITERKENNUNG finden, nicht ueber seine Position.
     auto* const mainTab = action->GetCtrl<ctrlTab>(0);
     BOOST_TEST_REQUIRE(mainTab != static_cast<ctrlTab*>(nullptr));
-    const Window* watchHead = nullptr;
-    for(unsigned short i = 0; i < mainTab->GetNumTabs(); ++i)
-    {
-        if(mainTab->GetTabIdAt(i) == kTabWatch)
-            watchHead = mainTab->GetCtrl<Window>(i);
-    }
-    BOOST_TEST_REQUIRE(watchHead != static_cast<const Window*>(nullptr));
-    focusToCtrl(11, 1, watchHead);
-    press(11, padHint::Act);
-
     ctrlGroup* const watchGroup = mainTab->GetGroup(kTabWatch);
     BOOST_TEST_REQUIRE(watchGroup != static_cast<ctrlGroup*>(nullptr));
-    focusToCtrl(11, 1, watchGroup->GetCtrl<Window>(kWatchBtObserve));
+    ringPageToCtrl(11, 1, watchGroup->GetCtrl<Window>(kWatchBtObserve));
     press(11, padHint::Act);
 
     // Das Aktionsfenster hat sich dabei selbst geschlossen; oben liegt jetzt das
@@ -1547,13 +1641,14 @@ BOOST_FIXTURE_TEST_CASE(WhileTheRoadIsBeingBuiltTheBarNoLongerPromisesTheMenu, H
     // Ausgangslage: hier steht "Back Menue", und das stimmt auch.
     BOOST_TEST_REQUIRE(hasHint(view(1).GetBrief(), PadButton::Back, brief::KeyAction::SystemMenu));
 
-    // Schritt 1 und 2 des Weges, den die Leiste vorgibt.
-    press(11, padHint::OpenActions);
-    BOOST_TEST_REQUIRE(view(1).actionwindow != static_cast<iwAction*>(nullptr));
+    // Ein Fenster, das waehrend des Baumodus offen steht - PHASE 13 nimmt dafuer ein
+    // GEWOEHNLICHES statt des Aktionsfensters, weil dieses jetzt ein Ring und damit modal ist.
+    // An der geprueften Frage aendert das nichts: es geht um Back, nicht um das Fenster.
+    IngameWindow* const plainWnd = openPlainWindowByPad(11, 1);
+    padSteerTo(11, 1, flagPt);
     press(11, padHint::Act);
     BOOST_TEST_REQUIRE((view(1).GetRoad().mode == RoadBuildMode::Normal));
-    // GEMESSEN: das Aktionsfenster bleibt dabei stehen - deshalb fuehrt Y gleich hinein.
-    BOOST_TEST_REQUIRE(view(1).actionwindow != static_cast<iwAction*>(nullptr));
+    BOOST_TEST_REQUIRE(!plainWnd->ShouldBeClosed());
 
     // (a) Baumodus, Fokus noch in der Welt: Back steht nicht mehr da.
     BOOST_TEST_MESSAGE("AUDIT: Leiste im Baumodus = " << dumpKeys(view(1).GetBrief()));
@@ -1584,7 +1679,11 @@ BOOST_FIXTURE_TEST_CASE(WhileTheRoadIsBeingBuiltTheBarNoLongerPromisesTheMenu, H
     press(11, padHint::SystemMenu);
     BOOST_TEST(WINDOWMANAGER.FindNonModalWindow(CGI_PADMENU, 1u) != static_cast<IngameWindow*>(nullptr));
 
-    closeActionWindow(*this, view(1));
+    if(view(1).GetRing().IsOpen())
+        dsk->CloseRing(view(1), true);
+    if(!plainWnd->ShouldBeClosed())
+        plainWnd->Close();
+    WINDOWMANAGER.Draw();
 }
 
 // ============================================================================================
@@ -1603,8 +1702,8 @@ BOOST_FIXTURE_TEST_CASE(InRoadModeTheBarNamesTheButtonThatEntersTheOpenWindow, H
     takePad(11, 1);
     padSteerTo(11, 1, flagPt);
 
-    press(11, padHint::OpenActions);
-    BOOST_TEST_REQUIRE(view(1).actionwindow != static_cast<iwAction*>(nullptr));
+    IngameWindow* const plainWnd = openPlainWindowByPad(11, 1);
+    padSteerTo(11, 1, flagPt);
     press(11, padHint::Act);
     BOOST_TEST_REQUIRE((view(1).GetRoad().mode == RoadBuildMode::Normal));
     BOOST_TEST_REQUIRE(!view(1).GetFocus().IsActive());
@@ -1621,9 +1720,11 @@ BOOST_FIXTURE_TEST_CASE(InRoadModeTheBarNamesTheButtonThatEntersTheOpenWindow, H
     // UND GEDRUECKT.
     press(11, padHint::Enter);
     BOOST_TEST(view(1).GetFocus().IsActive());
-    BOOST_TEST(view(1).GetFocus().GetRoot() == static_cast<Window*>(view(1).actionwindow));
+    BOOST_TEST(view(1).GetFocus().GetRoot() == static_cast<Window*>(plainWnd));
 
-    closeActionWindow(*this, view(1));
+    if(!plainWnd->ShouldBeClosed())
+        plainWnd->Close();
+    WINDOWMANAGER.Draw();
 }
 
 /// Die Gegenprobe zu N2: OHNE offenes Fenster nennt der Baumodus Y NICHT - denn dann tut es
@@ -1661,9 +1762,12 @@ BOOST_FIXTURE_TEST_CASE(InsideAWindowTheBarNamesTheShoulderThatGoesBack, HintFix
     world.SetFlag(flagPt, 1);
     takePad(11, 1);
     padSteerTo(11, 1, flagPt);
-    press(11, padHint::OpenActions);
+    // PHASE 13: gemessen an einem GEWOEHNLICHEN Fenster. Im Ring blaettern die Schultern die
+    // Seite statt die Fokusstation zu wechseln - das misst der Ringfall in Abschnitt 2.
+    IngameWindow* const plainWnd = openPlainWindowByPad(11, 1);
     press(11, padHint::Enter);
     BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
+    BOOST_TEST_REQUIRE(view(1).GetFocus().GetRoot() == static_cast<Window*>(plainWnd));
 
     // (a) Auf der ERSTEN Station gibt es kein Zurueck - also steht LB nicht da.
     const Window* const first = view(1).GetFocus().GetFocused();
@@ -1682,7 +1786,9 @@ BOOST_FIXTURE_TEST_CASE(InsideAWindowTheBarNamesTheShoulderThatGoesBack, HintFix
     press(11, PadButton::LeftShoulder);
     BOOST_TEST(view(1).GetFocus().GetFocused() == first);
 
-    closeActionWindow(*this, view(1));
+    if(!plainWnd->ShouldBeClosed())
+        plainWnd->Close();
+    WINDOWMANAGER.Draw();
 }
 
 // ============================================================================================
@@ -1704,15 +1810,21 @@ BOOST_FIXTURE_TEST_CASE(ForEveryDpadDirectionTheBarSaysExactlyWhatThePressDoes, 
     world.SetFlag(flagPt, 1);
     takePad(11, 1);
     padSteerTo(11, 1, flagPt);
-    press(11, padHint::OpenActions);
+    // PHASE 13: gemessen an einem GEWOEHNLICHEN Fenster. Im RING dreht das Steuerkreuz den Ring
+    // (KeyAction::TurnRing) und bewegt gerade nicht den Fokus in ID- oder Lageordnung; die
+    // Ringbelegung wird eigens in Abschnitt 2 gemessen. Die Frage dieses Falls - stimmt die
+    // Behauptung der Leiste in JEDER Richtung mit der Wirkung ueberein? - bleibt woertlich
+    // dieselbe, sie hat nur einen anderen Traeger.
+    //
+    // BEFUND K5: beim Umhaengen fielen hier drei Zeilen weg, die den Fokus auf den GEOLOGEN
+    // setzten - die Knopfreihe des Flaggenreiters. Sie ist nicht verloren, sie steht in
+    // Abschnitt 26 (OnTheFlagButtonRowTheBarSaysExactlyWhatEveryDpadPressDoes), auf dem
+    // Traeger, den ein Padspieler heute wirklich erreicht. Warum sie nicht HIER wieder
+    // stehen kann, ist dort gemessen: das Aktionsfenster geht fuer das Pad nur noch als RING
+    // auf, und im Ring lautet die Wirkung TurnRing und nicht MoveFocus.
+    IngameWindow* const plainWnd = openPlainWindowByPad(11, 1);
     press(11, padHint::Enter);
     BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
-
-    // Erst auf die Knopfreihe des Flaggenreiters - dort liegen vier Knoepfe nebeneinander, das
-    // Steuerkreuz hat also waagerecht wirklich etwas zu tun.
-    ctrlButton* const geologist = flagTabButton(view(1), kFlagBtGeologist);
-    BOOST_TEST_REQUIRE(geologist != static_cast<ctrlButton*>(nullptr));
-    focusToCtrl(11, 1, geologist);
 
     // DREI RUNDEN durch alle vier Richtungen. Der Fokus wandert dabei, jede Runde misst also
     // von einer anderen Stelle des Fensters aus - und die Leiste wird VOR jedem einzelnen Druck
@@ -1749,7 +1861,9 @@ BOOST_FIXTURE_TEST_CASE(ForEveryDpadDirectionTheBarSaysExactlyWhatThePressDoes, 
     BOOST_TEST(moved > 0u);
     BOOST_TEST(named == moved);
 
-    closeActionWindow(*this, view(1));
+    if(!plainWnd->ShouldBeClosed())
+        plainWnd->Close();
+    WINDOWMANAGER.Draw();
 }
 
 // ============================================================================================
@@ -1794,8 +1908,10 @@ BOOST_FIXTURE_TEST_CASE(YNoLongerThrowsThePlayerOutOfHisOwnWindow, HintFixture<2
     BOOST_TEST(view(1).GetFocus().IsActive());
     BOOST_TEST(view(1).GetFocus().GetRoot() == static_cast<Window*>(menu));
     BOOST_TEST(view(1).GetFocus().GetFocused() == focusedBefore);
-    // Der Spieler kann also weiterarbeiten - die Leiste ist die des Fensters, in dem er steht.
-    BOOST_TEST(hasHint(view(1).GetBrief(), PadButton::B, brief::KeyAction::LeaveFocus));
+    // Der Spieler kann also weiterarbeiten - die Leiste ist die des RINGES, in dem er steht
+    // (PHASE 13: das Systemmenue ist der Ring; dort schliesst B, statt nur den Fokus abzugeben).
+    BOOST_TEST(view(1).GetRing().IsOpen());
+    BOOST_TEST(hasHint(view(1).GetBrief(), PadButton::B, brief::KeyAction::CloseRing));
 }
 
 // ============================================================================================
@@ -1832,17 +1948,39 @@ BOOST_FIXTURE_TEST_CASE(TheFlagMenuHeadNamesOnlyTheButtonsThatAreReallyThere, Hi
     BOOST_TEST_REQUIRE(flagTabButton(view(1), kFlagBtScout) == static_cast<ctrlButton*>(nullptr));
     BOOST_TEST_REQUIRE(flagTabButton(view(1), kFlagBtPullDown) == static_cast<ctrlButton*>(nullptr));
 
-    press(11, padHint::Enter);
-    BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
+    // PHASE 13 - WIE DIESER BEFUND JETZT GESICHERT IST.
+    //
+    // Der Kopftext war die Antwort auf die Frage "welche Knoepfe gibt es hier?", und er stand
+    // auf dem Reiterkopf, weil das die erste Fokusstation nach Y war. Im RING gibt es diese
+    // Station nicht mehr - die Reiterkoepfe sind die Blaetterachse (LB/RB), und die Antwort auf
+    // dieselbe Frage steht nicht mehr in einem Satz, sondern IM BILD: der Ring zeigt genau die
+    // Knoepfe, die es wirklich gibt, alle gleichzeitig. Das ist die staerkere Zusicherung, und
+    // sie wird hier gemessen.
+    //
+    // Die Rechnung selbst (brief::ForFlagMenu, aus den Knoepfen gebaut statt aus der Flaggenart
+    // geraten) bleibt unveraendert und wird gleich darunter geprueft.
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    unsigned numPages = 1;
+    const std::vector<Window*> ringCtrls = dskGameInterface::RingPageCtrls(view(1), numPages);
+    BOOST_TEST_MESSAGE("AUDIT: Sektoren des Rings an der HQ-Flagge = " << ringCtrls.size());
+    // GENAU EIN Sektor - der Strassenknopf. Kein Geologe, kein Spaeher, kein Abreissen.
+    BOOST_TEST(ringCtrls.size() == 1u);
+    BOOST_TEST_REQUIRE(!ringCtrls.empty());
+    BOOST_TEST(ringCtrls.front() == static_cast<Window*>(flagTabButton(view(1), kFlagBtRoad)));
+    BOOST_TEST(numPages == 1u);
+    // Und der Klartext unter dem Ring ist der des gewaehlten Sektors - er verspricht nichts,
+    // was der Ring nicht zeigt.
     const std::string inWindow = view(1).GetBrief().joined();
-    BOOST_TEST_MESSAGE("AUDIT: im Fenster (Reiterkopf an der HQ-Flagge) = " << inWindow);
+    BOOST_TEST_MESSAGE("AUDIT: Klartext unter dem Ring an der HQ-Flagge = " << inWindow);
+    BOOST_TEST(inWindow.find("Geolog") == std::string::npos);
 
-    // ER IST WIRKLICH DER REITERKOPF - und zwar der des Flaggenreiters.
-    BOOST_TEST(view(1).GetBrief().title == brief::ForFlagMenu(hqFlagButtons()).title);
-    // DAS IST DER BEFUND: kein Geologe, kein Spaeher, kein Abreissen im Text.
-    BOOST_TEST(inWindow == brief::ForFlagMenu(hqFlagButtons()).joined());
-    BOOST_TEST(inWindow != brief::ForFlagMenu(plainFlagButtons()).joined());
-    BOOST_TEST(inWindow.find(brief::ForFlagMenu(plainFlagButtons()).lines.front()) == std::string::npos);
+    // DIE RECHNUNG SELBST, unveraendert aus Phase 12: der Kopftext wird aus den KNOEPFEN
+    // gebaut, nicht aus der Flaggenart geraten.
+    BOOST_TEST(brief::ForFlagMenu(hqFlagButtons()).joined() != brief::ForFlagMenu(plainFlagButtons()).joined());
+    BOOST_TEST(brief::ForFlagMenu(hqFlagButtons())
+                 .joined()
+                 .find(brief::ForFlagMenu(plainFlagButtons()).lines.front())
+               == std::string::npos);
 
     closeActionWindow(*this, view(1));
 }
@@ -1860,18 +1998,26 @@ BOOST_FIXTURE_TEST_CASE(AtAnOrdinaryFlagTheSameHeadNamesAllFourButtons, HintFixt
     takePad(11, 1);
     padSteerTo(11, 1, flagPt);
     press(11, padHint::OpenActions);
-    press(11, padHint::Enter);
-    BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
 
-    const brief::Brief& b = view(1).GetBrief();
-    BOOST_TEST_MESSAGE("AUDIT: Reiterkopf an gewoehnlicher Flagge = " << b.joined());
-    BOOST_TEST(b.joined() == brief::ForFlagMenu(plainFlagButtons()).joined());
-    // Und die vier Knoepfe stehen wirklich da.
+    // PHASE 13: die Gegenseite desselben Befunds - hier zeigt der Ring VIER Sektoren, und zwar
+    // genau die vier Knoepfe, die es an einer gewoehnlichen Flagge gibt. Ohne diesen Fall
+    // koennte der Ring ueberall einen einzigen Sektor zeigen und trotzdem gruen sein.
+    unsigned numPages = 1;
+    const std::vector<Window*> ringCtrls = dskGameInterface::RingPageCtrls(view(1), numPages);
+    BOOST_TEST_MESSAGE("AUDIT: Sektoren des Rings an gewoehnlicher Flagge = " << ringCtrls.size());
+    BOOST_TEST(ringCtrls.size() == 4u);
+    BOOST_TEST(numPages == 1u);
+    // Und die vier Knoepfe stehen wirklich da - jeder als Sektor.
     for(const unsigned btId : {kFlagBtRoad, kFlagBtPullDown, kFlagBtGeologist, kFlagBtScout})
-        BOOST_TEST(flagTabButton(view(1), btId) != static_cast<ctrlButton*>(nullptr));
+    {
+        ctrlButton* const bt = flagTabButton(view(1), btId);
+        BOOST_TEST_REQUIRE(bt != static_cast<ctrlButton*>(nullptr));
+        BOOST_TEST((std::find(ringCtrls.begin(), ringCtrls.end(), static_cast<Window*>(bt)) != ringCtrls.end()));
+    }
     BOOST_TEST(flagTabButton(view(1), kFlagBtWaterway) == static_cast<ctrlButton*>(nullptr));
-    // Der Wasserweg steht folgerichtig NICHT im Text.
-    BOOST_TEST(b.joined() != brief::ForFlagMenu(waterFlagButtons()).joined());
+    // Und die Rechnung aus Phase 12 unterscheidet die drei Flaggenarten weiterhin.
+    BOOST_TEST(brief::ForFlagMenu(plainFlagButtons()).joined() != brief::ForFlagMenu(waterFlagButtons()).joined());
 
     closeActionWindow(*this, view(1));
 }
@@ -2058,9 +2204,8 @@ BOOST_FIXTURE_TEST_CASE(TheWholeWayToTheGeologistReadAloud, HintFixture<2>)
 
     press(11, padHint::OpenActions); // "RB Aktionen"
     BOOST_TEST_REQUIRE(view(1).actionwindow != static_cast<iwAction*>(nullptr));
-    press(11, padHint::Enter); // "Y Ins Fenster"
-    BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
-    BOOST_TEST_MESSAGE("=== HQ-FLAGGE, Schritt 2: RB, dann Y - der Fokus steht auf dem Reiterkopf ===");
+    BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive()); // PHASE 13: der Ring ist sofort betreten
+    BOOST_TEST_MESSAGE("=== HQ-FLAGGE, Schritt 2: RB - der Ring steht offen, der Fokus im Ring ===");
     BOOST_TEST_MESSAGE("  " << view(1).GetBrief().joined());
     BOOST_TEST_MESSAGE("  [" << brief::KeyLine(view(1).GetBrief().keys) << "]");
     // Hier gibt es keinen Geologenknopf - und der Text sagt es jetzt auch.
@@ -2080,13 +2225,8 @@ BOOST_FIXTURE_TEST_CASE(TheWholeWayToTheGeologistReadAloud, HintFixture<2>)
 
     press(11, padHint::OpenActions);
     BOOST_TEST_REQUIRE(view(1).actionwindow != static_cast<iwAction*>(nullptr));
-    BOOST_TEST_MESSAGE("=== FLAGGE, Schritt 2: RB - das Aktionsfenster steht offen ===");
-    BOOST_TEST_MESSAGE("  " << view(1).GetBrief().joined());
-    BOOST_TEST_MESSAGE("  [" << brief::KeyLine(view(1).GetBrief().keys) << "]");
-
-    press(11, padHint::Enter);
-    BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
-    BOOST_TEST_MESSAGE("=== FLAGGE, Schritt 3: Y - der Fokus steht auf dem Reiterkopf ===");
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    BOOST_TEST_MESSAGE("=== FLAGGE, Schritt 2: RB - der Ring steht offen und ist betreten ===");
     BOOST_TEST_MESSAGE("  " << view(1).GetBrief().joined());
     BOOST_TEST_MESSAGE("  [" << brief::KeyLine(view(1).GetBrief().keys) << "]");
 
@@ -2095,14 +2235,15 @@ BOOST_FIXTURE_TEST_CASE(TheWholeWayToTheGeologistReadAloud, HintFixture<2>)
     unsigned steps = 0;
     while(view(1).GetFocus().GetFocused() != geologist && steps < 32u)
     {
-        press(11, PadButton::RightShoulder);
+        press(11, PadButton::DpadRight);
         ++steps;
-        BOOST_TEST_MESSAGE("=== FLAGGE, Schritt 3+" << steps << ": RB ===");
+        BOOST_TEST_MESSAGE("=== FLAGGE, Schritt 2+" << steps << ": der Ring dreht sich ===");
         BOOST_TEST_MESSAGE("  " << view(1).GetBrief().joined());
         BOOST_TEST_MESSAGE("  [" << brief::KeyLine(view(1).GetBrief().keys) << "]");
     }
     BOOST_TEST_REQUIRE(view(1).GetFocus().GetFocused() == static_cast<Window*>(geologist));
-    BOOST_TEST_MESSAGE("=== FLAGGE: der Fokus steht auf 'Gelehrten rufen' nach " << steps << " x RB ===");
+    BOOST_TEST_MESSAGE("=== FLAGGE: der Sektor des Geologen ist gewaehlt nach " << steps
+                                                                               << " x Steuerkreuz ===");
     // Dass A hier wirklich den Mann losschickt, misst testPadFlagActions.cpp in einer laufenden
     // Partie. Dieser Fall misst, was der Spieler dabei LIEST - das ist der Gegenstand dieser Phase.
     BOOST_TEST(view(1).GetBrief().joined() == brief::ForAction(brief::ActionBrief::CallGeologist).joined());
@@ -2224,10 +2365,19 @@ BOOST_FIXTURE_TEST_CASE(OnTheAlreadyChosenTabHeadTheBarKeepsQuietAboutA, HintFix
     world.SetFlag(flagPt, 1);
     takePad(11, 1);
     padSteerTo(11, 1, flagPt);
+    // PHASE 13: der Ring zeigt keine Reiterkoepfe mehr - er BLAETTERT sie (LB/RB). Der Fall
+    // misst weiterhin den Reiterkopf selbst, und dafuer muss das Aktionsfenster wie ein
+    // gewoehnliches betreten werden. Erreichbar ist das ueber den ANGEHEFTETEN Zustand: B
+    // schliesst dann nur den Ring, das Fenster bleibt sichtbar stehen, und Y fuehrt hinein.
     press(11, padHint::OpenActions);
     BOOST_TEST_REQUIRE(view(1).actionwindow != static_cast<iwAction*>(nullptr));
+    view(1).actionwindow->SetPinned(true);
+    press(11, padHint::Back);
+    BOOST_TEST_REQUIRE(!view(1).GetRing().IsOpen());
+    BOOST_TEST_REQUIRE(view(1).actionwindow->IsVisible());
     press(11, padHint::Enter);
     BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
+    BOOST_TEST_REQUIRE(view(1).GetFocus().GetRoot() == static_cast<Window*>(view(1).actionwindow));
 
     auto* const mainTab = view(1).actionwindow->GetCtrl<ctrlTab>(0);
     BOOST_TEST_REQUIRE(mainTab != static_cast<ctrlTab*>(nullptr));
@@ -2260,6 +2410,7 @@ BOOST_FIXTURE_TEST_CASE(OnTheAlreadyChosenTabHeadTheBarKeepsQuietAboutA, HintFix
     BOOST_TEST(mainTab->GetCurrentTab() == mainTab->GetTabIdAt(1));
     BOOST_TEST(mainTab->GetCurrentTab() != tabBefore);
 
+    view(1).actionwindow->SetPinned(false);
     closeActionWindow(*this, view(1));
 }
 
@@ -2410,6 +2561,114 @@ BOOST_FIXTURE_TEST_CASE(TheDrawnLinesReallyLeaveTheEmitter, HintFixture<2>)
     BOOST_TEST(briefEmitTap::emitted.size() + numKeyLines == expected.size());
     for(const auto& e : briefEmitTap::emitted)
         BOOST_TEST(e.color != dskGameInterface::keyLineColor);
+}
+
+// ============================================================================================
+// 26. BEFUND K5 - DIE PHASE-12-DECKUNG AUF DER KNOPFREIHE DES FLAGGENREITERS
+// ============================================================================================
+
+/// DER BEFUND: vier Phase-12-Nachweise wurden vom AKTIONSFENSTER auf das POSTFENSTER umgehaengt,
+/// und im letzten fielen dabei die drei Zeilen weg, die den Fokus auf den GEOLOGENKNOPF
+/// setzten - die Knopfreihe des Flaggenreiters, vier Knoepfe nebeneinander. Genau der Knopf,
+/// um den Phase 12 gebaut wurde. Die Zusicherungen liefen weiter, aber nicht mehr auf dem
+/// Fenster, dem ein Anfaenger begegnet.
+///
+/// WARUM DIE VIER FAELLE TROTZDEM AUF DEM POSTFENSTER BLEIBEN, und das ist gemessen und nicht
+/// gemeint: das Aktionsfenster ist fuer einen Padspieler seit Phase 13 KEIN Gitterfenster mehr.
+/// Es geht nur noch als RING auf (dskGameInterface::PadOpenActionWindow -> OpenRing), und
+/// solange der Ring offen ist, ist er fuer seinen Sitzplatz modal - auch Y wird verbraucht.
+/// Die erste Haelfte dieses Falls MISST das. Ein Nachweis, der im Aktionsfenster
+/// KeyAction::MoveFocus erwartet, kann dort also nicht mehr laufen; er wuerde nicht die alte
+/// Frage stellen, sondern eine falsche. Das Postfenster ist damit nicht der "bessere" Traeger,
+/// sondern der einzige verbliebene Gitterweg, den ein Anfaenger nimmt - er liegt hinter dem
+/// Postsektor des Back-Rings.
+///
+/// UND DIE VERLORENE DECKUNG KEHRT HIER ZURUECK, auf ihrem eigenen Traeger: die vier Knoepfe des
+/// Flaggenreiters, mit dem Geologen darunter, so wie ein Padspieler sie HEUTE erreicht. Die
+/// Frage ist woertlich die aus Phase 12 - stimmt die Behauptung der Leiste in JEDER Richtung mit
+/// der Wirkung ueberein? -, nur heisst die Wirkung im Ring TurnRing statt MoveFocus.
+BOOST_FIXTURE_TEST_CASE(OnTheFlagButtonRowTheBarSaysExactlyWhatEveryDpadPressDoes, HintFixture<2>)
+{
+    GameWorld& world = worldFixture.world;
+    const MapPoint flagPt = findPlainFlagSpot(world, view(1).GetViewer());
+    BOOST_TEST_REQUIRE(flagPt.isValid());
+    world.SetFlag(flagPt, 1);
+    takePad(11, 1);
+    padSteerTo(11, 1, flagPt);
+
+    press(11, padHint::OpenActions);
+    BOOST_TEST_REQUIRE(view(1).actionwindow != static_cast<iwAction*>(nullptr));
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+
+    // --- (a) DIE MESSUNG, die die Umhaengung begruendet: das Aktionsfenster ist fuer das Pad
+    //         kein Gitterfenster mehr. Y kommt nicht hinein, weil es schon drin ist - und der
+    //         Ring verbraucht die Flanke.
+    const Window* const rootBefore = view(1).GetFocus().GetRoot();
+    const Window* const focusBefore = view(1).GetFocus().GetFocused();
+    BOOST_TEST_REQUIRE(rootBefore == static_cast<Window*>(view(1).actionwindow));
+    BOOST_TEST(!namesButton(view(1).GetBrief(), PadButton::Y));
+    press(11, padHint::Enter);
+    BOOST_TEST(view(1).GetRing().IsOpen());
+    BOOST_TEST(view(1).GetFocus().GetRoot() == rootBefore);
+    BOOST_TEST(view(1).GetFocus().GetFocused() == focusBefore);
+
+    // --- (b) DIE KNOPFREIHE selbst: vier Knoepfe, und der Geologe ist einer davon.
+    unsigned numPages = 1;
+    const std::vector<Window*> ringCtrls = dskGameInterface::RingPageCtrls(view(1), numPages);
+    BOOST_TEST_MESSAGE("AUDIT: Sektoren des Flaggenreiters = " << ringCtrls.size() << ", Seiten = " << numPages);
+    BOOST_TEST_REQUIRE(ringCtrls.size() == 4u);
+    ctrlButton* const geologist = flagTabButton(view(1), kFlagBtGeologist);
+    BOOST_TEST_REQUIRE(geologist != static_cast<ctrlButton*>(nullptr));
+    BOOST_TEST_REQUIRE(
+      (std::find(ringCtrls.begin(), ringCtrls.end(), static_cast<Window*>(geologist)) != ringCtrls.end()));
+
+    // DER FOKUS AUF DEN GEOLOGEN - woertlich die drei Zeilen, die beim Umhaengen gestrichen
+    // wurden. Ohne sie faengt die Runde unten an einer beliebigen Stelle an.
+    for(unsigned presses = 0; presses < 8u && view(1).GetFocus().GetFocused() != geologist; ++presses)
+        press(11, PadButton::DpadRight);
+    BOOST_TEST_REQUIRE(view(1).GetFocus().GetFocused() == static_cast<Window*>(geologist));
+    // Und der Klartext ist wirklich der des Geologen - der Fall misst also die Reihe, um die
+    // Phase 12 gebaut wurde, und nicht irgendeine.
+    BOOST_TEST(view(1).GetBrief().title == brief::ForAction(brief::ActionBrief::CallGeologist).title);
+
+    // --- (c) DIE PHASE-12-FRAGE, Richtung fuer Richtung, drei Runden ---------------------
+    unsigned named = 0;
+    unsigned turned = 0;
+    unsigned presses = 0;
+    bool sawGeologist = false;
+    for(unsigned round = 0; round < 3u; ++round)
+    {
+        for(const PadButton dpad : {PadButton::DpadLeft, PadButton::DpadRight, PadButton::DpadUp, PadButton::DpadDown})
+        {
+            const std::string bar = dumpKeys(view(1).GetBrief());
+            const auto claimed = actionFor(view(1).GetBrief(), dpad);
+            const Window* const before = view(1).GetFocus().GetFocused();
+            press(11, dpad);
+            const Window* const after = view(1).GetFocus().GetFocused();
+            const bool reallyTurned = (after != before);
+            ++presses;
+            if(after == geologist)
+                sawGeologist = true;
+            BOOST_TEST_CONTEXT("Runde " << round << " " << brief::PadButtonLabel(dpad) << "  Leiste=" << bar)
+            {
+                // Die Behauptung und die Wirkung sind DASSELBE - in beide Richtungen.
+                BOOST_TEST(reallyTurned == (claimed.has_value() && *claimed == brief::KeyAction::TurnRing));
+            }
+            if(claimed)
+                ++named;
+            if(reallyTurned)
+                ++turned;
+        }
+    }
+    BOOST_TEST_MESSAGE("AUDIT: " << presses << " Steuerkreuzdruecke auf der Flaggenreihe, genannt = " << named
+                                 << ", gewirkt = " << turned);
+    // Waere hier 0, waere der ganze Fall wertlos - genau die Sorte stiller Schrumpfung, die
+    // Befund K5 aufgedeckt hat.
+    BOOST_TEST(turned > 0u);
+    BOOST_TEST(named == turned);
+    BOOST_TEST(sawGeologist);
+
+    closeActionWindow(*this, view(1));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

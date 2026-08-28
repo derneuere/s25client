@@ -6,6 +6,7 @@
 
 #include "IngameMinimap.h"
 #include "input/FocusPath.h"
+#include "input/PadRing.h"
 #include "input/PlayerBrief.h"
 #include "world/GameWorldView.h"
 #include "world/GameWorldViewer.h"
@@ -134,6 +135,36 @@ public:
     FocusPath& GetFocus() { return focus_; }
     const FocusPath& GetFocus() const { return focus_; }
 
+    /// Das Kreismenue DIESES Sitzplatzes. Vier Ansichten = vier unabhaengige Ringe; ein Ring
+    /// weiss von den anderen nichts, genau wie der Fokus. Daran haengt die Zusicherung, dass
+    /// Spieler 1 mit seiner Ringauswahl an Spieler 0 nichts aendert.
+    padring::Ring& GetRing() { return ring_; }
+    const padring::Ring& GetRing() const { return ring_; }
+
+    /// "NUR ZUSCHAUEN" - die zweite woertliche Bitte des Auftraggebers.
+    ///
+    /// In diesem Zustand ist alles Erklaerende und alles Bedienende dieser Ansicht aus: die
+    /// Bauhilfe, die Gebaeudenamen, die Auslastung, der Klartextkasten (bis auf die eine Zeile,
+    /// die wieder herausfuehrt) und die Bodenmarkierung des Padzeigers. Was BLEIBT, sind Welt,
+    /// Figuren, Grenzsteine - und beide Sticks samt Trigger: "zuschauen" heisst herumschauen,
+    /// also muessen Kamera und Zoom weiterlaufen.
+    ///
+    /// Der Ausgang ist GENAU EINER und er ist sichtbar (B, und der Kasten sagt es). Ein Zustand
+    /// ohne sichtbaren Ausgang ist die Falle, die Phase 11 und Phase 12 je einmal gebaut und
+    /// wieder ausgebaut haben.
+    bool IsWatchOnly() const { return watchOnly_; }
+    void SetWatchOnly(bool watchOnly) { watchOnly_ = watchOnly; }
+    /// Die drei Anzeigeschalter, wie sie VOR dem Zuschauen standen. Beim Verlassen werden genau
+    /// diese Werte wiederhergestellt - "B bringt alles zurueck" ist woertlich das, was der
+    /// Kasten dazu verspricht, und es muss stimmen.
+    struct WatchOnlySaved
+    {
+        bool showBQ = false;
+        bool showNames = false;
+        bool showProductivity = false;
+    };
+    WatchOnlySaved watchOnlySaved;
+
     /// Aktuell geoeffnetes Aktionsfenster DIESES Spielers. Besitzer bleibt der WINDOWMANAGER,
     /// hier steht nur der Zeiger. Solange die Fenster-IDs global sind
     /// (gameData/const_gui_ids.h), kann nur eine Ansicht gleichzeitig eins offen haben - das
@@ -198,6 +229,8 @@ public:
 private:
     const unsigned viewIdx_;
     FocusPath focus_;
+    padring::Ring ring_;
+    bool watchOnly_ = false;
     std::optional<Position> padCursor_;
     std::optional<PadRejection> rejection_;
     unsigned rejectionCount_ = 0;

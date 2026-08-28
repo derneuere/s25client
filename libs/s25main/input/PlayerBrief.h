@@ -118,11 +118,28 @@ enum class KeyAction
     /// B auf einem Control mit OFFENER Eingabe (aufgeklappte Auswahlliste): die Liste klappt zu
     /// und der alte Wert bleibt stehen. Der Fokus bleibt dabei, wo er ist - deshalb ist das
     /// nicht LeaveFocus (FocusPath::OnPadButton, case B: erst Cancel(), dann erst Clear()).
-    CancelChoice
+    CancelChoice,
+    // --- DAS KREISMENUE, Phase 13 -----------------------------------------------------------
+    /// Das Steuerkreuz im Ring: einen Sektor weiter. Bewusst NICHT MoveFocus, obwohl der Fokus
+    /// dabei wandert - im Ring bewegt sich sichtbar der RING, und der Spieler sucht das Wort
+    /// fuer das, was er sieht.
+    TurnRing,
+    /// RB im Ring: die naechste Seite bzw. der naechste Reiter.
+    RingNextPage,
+    /// LB im Ring: die vorige Seite.
+    RingPrevPage,
+    /// B im Ring: der Ring geht zu, und das Fenster dahinter mit ihm.
+    CloseRing,
+    /// B beim Zuschauen: der EINZIGE Knopf in diesem Zustand.
+    LeaveWatchOnly,
+    /// DER LINKE STICK IM RING: er zeigt auf einen Sektor. Das HAUPTZEIGEMITTEL des Rings -
+    /// und bis zur Korrektur der einzige belegte Eingang, den die Leiste konstruktiv nicht
+    /// nennen KONNTE, weil ein Stickausschlag kein PadButton ist (Befund K2/4E).
+    AimRing
 };
 constexpr auto maxEnumValue(KeyAction)
 {
-    return KeyAction::CancelChoice;
+    return KeyAction::AimRing;
 }
 
 /// Was EINE Steuerkreuzrichtung im Fenster bewirkt.
@@ -162,13 +179,40 @@ enum class RoadStep
 };
 
 /// Ein Eintrag der Tastenhinweisleiste: dieser Knopf tut das.
+/// WOMIT ein Hinweis ausgeloest wird.
+///
+/// BEFUND K2/4E: bis hierher war ein Hinweis IMMER ein PadButton, und deshalb konnte die Leiste
+/// den linken Stick nicht nennen - obwohl er im Ring das Hauptzeigemittel ist. Ein
+/// Stickausschlag ist kein Knopf: IPadTarget::OnPadMove liefert eine Verschiebung, kein
+/// PadButton, und PadButton::LeftStick ist etwas ANDERES (der Stickklick, L3). Ihn dafuer zu
+/// missbrauchen waere eine Luege ueber L3.
+///
+/// Deshalb bekommt der Hinweis ein zweites Feld statt eines geliehenen Knopfes. Der Massstab
+/// aus Phase 12 heisst: die Leiste darf nichts verschweigen, was wirkt - und ein Eingang, den
+/// sie konstruktiv nicht nennen kann, ist die haerteste Form des Verschweigens.
+enum class KeyInput : uint8_t
+{
+    /// Ein Knopf. `KeyHint::button` gilt.
+    Button,
+    /// Der linke Stick als ZEIGER (die Achse, nicht der Klick). `KeyHint::button` gilt NICHT.
+    LeftStickAxis
+};
+
 struct KeyHint
 {
-    PadButton button;
-    KeyAction action;
+    PadButton button{};
+    KeyAction action{};
+    /// Vorgabe Button - jeder bestehende Hinweis bleibt woertlich, was er war.
+    KeyInput input = KeyInput::Button;
 
     friend bool operator==(const KeyHint& a, const KeyHint& b)
     {
+        if(a.input != b.input)
+            return false;
+        // Bei allem, was kein Knopf ist, traegt `button` keine Bedeutung und darf deshalb auch
+        // nicht verglichen werden.
+        if(a.input != KeyInput::Button)
+            return a.action == b.action;
         return a.button == b.button && a.action == b.action;
     }
     friend bool operator!=(const KeyHint& a, const KeyHint& b) { return !(a == b); }
@@ -502,6 +546,25 @@ struct KeyContext
     /// den die Leiste selbst vorgibt (eigene Flagge, RB, A, Y), stand "Back Menue" da und der
     /// Druck tat nichts - genau der Knopf, den ein festgefahrener Anfaenger als Ausweg sucht.
     bool canOpenSystemMenu = true;
+    /// DER RING DIESES SITZPLATZES IST OFFEN (padring::Ring::IsOpen). Dann gilt eine eigene
+    /// Belegung, und die Leiste muss sie nennen - sonst verspraeche sie "RB Weiter" (eine
+    /// Fokusstation), waehrend RB in Wirklichkeit die SEITE wechselt. Genau die Sorte Luege,
+    /// die Phase 12 dreimal ausbauen musste.
+    bool ringOpen = false;
+    /// Der Ring hat mehr als eine Seite (oder mehr als einen Reiter) - nur dann tun LB und RB
+    /// ueberhaupt etwas.
+    ///
+    /// BEFUND K2/4A: das stimmte bis zur Korrektur nur zur HAELFTE. Die Leiste schwieg im
+    /// einseitigen Ring richtig, aber LB und RB wirkten dort trotzdem - sie warfen die Auswahl
+    /// wortlos auf Sektor 0 zurueck, waehrend der Quelltext daneben das Gegenteil behauptete
+    /// ("laeuft die Seite um"). Geheilt ist das nicht an der Leiste, sondern an der WIRKUNG:
+    /// dskGameInterface::RingTurnPage kehrt jetzt sofort zurueck, wenn es nichts zu blaettern
+    /// gibt, und beide - Leiste und Knopf - fragen dafuer DIESELBE Funktion
+    /// (dskGameInterface::RingHasPages). Verschmolzen, nicht abgeschrieben.
+    bool ringHasPages = false;
+    /// "NUR ZUSCHAUEN" laeuft. Dann ist GENAU EIN Knopf belegt, und der Kasten besteht aus
+    /// dieser einen Zeile.
+    bool watchOnly = false;
 
     // --- Was das FOKUSSIERTE Control hergibt (nur im Fenster gelesen) ------------------------
     //
@@ -548,6 +611,10 @@ const char* KeyLabel(KeyAction action);
 /// (SDL_GameControllerGetType ist nirgends angebunden), und das ist ein benannter, hinzunehmender
 /// Bruch und keine Nachlaessigkeit.
 const char* PadButtonLabel(PadButton button);
+
+/// Der Name des EINGANGS eines Hinweises - der Knopf, oder der linke Stick. Die eine Stelle,
+/// an der KeyLine fragt, womit ein Hinweis ausgeloest wird.
+const char* KeyInputLabel(const KeyHint& hint);
 
 /// Die fertige Zeile, so wie sie unter dem Klartext steht: "A Strasse - RB Aktionen - Back Menue".
 ///

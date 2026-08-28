@@ -101,6 +101,13 @@ BOOST_FIXTURE_TEST_CASE(APadPlayerStartsRoadBuildingOnHisOwnFlagButNotOnAnyOther
     aimAt(0, emptyPt);
     press(10, padRoad::Begin);
     BOOST_TEST((view(0).GetRoad().mode == RoadBuildMode::Disabled));
+    // PHASE 13: auf BAUBAREM leerem Land ist A die dritte Stufe der Kaskade und oeffnet das
+    // Kreismenue (frueher: das Aktionsfenster, ohne den Fokus zu setzen). Der Strassenbau faengt
+    // dort weiterhin NICHT an - das ist die Zusicherung dieses Falls. Der Ring muss aber weg,
+    // bevor weitergezielt wird: solange er offen ist, gehoert der linke Stick ihm.
+    if(view(0).GetRing().IsOpen())
+        press(10, PadButton::B);
+    BOOST_TEST_REQUIRE(!view(0).GetRing().IsOpen());
 
     // (b) fremde Flagge: der Startpunkt gehoert Spieler 1, also passiert nichts
     aimAt(0, foreignFlag);

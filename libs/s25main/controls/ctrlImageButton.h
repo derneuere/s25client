@@ -14,6 +14,9 @@ public:
     ctrlImageButton(Window* parent, unsigned id, const DrawPoint& pos, const Extent& size, TextureColor tc,
                     ITexture* image, const std::string& tooltip);
 
+    /// Das Bild, mit dem dieser Knopf im Kreismenue steht - dasselbe, das er selbst zeichnet.
+    ITexture* GetRingIcon() const override { return GetImagePtr(); }
+
 protected:
     void DrawContent() const override;
 };

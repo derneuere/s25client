@@ -19,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 class ctrlBuildingIcon;
@@ -126,6 +127,24 @@ public:
     /// eine Spalte der Breite 0, um die kein Rahmen zu sehen ist (FocusPath::DrawRing steigt
     /// bei leerem Rechteck aus). Der Fokus verschwaende dort sichtbar im Nichts.
     virtual bool IsFocusLeaf() const { return CanFocus(); }
+
+    // --- Das Kreismenue (Phase 13) ---------------------------------------------------------
+    //
+    // Der Ring zeigt die Controls eines Fensters im Kreis. Er braucht dafuer je Eintrag genau
+    // zwei Auskuenfte: ein BILD, wenn es eins gibt, und einen KURZEN TEXT, wenn es keins gibt.
+    // Beide Vorgaben sind leer, also aendert sich fuer jede Klasse, die sie nicht
+    // ueberschreibt, gar nichts - dieselbe Bauform wie CanFocus/Activate darueber.
+    //
+    // WARUM DER TEXT VOM CONTROL KOMMT und nicht aus einer Tabelle im Ring: sonst gaebe es zwei
+    // Zeichenketten fuer denselben Knopf, und die eine (der Ring) veraltete neben der anderen
+    // (der Knopf). "Der Ring sagt es" und "der Knopf tut es" sind so dieselbe Zeile Quelltext -
+    // woertlich der Massstab, den Phase 12 fuer die Tastenhinweisleiste gesetzt hat.
+
+    /// Das Bild, mit dem dieser Eintrag im Ring steht. nullptr = keins, dann traegt der Sektor
+    /// den Text aus GetRingLabel().
+    virtual ITexture* GetRingIcon() const { return nullptr; }
+    /// Der kurze Text, mit dem dieser Eintrag im Ring steht. Leer = keiner.
+    virtual std::string GetRingLabel() const { return std::string(); }
 
     /// B-Knopf auf dem FOKUSSIERTEN Control: eine begonnene, noch nicht bestaetigte Eingabe
     /// verwerfen - eine aufgeklappte Liste zuklappen und den alten Wert stehen lassen.

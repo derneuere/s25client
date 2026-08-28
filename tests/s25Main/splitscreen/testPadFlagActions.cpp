@@ -33,6 +33,7 @@
 #include "desktops/dskGameInterface.h"
 #include "driver/PadEvent.h"
 #include "ingameWindows/iwAction.h"
+#include "ingameWindows/iwPadSystemMenu.h"
 #include "input/FocusPath.h"
 #include "lua/GameDataLoader.h"
 #include "nodeObjs/noFlag.h"
@@ -146,11 +147,13 @@ template<class T_Fixture>
 unsigned padFocusOnto(T_Fixture& f, const unsigned viewIdx, const PadDeviceId dev, const Window* target)
 {
     PlayerView& view = f.playerViewOf(viewIdx);
+    // PHASE 13: im KREISMENUE dreht das Steuerkreuz den Ring, die Schultern blaettern die
+    // SEITE. In einem gewoehnlichen Fenster ist es umgekehrt (RB = FocusPath::Dir::Next).
     for(unsigned presses = 0; presses < 32u; ++presses)
     {
         if(view.GetFocus().GetFocused() == target)
             return presses;
-        f.press(dev, PadButton::RightShoulder);
+        f.press(dev, view.GetRing().IsOpen() ? PadButton::DpadRight : PadButton::RightShoulder);
     }
     return 0;
 }
@@ -427,11 +430,14 @@ BOOST_FIXTURE_TEST_CASE(APadPlayerCanPullDownHisOwnFlagAndItBooksOnHisOwnAccount
     auto* pullDown = flagGroup->GetCtrl<ctrlButton>(kFlagBtPullDown);
     BOOST_TEST_REQUIRE(pullDown != static_cast<ctrlButton*>(nullptr));
 
-    // 3. Hinein und auf den Knopf - nur mit Padereignissen.
-    press(11, PadButton::Y);
+    // 3. Auf den Knopf - nur mit Padereignissen.
+    //
+    // PHASE 13: der Fokus steht schon im Ring (RB hat ihn geoeffnet UND betreten), Y ist dort
+    // wirkungslos. Gedreht wird mit dem Steuerkreuz; die Schultern blaettern die Seite.
+    BOOST_TEST_REQUIRE(view1.GetRing().IsOpen());
     BOOST_TEST_REQUIRE(view1.GetFocus().IsActive());
     for(unsigned i = 0; i < 32u && view1.GetFocus().GetFocused() != static_cast<Window*>(pullDown); ++i)
-        press(11, PadButton::RightShoulder);
+        press(11, PadButton::DpadRight);
     BOOST_TEST_REQUIRE(view1.GetFocus().GetFocused() == static_cast<Window*>(pullDown));
 
     const unsigned demolishGF = GAMECLIENT.GetGFNumber();
@@ -485,6 +491,11 @@ BOOST_FIXTURE_TEST_CASE(APadPlayerCanCloseHisActionWindowWithoutActing, FlagPadF
     press(11, padFlag::CloseWindow);
     BOOST_TEST_MESSAGE("AUDIT: iwAction nach B geschlossen - " << (wnd->ShouldBeClosed() ? "ja" : "nein"));
     BOOST_TEST(wnd->ShouldBeClosed());
+    // PHASE 13: EIN Druck genuegt, weil der Ring das Fenster IST - und mit ihm geht auch der
+    // Fokus. Vor der Ringform brauchte es zwei (erst Fokus, dann Fenster); hier war der Fokus
+    // von Anfang an drin.
+    BOOST_TEST(!view(1).GetRing().IsOpen());
+    BOOST_TEST(!view(1).GetFocus().IsActive());
     // Und es ist dabei nichts passiert: kein Baumodus, keine Ablehnungsmeldung als Ersatz.
     BOOST_TEST((view(1).GetRoad().mode == RoadBuildMode::Disabled));
 
@@ -495,10 +506,15 @@ BOOST_FIXTURE_TEST_CASE(APadPlayerCanCloseHisActionWindowWithoutActing, FlagPadF
     BOOST_TEST(WINDOWMANAGER.GetTopMostWindow(1) == static_cast<IngameWindow*>(nullptr));
 }
 
-/// B bleibt INNERHALB des Fensters, was es war: der Knopf, der den Fokus loest. Erst der
-/// zweite Druck - jetzt in der Welt - schliesst. Damit verliert der Padspieler nicht die
-/// Moeglichkeit, ein Fenster stehen zu lassen und weiterzuschauen.
-BOOST_FIXTURE_TEST_CASE(BFirstReleasesTheFocusAndOnlyThenClosesTheWindow, FlagPadFixture<2>)
+/// PHASE 13: IM RING SCHLIESST B IN EINEM DRUCK - und das ist Absicht, nicht Nachlaessigkeit.
+///
+/// Vorher galt die Staffelung "erst der Fokus, dann das Fenster", weil ein Padspieler ein
+/// Fenster stehen lassen und weiterschauen koennen musste. Im Ring gibt es diesen Zwischenhalt
+/// nicht: der Ring IST das Fenster, er verdeckt die Welt an dieser Stelle, und ein Ring, in dem
+/// der Fokus nicht steht, waere ein Bild ohne Bedienung. Die Staffelung bleibt fuer jedes
+/// GEWOEHNLICHE Fenster erhalten (testPadWindowFocus) - hier wird gemessen, dass sie im Ring
+/// wirklich nicht mehr gilt und der Ring dabei restlos verschwindet.
+BOOST_FIXTURE_TEST_CASE(InTheRingBClosesEverythingInOnePress, FlagPadFixture<2>)
 {
     const MapPoint spot = findBuildSpot(worldFixture.world, view(1).GetViewer(), BuildingQuality::Hut);
     BOOST_TEST_REQUIRE(spot.isValid());
@@ -512,16 +528,16 @@ BOOST_FIXTURE_TEST_CASE(BFirstReleasesTheFocusAndOnlyThenClosesTheWindow, FlagPa
     press(11, padFlag::Act);
     iwAction* const wnd = view(1).actionwindow;
     BOOST_TEST_REQUIRE(wnd != static_cast<iwAction*>(nullptr));
-    press(11, padFlag::Enter);
+    // Der Fokus steht sofort im Ring - Y braucht es nicht mehr, und ein Y ist dort wirkungslos.
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
     BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
+    press(11, padFlag::Enter);
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
 
-    // Erstes B: nur der Fokus geht - das Fenster bleibt.
+    // EIN B: Ring weg, Fokus weg, Fenster zu.
     press(11, padFlag::CloseWindow);
+    BOOST_TEST(!view(1).GetRing().IsOpen());
     BOOST_TEST(!view(1).GetFocus().IsActive());
-    BOOST_TEST(!wnd->ShouldBeClosed());
-
-    // Zweites B: jetzt schliesst es.
-    press(11, padFlag::CloseWindow);
     BOOST_TEST(wnd->ShouldBeClosed());
 
     if(!wnd->ShouldBeClosed())
@@ -584,8 +600,13 @@ BOOST_FIXTURE_TEST_CASE(APinnedWindowSurvivesTheCloseButton, FlagPadFixture<2>)
     BOOST_TEST_REQUIRE(wnd != static_cast<iwAction*>(nullptr));
     wnd->SetPinned(true);
 
+    // PHASE 13: der RING geht in jedem Fall zu - er ist der Zustand dieses Sitzplatzes, und
+    // einer, den man nicht mehr loswird, waere die Falle. Das angeheftete Fenster dahinter
+    // bleibt stehen und wird wieder sichtbar, genau wie es der Mausspieler festgesteckt hat.
     press(11, padFlag::CloseWindow);
     BOOST_TEST(!wnd->ShouldBeClosed());
+    BOOST_TEST(!view(1).GetRing().IsOpen());
+    BOOST_TEST(wnd->IsVisible());
 
     wnd->SetPinned(false);
     press(11, padFlag::CloseWindow);
@@ -613,9 +634,38 @@ BOOST_FIXTURE_TEST_CASE(InRoadModeBStillStepsBackAndClosesNothing, FlagPadFixtur
     padSteerTo(11, 1, spot.start);
 
     // Ein Fenster, das offen bleiben MUSS, waehrend der Baumodus laeuft.
-    press(11, padFlag::OpenActions);
-    iwAction* const wnd = view(1).actionwindow;
-    BOOST_TEST_REQUIRE(wnd != static_cast<iwAction*>(nullptr));
+    //
+    // PHASE 13: das kann NICHT mehr das Aktionsfenster sein - es ist jetzt ein Ring und damit
+    // fuer diesen Sitzplatz modal; solange er offen ist, faengt A keinen Strassenbau an,
+    // sondern loest einen Sektor aus. Genommen wird deshalb ein GEWOEHNLICHES Fenster, und
+    // zwar ueber den vollen produktiven Weg: Back oeffnet den System-Ring, ein Sektor darin
+    // oeffnet das Postfenster, B gibt dessen Fokus wieder ab. Die Frage dieses Falls bleibt
+    // woertlich dieselbe - nimmt B im Baumodus ein Wegstueck zurueck, statt ein Fenster
+    // zuzumachen?
+    press(11, PadButton::Back);
+    IngameWindow* const menu = WINDOWMANAGER.FindNonModalWindow(CGI_PADMENU, 1);
+    BOOST_TEST_REQUIRE(menu != static_cast<IngameWindow*>(nullptr));
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    for(unsigned i = 0; i < 16u; ++i)
+    {
+        const Window* const focused = view(1).GetFocus().GetFocused();
+        BOOST_TEST_REQUIRE(focused != static_cast<const Window*>(nullptr));
+        if(focused->GetID() == iwPadSystemMenu::ID_POST)
+            break;
+        press(11, PadButton::DpadRight);
+    }
+    press(11, PadButton::A);
+    IngameWindow* const wnd = WINDOWMANAGER.FindNonModalWindow(CGI_POSTOFFICE, 1);
+    BOOST_TEST_REQUIRE(wnd != static_cast<IngameWindow*>(nullptr));
+    BOOST_TEST_REQUIRE(!view(1).GetRing().IsOpen());
+    // B in einem GEWOEHNLICHEN Fenster gibt nur den Fokus ab - die Staffelung, die es dort
+    // weiterhin gibt.
+    press(11, PadButton::B);
+    BOOST_TEST_REQUIRE(!view(1).GetFocus().IsActive());
+    BOOST_TEST_REQUIRE(!wnd->ShouldBeClosed());
+    // Der Zeiger muss wieder auf der Startflagge stehen: der Ring hat ihn nicht bewegt, aber
+    // das Fenster koennte ihn ueberlagert haben - hier wird nichts angenommen.
+    padSteerTo(11, 1, spot.start);
 
     press(11, padRoad::Begin);
     BOOST_TEST_REQUIRE((view(1).GetRoad().mode == RoadBuildMode::Normal));
@@ -636,6 +686,8 @@ BOOST_FIXTURE_TEST_CASE(InRoadModeBStillStepsBackAndClosesNothing, FlagPadFixtur
     if(!wnd->ShouldBeClosed())
         wnd->Close();
     dsk->Msg_WindowClosed(*wnd);
+    if(!menu->ShouldBeClosed())
+        menu->Close();
     WINDOWMANAGER.Draw();
 }
 

@@ -2173,6 +2173,9 @@ msgstr ""
 msgid "Hi, I'm an artifical player and I'm not very good yet!"
 msgstr "Hei, jeg er en kunstig spiller og er ikke veldig god foreløpig!"
 
+msgid "Hides every symbol and every text of this seat, so you can just look at your land. The camera and the zoom keep working. B brings everything back."
+msgstr ""
+
 #: libs/s25main/ingameWindows/iwLobbyServerInfo.cpp:37
 msgid "Host:"
 msgstr "Vert:"
@@ -2385,6 +2388,9 @@ msgstr ""
 msgid "Jump to X:Y"
 msgstr ""
 
+msgid "Just watch"
+msgstr ""
+
 #: libs/s25main/input/PlayerBrief.cpp:125
 msgid "Keep moving until this line tells you that something fits."
 msgstr ""
@@ -2421,6 +2427,9 @@ msgstr "Språk:"
 #, fuzzy
 msgid "Leatherworks"
 msgstr "Smie"
+
+msgid "Left stick"
+msgstr ""
 
 #: libs/s25main/ingameWindows/iwPlayReplay.cpp:54
 msgid "Length"
@@ -2982,6 +2991,12 @@ msgstr ""
 msgid "Names and output: on"
 msgstr ""
 
+msgid "Names: off"
+msgstr ""
+
+msgid "Names: on"
+msgstr ""
+
 #: libs/s25main/addons/AddonCatapultGraphics.h:19
 msgid "Nation-specific catapult graphics"
 msgstr ""
@@ -3339,6 +3354,12 @@ msgstr ""
 msgid "Output mineral"
 msgstr ""
 
+msgid "Output: off"
+msgstr ""
+
+msgid "Output: on"
+msgstr ""
+
 #: libs/s25main/desktops/dskSelectMap.cpp:106
 msgid "Own maps"
 msgstr "Egne kart"
@@ -3471,6 +3492,9 @@ msgstr "Vennligst skriv inn et navn for spillet"
 msgid "Please wait..."
 msgstr "Vennligst vent..."
 
+msgid "Point"
+msgstr ""
+
 msgid "Point your allies here"
 msgstr ""
 
@@ -3508,6 +3532,9 @@ msgid "Presses wine, which only the temple uses."
 msgstr ""
 
 msgid "Previous"
+msgstr ""
+
+msgid "Previous page"
 msgstr ""
 
 #: libs/s25main/gameData/JobConsts.cpp:40
@@ -4305,6 +4332,9 @@ msgstr "Steiner"
 msgid "Stop storage"
 msgstr "Stopp lagring"
 
+msgid "Stop watching"
+msgstr ""
+
 #: libs/s25main/gameData/BuildingConsts.cpp:39
 msgid "Storehouse"
 msgstr "Lagerhus"
@@ -4802,6 +4832,9 @@ msgstr "Høvdingene samlet seg rundt bordet..."
 msgid "Tsunami"
 msgstr ""
 
+msgid "Turn"
+msgstr ""
+
 #: libs/s25main/desktops/dskSelectMap.cpp:78
 msgid "Type"
 msgstr "Type"
@@ -5093,6 +5126,9 @@ msgstr ""
 msgid "What you can do with the road under the pointer."
 msgstr ""
 
+msgid "What you see on the map"
+msgstr ""
+
 #: libs/s25main/desktops/dskOptions.cpp:298
 msgid "Window pinning"
 msgstr ""
@@ -5140,6 +5176,12 @@ msgid "Writes the name and the output of every building onto the map."
 msgstr ""
 
 msgid "Writes the name and the workload above every building. The workload tells you which of your works stand idle."
+msgstr ""
+
+msgid "Writes the name of every building onto the map. Useful while you are still learning which building is which."
+msgstr ""
+
+msgid "Writes the output of every building onto the map: how busy it is, how many soldiers are inside, how far a construction site has come."
 msgstr ""
 
 #: libs/s25main/network/ClientError.cpp:14

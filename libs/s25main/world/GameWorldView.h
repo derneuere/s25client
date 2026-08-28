@@ -59,6 +59,19 @@ class GameWorldView
     /// also auf der des PADSPIELERS. Der Mausspieler faende die Bauhilfe danach dauerhaft
     /// eingeschaltet vor, ohne sie je angefasst zu haben.
     bool forcedShowBQ_ = false;
+    /// Der Mensch hat die Bauhilfe AUSDRUECKLICH ausgeschaltet (ToggleShowBQ auf "aus").
+    ///
+    /// BEFUND PHASE 13, gemessen: ohne dieses Feld war jeder Schalter im Systemmenue nur die
+    /// halbe Antwort. dskGameInterface::PadOpenActionWindow ruft ForceShowBQ() bei JEDEM A auf
+    /// Bauland, und forcedShowBQ_ faellt ausschliesslich in ToggleShowBQ. Wer die Bauhilfe also
+    /// ausschaltete und danach einmal A drueckte, hatte sie wieder an - und zwar fuer immer,
+    /// weil derselbe Griff sie jedes Mal aufs Neue erzwingt. Genau die Schleife, die der
+    /// Auftraggeber mit "ich verstehe nicht, wie ich die Symbole ausschalte" beschrieben hat.
+    ///
+    /// Eine Bequemlichkeitsvorgabe darf einen ausgesprochenen Willen nicht ueberstimmen. Sie
+    /// darf ihn auch nicht fuer immer festschreiben: schaltet der Mensch die Bauhilfe spaeter
+    /// wieder ein, faellt das Feld, und die Vorgabe wirkt wieder.
+    bool bqExplicitlyOff_ = false;
     /// Show building names
     bool show_names;
     /// Show productivities
@@ -164,6 +177,10 @@ public:
     /// ToggleShowNamesAndProductivity beantwortet - der Schalter kippt beide zusammen, also ist
     /// "beide an" der einzige Zustand, den ein Umschalter als "an" beschriften darf.
     bool IsShowingNamesAndProductivity() const { return show_names && show_productivity; }
+    /// Die beiden EINZELN - gebraucht, seit der Ring sie getrennt schaltet (Phase 13). Reine
+    /// Lesezugriffe auf Felder, die es seit jeher gibt; am Verhalten aendert sich nichts.
+    bool IsShowingNames() const { return show_names; }
+    bool IsShowingProductivity() const { return show_productivity; }
 
     /// Copy visibility of HUD elements from this view to another
     void CopyHudSettingsTo(GameWorldView& other, bool copyBQ) const;

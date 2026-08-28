@@ -75,13 +75,19 @@ struct PadMenuFixture : PadViewFixture<2>
         // weiter und traefe dort eine zufaellig gleichlautende Kennung. Genau das ist beim
         // Bauen dieser Faelle einmal passiert, nachdem das Menue sich beim Waehlen schliesst.
         BOOST_TEST_REQUIRE(view(viewIdx).GetFocus().GetRoot() == expectedRoot);
+        // PHASE 13: das Systemmenue IST ein Ring. Dort wandert der Fokus mit dem STEUERKREUZ
+        // (ein Sektor weiter), waehrend die Schultern die SEITE wechseln; in einem gewoehnlichen
+        // Fenster ist es umgekehrt. Gefragt wird der Ringzustand selbst und nicht das Fenster -
+        // derselbe Wert, den auch dskGameInterface::OnPadButton liest.
+        const PadButton nextCtrl =
+          view(viewIdx).GetRing().IsOpen() ? PadButton::DpadRight : PadButton::RightShoulder;
         for(unsigned i = 0; i < 24u; ++i)
         {
             const Window* focused = view(viewIdx).GetFocus().GetFocused();
             BOOST_TEST_REQUIRE(focused != static_cast<const Window*>(nullptr));
             if(focused->GetID() == ctrlId)
                 return;
-            press(dev, PadButton::RightShoulder);
+            press(dev, nextCtrl);
         }
         BOOST_FAIL("Das Control ist per Pad nicht erreichbar");
     }
@@ -624,18 +630,32 @@ BOOST_FIXTURE_TEST_CASE(TheMousePlayerStillReachesEndGame, PadMenuFixture)
     BOOST_TEST(opts->GetCtrls<ctrlTextButton>().size() == 4u);
 }
 
-/// Namen und Auslastung sind der zweite Anzeigeschalter im Menue - und ebenfalls je Ansicht.
-BOOST_FIXTURE_TEST_CASE(NamesAndOutputAreSwitchedPerView, PadMenuFixture)
+/// Namen sind der zweite Anzeigeschalter im Menue - und ebenfalls je Ansicht.
+///
+/// PHASE 13: Namen und Auslastung sind hier GETRENNT (ID_NAMES / ID_PRODUCTIVITY). Der
+/// gekoppelte Schalter war ein Platzkompromiss der Knopfliste; der Ring hat den Platz. Der
+/// Nachweis prueft deshalb beides einzeln - und ausdruecklich auch, dass der eine den anderen
+/// NICHT mitzieht.
+BOOST_FIXTURE_TEST_CASE(NamesAndOutputAreSwitchedPerViewAndSeparately, PadMenuFixture)
 {
-    const bool before0 = view(0).GetView().IsShowingNamesAndProductivity();
-    const bool before1 = view(1).GetView().IsShowingNamesAndProductivity();
+    const bool names0 = view(0).GetView().IsShowingNames();
+    const bool names1 = view(1).GetView().IsShowingNames();
+    const bool prod1 = view(1).GetView().IsShowingProductivity();
 
     press(11, PadButton::Back);
-    focusTo(11, 1, iwPadSystemMenu::ID_NAMES_PRODUCTIVITY, menuOf(1));
+    focusTo(11, 1, iwPadSystemMenu::ID_NAMES, menuOf(1));
     press(11, PadButton::A);
 
-    BOOST_TEST(view(1).GetView().IsShowingNamesAndProductivity() == !before1);
-    BOOST_TEST(view(0).GetView().IsShowingNamesAndProductivity() == before0);
+    BOOST_TEST(view(1).GetView().IsShowingNames() == !names1);
+    BOOST_TEST(view(0).GetView().IsShowingNames() == names0);
+    // Die Auslastung ist NICHT mitgegangen - das ist der ganze Punkt der Trennung.
+    BOOST_TEST(view(1).GetView().IsShowingProductivity() == prod1);
+
+    // Und der zweite Schalter wirkt fuer sich.
+    focusTo(11, 1, iwPadSystemMenu::ID_PRODUCTIVITY, menuOf(1));
+    press(11, PadButton::A);
+    BOOST_TEST(view(1).GetView().IsShowingProductivity() == !prod1);
+    BOOST_TEST(view(1).GetView().IsShowingNames() == !names1);
 }
 
 /// Ein Fenster, das ein Padspieler geoeffnet hat, darf sich die gemerkten Fenstereinstellungen
@@ -705,9 +725,10 @@ BOOST_FIXTURE_TEST_CASE(InARunningGameThePadMenuServesTheSeatThatPressed, PadMen
     auto* menu = dynamic_cast<iwPadSystemMenu*>(WINDOWMANAGER.FindNonModalWindow(CGI_PADMENU, 1));
     BOOST_TEST_REQUIRE(menu != static_cast<iwPadSystemMenu*>(nullptr));
     BOOST_TEST(menu->GetOwner() == 1u);
-    // Fokus mit den SCHULTERN wandern lassen - RB vorwaerts, LB rueckwaerts, jeweils in
-    // ID-Reihenfolge (FocusPath::Move). FocusPath laeuft ausdruecklich NICHT um, deshalb
-    // braucht es beide Richtungen.
+    // Fokus wandern lassen - im RING mit dem Steuerkreuz (Phase 13), in einem gewoehnlichen
+    // Fenster mit den Schultern (RB vorwaerts, LB rueckwaerts, in ID-Reihenfolge). FocusPath
+    // laeuft ausdruecklich NICHT um, deshalb braucht der Fensterfall beide Richtungen; der Ring
+    // laeuft um und kommt mit einer aus.
     const auto focusToId = [&](const unsigned target) {
         for(unsigned i = 0; i < 24u; ++i)
         {
@@ -715,7 +736,10 @@ BOOST_FIXTURE_TEST_CASE(InARunningGameThePadMenuServesTheSeatThatPressed, PadMen
             BOOST_TEST_REQUIRE(focused != static_cast<const Window*>(nullptr));
             if(focused->GetID() == target)
                 return;
-            press(11, focused->GetID() < target ? PadButton::RightShoulder : PadButton::LeftShoulder);
+            if(v1.GetRing().IsOpen())
+                press(11, PadButton::DpadRight);
+            else
+                press(11, focused->GetID() < target ? PadButton::RightShoulder : PadButton::LeftShoulder);
         }
         BOOST_FAIL("Das Control ist per Pad nicht erreichbar");
     };

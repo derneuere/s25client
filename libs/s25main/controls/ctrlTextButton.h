@@ -17,6 +17,10 @@ public:
     /// Changes width so at most this many chars can be shown
     void ResizeForMaxChars(unsigned numChars);
 
+    /// Der Text, mit dem dieser Knopf im Kreismenue steht - WOERTLICH seine Beschriftung.
+    /// Keine zweite Zeichenkette: was auf dem Knopf steht, steht im Sektor.
+    std::string GetRingLabel() const override { return GetText(); }
+
 protected:
     /// Draw actual content (text here)
     void DrawContent() const override;

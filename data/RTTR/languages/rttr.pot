@@ -5601,3 +5601,45 @@ msgstr ""
 msgid "Soldiers only march out from your own military buildings nearby. Build one closer and come back."
 msgstr ""
 
+
+msgid "Turn"
+msgstr ""
+
+msgid "Point"
+msgstr ""
+
+msgid "Left stick"
+msgstr ""
+
+msgid "Previous page"
+msgstr ""
+
+msgid "Stop watching"
+msgstr ""
+
+msgid "Just watch"
+msgstr ""
+
+msgid "What you see on the map"
+msgstr ""
+
+msgid "Names: on"
+msgstr ""
+
+msgid "Names: off"
+msgstr ""
+
+msgid "Output: on"
+msgstr ""
+
+msgid "Output: off"
+msgstr ""
+
+msgid "Writes the name of every building onto the map. Useful while you are still learning which building is which."
+msgstr ""
+
+msgid "Writes the output of every building onto the map: how busy it is, how many soldiers are inside, how far a construction site has come."
+msgstr ""
+
+msgid "Hides every symbol and every text of this seat, so you can just look at your land. The camera and the zoom keep working. B brings everything back."
+msgstr ""

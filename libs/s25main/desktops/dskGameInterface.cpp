@@ -22,7 +22,9 @@
 #include "buildings/nobStorehouse.h"
 #include "buildings/nobTemple.h"
 #include "buildings/nobUsual.h"
+#include "controls/ctrlGroup.h"
 #include "controls/ctrlImageButton.h"
+#include "controls/ctrlTab.h"
 #include "controls/ctrlText.h"
 #include "driver/MouseCoords.h"
 #include "drivers/VideoDriverWrapper.h"
@@ -91,6 +93,7 @@
 #include "gameData/const_gui_ids.h"
 #include "liblobby/LobbyClient.h"
 #include "s25util/Log.h"
+#include <glad/glad.h>
 #include <algorithm>
 #include <cstdio>
 #include <utility>
@@ -713,7 +716,14 @@ void dskGameInterface::PadMenuLeaveTo(PlayerView& view, IngameWindow* const open
     if(auto* menu = WINDOWMANAGER.FindNonModalWindow(CGI_PADMENU, view.GetIndex()))
     {
         if(view.GetFocus().GetRoot() == menu)
-            ReleaseFocus(view);
+        {
+            // Der Ring gehoert diesem Menue; das gewaehlte Fenster ist ein gewoehnliches und
+            // wird ganz normal betreten. Sichtbarkeit kommt dabei zurueck (CloseRing).
+            if(view.GetRing().IsOpen())
+                CloseRing(view, /*closeWindow*/ false);
+            else
+                ReleaseFocus(view);
+        }
         menu->Close();
     }
     // `opened` ist nullptr, wenn ToggleWindow ein bereits offenes Fenster ZUGEMACHT hat. Dann
@@ -873,7 +883,13 @@ void dskGameInterface::Msg_PaintAfter()
     //
     // Ohne angestecktes Pad ist jeder Block leer (RefreshBrief), und diese Schleife zeichnet
     // nichts. Der Einzelspieler mit Maus bekommt also keinen einzigen zusaetzlichen Zeichenruf.
-    forEachView([this](const PlayerView& view) { DrawBrief(view); });
+    // Der RING liegt UNTER dem Kasten und ueber der Welt: der Kasten ist seine Beschriftung
+    // und muss lesbar bleiben. Beide in derselben Schleife, damit sie nicht auseinanderlaufen
+    // koennen.
+    forEachView([this](const PlayerView& view) {
+        DrawRing(view);
+        DrawBrief(view);
+    });
 }
 
 bool dskGameInterface::OpenObjectWindow(PlayerView& view, const MapPoint cSel)
@@ -1054,6 +1070,11 @@ bool dskGameInterface::PadOpenActionWindow(PlayerView& view)
     if(opts.tabs.build)
         view.GetView().ForceShowBQ();
     view.ClearRejection();
+    // DER RING - Phase 13. Dasselbe Fenster, dieselben Knoepfe, dieselben Regeln; nur im Kreis
+    // statt im Gitter, und der Fokus steht sofort darin, statt erst auf Y zu warten.
+    // Schlaegt das fehl (kein bedienbares Control), bleibt es beim Fenster von vorher - der
+    // Padspieler verliert dadurch nichts.
+    OpenRing(view, view.actionwindow);
     return true;
 }
 
@@ -1385,6 +1406,22 @@ void dskGameInterface::RefreshBrief(PlayerView& view)
         view.SetBrief(brief::Brief());
         return;
     }
+    // BEIM ZUSCHAUEN bleibt vom Kasten GENAU EINE ZEILE stehen: der Ausgang.
+    //
+    // Nicht gar nichts, und das ist die wichtigste Entscheidung an diesem Zustand. Ein Zustand,
+    // der alles ausblendet UND seinen eigenen Ausgang verschweigt, ist eine Falle - genau die,
+    // die Phase 11 (Back verschluckt) und Phase 12 (luegende Leiste) je einmal gebaut und
+    // wieder ausgebaut haben. Der Kasten ist damit nicht weg, sondern von bis zu neun Zeilen
+    // auf eine geschrumpft.
+    if(view.IsWatchOnly())
+    {
+        brief::KeyContext watchKeys;
+        watchKeys.watchOnly = true;
+        brief::Brief b;
+        b.keys = brief::HintsFor(watchKeys);
+        view.SetBrief(std::move(b));
+        return;
+    }
     // Steht der Spieler in einem Fenster, ist das fokussierte Control die Frage, die er gerade
     // stellt - nicht der Knoten unter seinem Zeiger. Das ist der Kern: die Auskunft folgt dem
     // FOKUS, und der Fokus ist je Ansicht gefuehrt (FocusPath). Deshalb koennen vier Spieler
@@ -1397,6 +1434,14 @@ void dskGameInterface::RefreshBrief(PlayerView& view)
     brief::KeyContext keys;
     keys.canOpenSystemMenu = CanOpenSystemMenu(view);
     keys.inWindow = view.GetFocus().IsActive();
+    // DER RING - und die Leiste liest denselben Zustand, den OnPadButton liest. `ringHasPages`
+    // fragt woertlich, ob RingTurnPage etwas zu wechseln haette: mehr als eine Seite oder mehr
+    // als ein Reiter. Ohne die zweite Haelfte verschwiege die Leiste die Schultern genau dort,
+    // wo ein Anfaenger die restlichen Gebaeude sucht - im Baumenue mit drei Reitern zu je
+    // weniger als acht Eintraegen.
+    keys.ringOpen = view.GetRing().IsOpen();
+    if(keys.ringOpen)
+        keys.ringHasPages = RingHasPages(view);
     keys.roadMode = view.GetRoad().mode != RoadBuildMode::Disabled;
 
     // Y UND B, EINMAL RICHTIG GEFRAGT - Befund B2 und B3.
@@ -1541,7 +1586,12 @@ dskGameInterface::BriefLayout dskGameInterface::LayoutBrief(const PlayerView& vi
     // gebraucht wird. Der Zeiger ist gueltig, solange das Fenster lebt: Msg_WindowClosed setzt
     // ihn beim Schliessen auf nullptr. Andere Fenster bleiben aussen vor; sie liegen ohnehin
     // ueber dem Kasten und gehoeren dorthin (siehe die Begruendung am Aufruf in Msg_PaintAfter).
-    const Rect avoid = view.actionwindow ?
+    //
+    // PHASE 13: ...und nur, solange es SICHTBAR ist. Der Ring setzt genau dieses Fenster
+    // unsichtbar; wiche der Kasten weiterhin davor aus, spraenge er unter dem Ring weg - vor
+    // einem Fenster, das niemand sieht. Der Kasten ist die Beschriftung des Rings und muss
+    // dabei feststehen.
+    const Rect avoid = (view.actionwindow && view.actionwindow->IsVisible()) ?
                          Rect(view.actionwindow->GetDrawPos(), view.actionwindow->GetSize()) :
                          Rect(Position(0, 0), Extent(0, 0));
 
@@ -2130,6 +2180,29 @@ void dskGameInterface::UpdateInput(const unsigned elapsedMs, const Position& mou
     // Fenster geoeffnet, den Fokus gesetzt oder den Strassenbau gestartet haben. Der Text muss
     // den Zustand NACH der Eingabe beschreiben, sonst haengt er dem Spieler um einen Frame
     // hinterher - bei 110 ms Wiederholrate der Fokusnavigation waere das sichtbar.
+    // Ein Ring ohne Fokus ist verwaist: sein Fenster hat sich beim Ausloesen selbst
+    // geschlossen (iwAction tut das, sobald ein Gebaeude gesetzt ist). Ohne diesen Schritt
+    // bliebe der Ringzustand stehen und verschluckte die Weltknoepfe dieses Sitzplatzes.
+    //
+    // GEFRAGT WIRD AUCH NACH DEM FENSTER SELBST, nicht nur nach dem Fokus. Ein Fenster, das
+    // sich beim Ausloesen zum Schliessen VORGEMERKT hat, lebt noch, bis der WindowManager es
+    // beim naechsten Zeichnen wegraeumt - der Fokus haengt in dieser Zwischenzeit noch daran.
+    // Ein Ring, der solange offen bleibt, zeichnet ueber einer Leiche und verschluckt genau die
+    // Flanken, mit denen der Spieler weitermachen will.
+    //
+    // Und geschlossen wird ueber CloseRing und nicht ueber Ring::Close(): nur CloseRing gibt
+    // dem Fenster seine SICHTBARKEIT zurueck. Sonst bliebe - sobald der Fokus einmal aus einem
+    // anderen Grund als dem Fensterschluss faellt - ein unsichtbares, aber bedienbares Fenster
+    // im Stapel liegen. Genau die Sorte stiller Rest, aus der frueher Geisterstrassen und
+    // Geisterfokusse entstanden sind.
+    forEachView([this](PlayerView& view) {
+        if(!view.GetRing().IsOpen())
+            return;
+        const auto* const root = dynamic_cast<const IngameWindow*>(view.GetFocus().GetRoot());
+        if(!view.GetFocus().IsActive() || !root || root->ShouldBeClosed())
+            CloseRing(view, /*closeWindow*/ false);
+    });
+
     forEachView([this](PlayerView& view) { RefreshBrief(view); });
 }
 
@@ -2163,6 +2236,20 @@ void dskGameInterface::OnPadMove(const unsigned slot, const Position& delta)
     PlayerView& view = *views_[slot];
     // Ab hier handelt DIESER Spieler - siehe die Klammer in OnPadButton.
     const ViewScope ownerScope(slot);
+    // DER RING BEKOMMT DEN STICK VOR DEM FOKUS - Phase 13. Im Ring ist die Stickrichtung die
+    // Auswahl; liefe der Stick vorher durch FocusPath::OnPadMove, wanderte der Fokus in
+    // ID-Reihenfolge statt zum getroffenen Sektor, und der Ring waere ein Rasterknopfwerk in
+    // Kreisform.
+    if(view.GetRing().IsOpen())
+    {
+        RingOnPadMove(view, delta);
+        return;
+    }
+    // Beim ZUSCHAUEN bewegt sich der Zeiger nicht. Der Sinn des Zustandes ist, dass nichts
+    // Bedienendes mehr im Bild ist; ein wandernder Zeiger samt Bodenmarkierung waere genau das.
+    // Kamera und Zoom laufen weiter - sie kommen ueber OnPadCamera/OnPadZoom und nicht hier an.
+    if(view.IsWatchOnly())
+        return;
     // Steht dieser Spieler in einem Fenster, gehoert der Stick dem Fokus und NICHT dem
     // Weltzeiger. Ohne gesetzte Wurzel liefert das false und alles laeuft wie in Phase 3.
     if(view.GetFocus().OnPadMove(delta, padStepMs_))
@@ -2326,6 +2413,26 @@ void dskGameInterface::OnPadButton(const unsigned slot, const PadButton button, 
     // gehoert es ihm. Ein einziger Wert, aus dem beides faellt - der handelnde Spieler kann
     // gar nicht mehr vom Fensterbesitz abweichen.
     const ViewScope ownerScope(slot);
+    // --- DER RING IST FUER SEINEN SITZPLATZ MODAL (Phase 13) ---------------------------------
+    //
+    // Er wird VOR allem anderen gefragt - auch vor Back und Y. Sonst risse Back mitten in der
+    // Gebaeudewahl ein zweites Menue auf und Y spraenge in das unsichtbare Fenster hinter dem
+    // Ring. Der Ring verbraucht JEDE Flanke; welcher Knopf welche Wirkung hat, steht in
+    // RingOnPadButton und in der Tastenhinweisleiste - und beides liest denselben Zustand.
+    if(view.GetRing().IsOpen())
+    {
+        if(RingOnPadButton(view, button, down))
+            return;
+    }
+    // BEIM ZUSCHAUEN gibt es GENAU EINEN Knopf, und der Kasten nennt ihn: B fuehrt zurueck.
+    // Ein Zustand ohne sichtbaren Ausgang ist die Falle, die Phase 11 und Phase 12 je einmal
+    // gebaut und wieder ausgebaut haben.
+    if(view.IsWatchOnly())
+    {
+        if(down && button == PadButton::B)
+            LeaveWatchOnly(view);
+        return;
+    }
     // --- ZWEI Knoepfe werden VOR dem Fokus abgefragt ----------------------------------------
     //
     // Die Regel darunter lautet sonst: steht der Spieler in einem Fenster, sieht die Welt seine
@@ -2617,7 +2724,13 @@ bool dskGameInterface::PadOpenSystemMenu(PlayerView& view)
         // Steht der Fokus dieses Spielers noch im Menue, muss er MIT verschwinden - sonst
         // bliebe eine Wurzel stehen, deren Fenster gleich zerfaellt.
         if(view.GetFocus().GetRoot() == old)
-            ReleaseFocus(view);
+        {
+            // Der Ring dieses Sitzplatzes zeigt genau dieses Fenster - er geht mit.
+            if(view.GetRing().IsOpen())
+                CloseRing(view, /*closeWindow*/ false);
+            else
+                ReleaseFocus(view);
+        }
         old->Close();
         return true;
     }
@@ -2666,7 +2779,11 @@ bool dskGameInterface::PadOpenSystemMenu(PlayerView& view)
     // etwas auszuwaehlen. Ihn danach erst noch Y druecken zu lassen waere genau die
     // unausgesprochene Regel, an der der Auftraggeber beim Tagebuch gescheitert ist ("ich
     // druecke B und es passiert nichts").
-    EnterWindow(view, &wnd);
+    // ALS RING, und das ist die woertliche Bitte "dann haben wir nur ein Paradigma": das
+    // Back-Menue ist derselbe Ring wie das Baumenue. Wer die eine Bedienform gelernt hat,
+    // findet sie hier wieder - und genau hier sitzen die Symbolschalter, nach denen der
+    // Auftraggeber gefragt hat.
+    OpenRing(view, &wnd);
     view.ClearRejection();
     return true;
 }
@@ -2903,10 +3020,14 @@ void dskGameInterface::Run()
     for(auto& view : views_)
     {
         const bool hasCursor = view->GetView().GetCursorPos().has_value();
+        // BEIM ZUSCHAUEN keine Bodenmarkierung: sie ist das letzte Bedienelement in der Welt
+        // dieser Ansicht, und der Sinn des Zustandes ist, dass keines mehr im Bild ist.
+        // Der AUSWAHLRAHMEN des Aktionsfensters faellt ohnehin weg - der Ring schliesst es.
         view->GetView().Draw(view->GetRoad(),
                              view->actionwindow != nullptr ? view->actionwindow->GetSelectedPt() :
                                                              MapPoint::Invalid(),
-                             drawMouse && hasCursor, view.get() == &primary() ? &water_percent : nullptr);
+                             drawMouse && hasCursor && !view->IsWatchOnly(),
+                             view.get() == &primary() ? &water_percent : nullptr);
     }
 
     // Indicate that the game is paused by darkening the screen (dark semi-transparent overlay)
@@ -3278,6 +3399,637 @@ bool dskGameInterface::CommitRoad(PlayerView& view)
 void dskGameInterface::GI_BuildRoad()
 {
     CommitRoad(RoadWindowOwner());
+}
+
+
+// ============================================================================================
+// DAS KREISMENUE - Phase 13
+// ============================================================================================
+//
+// Der Auftraggeber hat es zweimal bestellt: "Ich hatte mir eigentlich auch ein Kreismenue
+// gewuenscht fuer die Gebaeude statt das fuer die Maus. Einfach weil es Benutzerfreundlicher
+// ist und dann haben wir nur ein Paradigma."
+//
+// "NUR EIN PARADIGMA" ist der Kern und bestimmt die Bauform: der Ring ist KEIN zweites
+// Regelwerk neben dem Aktionsfenster, sondern eine DARSTELLUNG desselben. Er zeigt die Controls
+// eines Fensters, das schon offen ist, und loest sie ueber FocusPath::Activate() aus - also
+// ueber genau den Weg, den ein Mausklick nimmt. Daraus faellt gratis an:
+//  - der Klartextkasten aus Phase 9 beschriftet den Ring (RefreshBrief folgt dem FOKUS),
+//  - die Verfuegbarkeitsregeln bleiben in iwAction, wo sie stehen,
+//  - die GameCommands laufen unveraendert. Die Ringauswahl ist ANZEIGE.
+//
+// WARUM DAS FENSTER UNSICHTBAR WIRD statt zu verschwinden: Window::Draw() prueft visible_, aber
+// FocusPath::collectFrom steigt von der WURZEL in deren Kinder ab und prueft nur DEREN
+// Sichtbarkeit. Ein unsichtbares Fenster ist also vollstaendig bedienbar und wird nicht
+// gezeichnet. Zwei Stellen mussten dafuer nachgezogen werden, beide in IngameWindow und beide
+// aus demselben Grund - was nicht gezeichnet wird, darf auch nicht wirken:
+// Msg_PaintAfter (der Fokusrahmen) und IsMessageRelayAllowed (Maus und Tastatur).
+
+std::vector<FocusPath::Candidate> dskGameInterface::RingCandidates(const PlayerView& view)
+{
+    std::vector<FocusPath::Candidate> out;
+    for(FocusPath::Candidate& cand : view.GetFocus().Collect())
+    {
+        // Die REITERKOEPFE sind keine Ringeintraege. Sie sind die Blaetterachse (LB/RB) - und
+        // ein Reiterkopf als Sektor waere ausserdem ein Sektor, der die Bedeutung aller
+        // anderen umschreibt, statt selbst etwas zu tun.
+        if(dynamic_cast<const ctrlTab*>(cand.ctrl->GetParent()))
+            continue;
+        out.push_back(std::move(cand));
+    }
+    return out;
+}
+
+std::vector<Window*> dskGameInterface::RingPageCtrls(const PlayerView& view, unsigned& numPages)
+{
+    const std::vector<FocusPath::Candidate> all = RingCandidates(view);
+    numPages = std::max(1u, (static_cast<unsigned>(all.size()) + padring::Ring::SectorsPerPage - 1)
+                              / padring::Ring::SectorsPerPage);
+    const unsigned page = std::min(view.GetRing().GetPage(), numPages - 1);
+    const unsigned begin = page * padring::Ring::SectorsPerPage;
+    std::vector<Window*> out;
+    for(unsigned i = begin; i < all.size() && i < begin + padring::Ring::SectorsPerPage; ++i)
+        out.push_back(all[i].ctrl);
+    return out;
+}
+
+// DIE LAGE EINER BESCHRIFTUNG - die eine Stelle, an der Phase 13 gerechnet statt gemessen hat.
+//
+// DER BEFUND (K1), nachgemessen und hier festgehalten: der Text stand MITTIG IM SEKTOR, auf dem
+// mittleren Radius, CENTER|VCENTER. Bei sieben Sektoren ist der Sektorbogen 63,7 Punkte breit
+// (Ringdurchmesser 200) bzw. 95 (Durchmesser 300). Gemessen mit den ausgelieferten Schriften:
+// "Uebersichtskarte" 180, "Auslastung: aus" 180, "Construction aid: off" 252. Sechs von sieben
+// deutschen Beschriftungen passten nicht, im Polnischen keine einzige, und zwei Paare lagen
+// uebereinander. Kein Bogen dieser Groesse traegt ein solches Wort - auch nicht bei 300.
+//
+// DIE LOESUNG: DER TEXT STEHT NEBEN DEM RING, nicht darin.
+//
+// Der Sektor selbst bleibt, was er war - die getroffene Flaeche und der farbige Beleg dafuer,
+// wo die Auswahl steht. Nur das WORT wandert nach draussen, radial in Sektorrichtung, und
+// bekommt dort die Breite, die dort wirklich frei ist: bis an den Rand der freien Flaeche
+// (Viewport geschnitten mit Safe Area, oberhalb des Klartextkastens). Was dann immer noch
+// nicht passt, wird UMGEBROCHEN und nicht verkleinert - der Spieler sitzt drei Meter vor einem
+// 55-Zoll-Fernseher, und kleinere Schrift ist genau die Loesung, die dort nicht geht
+// (TV-RECHERCHE.md 1: 26-32 px Mindestgroesse bei 1080p, und der Ring ist die EINZIGE Tuer zu
+// den Symbolschaltern - er muss lesbar sein).
+//
+// WARUM DIE BREITE ZWEIMAL GERECHNET WIRD: wie weit der Ring in einem Hoehenband seitlich
+// hinausragt, haengt an der Hoehe des Kastens; die Hoehe haengt an der Zeilenzahl, die
+// Zeilenzahl an der Breite. Zwei Durchgaenge loesen das auf - der erste schaetzt mit einer
+// Zeile, der zweite rechnet mit der wirklichen Hoehe.
+//
+// GEZEICHNET WIRD GENAU DIESER KASTEN (DrawRing liest labelBox). Der Nachweis liest dieselbe
+// Zahl. Es gibt keine zweite Lagerechnung mehr, die neben dieser veralten koennte - dieselbe
+// Linie, die Phase 12 fuer die Tastenhinweisleiste gezogen hat.
+void dskGameInterface::LayoutRingLabel(const RingLayout& layout, RingEntry& e)
+{
+    e.icon = e.ctrl->GetRingIcon();
+    if(e.icon)
+    {
+        // EIN BILD BLEIBT IM SEKTOR. Es ist so gross, wie es ist (36 Punkte bei den
+        // Gebaeudesymbolen) und passt in jeden Bogen, den dieser Ring erzeugt - der Befund
+        // betraf ausschliesslich den TEXT.
+        const float rMid = (layout.rInner + layout.rOuter) / 2.f;
+        const PointF mid = padring::PointOnRing(PointF(layout.center), rMid, e.sector.midAngle());
+        const Position p(static_cast<int>(mid.x), static_cast<int>(mid.y));
+        e.labelBox = Rect(p - e.icon->GetOrigin(), e.icon->GetSize());
+        return;
+    }
+    const std::string label = e.ctrl->GetRingLabel();
+    if(label.empty())
+        return;
+
+    const glFont& font = *NormalFont;
+    const auto lineH = static_cast<int>(font.getHeight());
+    // Der Abstand zwischen Ringkante und Wort. Ohne ihn klebte der Text am Sektorrand und die
+    // Kante der hellen Auswahlflaeche liefe durch die Unterlaengen.
+    constexpr int gap = 6;
+    const float rad = e.sector.midAngle() * 3.14159265358979323846f / 180.f;
+    const float ux = std::cos(rad);
+    const float uy = std::sin(rad);
+    const int anchorY = layout.center.y + static_cast<int>((layout.rOuter + gap) * uy);
+
+    // Wie weit ragt der Ring in dem Hoehenband [top, bottom) seitlich ueber seine Mitte hinaus?
+    const auto ringHalfWidthIn = [&layout](const int top, const int bottom) {
+        if(top <= layout.center.y && bottom >= layout.center.y)
+            return layout.rOuter; // das Band schneidet die Mitte: volle Breite
+        const auto dy =
+          static_cast<float>(std::min(std::abs(top - layout.center.y), std::abs(bottom - layout.center.y)));
+        if(dy >= layout.rOuter)
+            return 0.f;
+        return std::sqrt(layout.rOuter * layout.rOuter - dy * dy);
+    };
+
+    std::vector<std::string> lines{label};
+    int w = static_cast<int>(font.getWidth(label));
+    int h = lineH;
+    Rect box;
+    for(int pass = 0; pass < 2; ++pass)
+    {
+        // SENKRECHT: der Kasten waechst VOM RING WEG. Oben waechst er nach oben, unten nach
+        // unten, und auf der Seite steht er mittig auf dem Sektorstrahl.
+        int top;
+        if(uy < -0.25f)
+            top = anchorY - h;
+        else if(uy > 0.25f)
+            top = anchorY;
+        else
+            top = anchorY - h / 2;
+        const int bottom = top + h;
+        const auto halfW = static_cast<int>(ringHalfWidthIn(top, bottom));
+
+        // WAAGERECHT: rechts vom Ring linksbuendig, links davon rechtsbuendig, oben und unten
+        // mittig ueber der Ringmitte. Die verfuegbare Breite ist das, was von dort bis zum Rand
+        // der freien Flaeche wirklich uebrig ist - gemessen, nicht angenommen.
+        int maxW;
+        if(ux > 0.25f)
+            maxW = layout.freeArea.right - (layout.center.x + halfW + gap);
+        else if(ux < -0.25f)
+            maxW = (layout.center.x - halfW - gap) - layout.freeArea.left;
+        else
+            maxW = layout.freeArea.right - layout.freeArea.left;
+        maxW = std::max(lineH, maxW);
+
+        if(w > maxW)
+        {
+            // GetWrapInfo trennt Woerter nur, wenn ein Wort allein laenger ist als die Zeile.
+            // Genau das ist hier gewollt: lieber ein getrenntes Wort als eines, das ueber den
+            // Bildrand oder in die Nachbarbeschriftung laeuft.
+            lines = font.GetWrapInfo(label, static_cast<unsigned short>(maxW), static_cast<unsigned short>(maxW))
+                      .CreateSingleStrings(label);
+        }
+        if(lines.empty())
+            lines.assign(1, label);
+        w = 0;
+        for(const std::string& line : lines)
+            w = std::max(w, static_cast<int>(font.getWidth(line)));
+        h = static_cast<int>(lines.size()) * lineH;
+
+        int left;
+        if(ux > 0.25f)
+            left = layout.center.x + halfW + gap;
+        else if(ux < -0.25f)
+            left = (layout.center.x - halfW - gap) - w;
+        else
+            left = layout.center.x - w / 2;
+        box = Rect(Position(left, top), Extent(static_cast<unsigned>(std::max(0, w)),
+                                               static_cast<unsigned>(std::max(0, h))));
+    }
+    // ZULETZT IN DIE FREIE FLAECHE SCHIEBEN. Die Breite ist oben schon so gewaehlt, dass nach
+    // aussen nichts uebersteht; senkrecht kann bei vielen Zeilen trotzdem etwas herausragen,
+    // und aus dem Bild geschobener Text ist genau der Fehler, um den es hier geht.
+    Position shift(0, 0);
+    if(box.left < layout.freeArea.left)
+        shift.x = layout.freeArea.left - box.left;
+    else if(box.right > layout.freeArea.right)
+        shift.x = layout.freeArea.right - box.right;
+    if(box.top < layout.freeArea.top)
+        shift.y = layout.freeArea.top - box.top;
+    else if(box.bottom > layout.freeArea.bottom)
+        shift.y = layout.freeArea.bottom - box.bottom;
+    e.labelBox = Rect(box.getOrigin() + shift, box.getSize());
+    e.labelLines = std::move(lines);
+}
+
+dskGameInterface::RingLayout dskGameInterface::LayoutRing(const PlayerView& view) const
+{
+    RingLayout out;
+    if(!view.GetRing().IsOpen())
+        return out;
+    unsigned numPages = 1;
+    const std::vector<Window*> ctrls = RingPageCtrls(view, numPages);
+    if(ctrls.empty())
+        return out;
+    out.numPages = numPages;
+    out.page = std::min(view.GetRing().GetPage(), numPages - 1);
+
+    // DIE LAGE: der Ring sitzt in der freien Flaeche UEBER dem Klartextkasten, nicht in der
+    // Viewportmitte.
+    //
+    // NACHGERECHNET fuer den Zielfall (4K, Fernsehmodus, vier Spieler): ein Viewport ist
+    // 960x540, der Kasten steht unten und ist bei neun Zeilen 134 Punkte hoch. Ein Ring in der
+    // Viewportmitte (y 810) mit Radius 148 reichte bis y 958 und liefe damit 72 Punkte tief in
+    // seine EIGENE Beschriftung hinein. Der Kasten ist die Beschriftung des Rings; sie zu
+    // ueberdecken waere der Fehler, den diese Phase gerade vermeiden soll.
+    const Rect viewport(view.GetView().GetPos(), view.GetView().GetSize());
+    const Rect safeArea = tv::ActiveSafeAreaRect(VIDEODRIVER.GetRenderSize());
+    const int left = std::max<int>(viewport.left, safeArea.left);
+    const int right = std::min<int>(viewport.right, safeArea.right);
+    const int top = std::max<int>(viewport.top, safeArea.top);
+    int bottom = std::min<int>(viewport.bottom, safeArea.bottom);
+    const BriefLayout brief = LayoutBrief(view);
+    if(!brief.lines.empty() && brief.panel.top > top && brief.panel.top < bottom)
+        bottom = brief.panel.top;
+    const int freeH = std::max(1, bottom - top);
+    const int freeW = std::max(1, right - left);
+    out.freeArea = Rect(Position(left, top), Extent(static_cast<unsigned>(freeW), static_cast<unsigned>(freeH)));
+    out.center = Position((left + right) / 2, (top + bottom) / 2);
+    // Der Deckel von 300 ist da, damit der Ring bei EINEM Spieler auf einem 4K-Fernseher nicht
+    // das halbe Bild einnimmt; die beiden anderen Grenzen halten ihn in der freien Flaeche.
+    //
+    // DER RING WEICHT SEINEM TEXT, NICHT UMGEKEHRT (Befund K1). Traegt auch nur ein Eintrag
+    // Text statt Bild, stehen die Beschriftungen AUSSERHALB des Rings, und dann braucht jede
+    // Seite Platz. 0,34 statt 0,5 der freien Breite laesst je Seite ein volles Drittel stehen -
+    // gemessen der Wert, bei dem auf einem 400 Punkte breiten Testviewport auch das laengste
+    // deutsche Tuerschild ("Hauptauswahl", 144 Punkte) noch ungetrennt hineinpasst.
+    // Auf dem Zielgeraet aendert das nichts (dort greift der Deckel von 300), auf einem engen
+    // Viewport ist es der Unterschied zwischen einem umgebrochenen Wort und einem ganzen.
+    // Kleiner schreiben waere die eine Loesung, die hier nicht geht - der Spieler sitzt drei
+    // Meter vor dem Bild (TV-RECHERCHE.md 6.2: im Splitscreen WENIGER UI, nicht kleineres).
+    bool anyText = false;
+    for(const Window* const ctrl : ctrls)
+    {
+        if(!ctrl->GetRingIcon() && !ctrl->GetRingLabel().empty())
+            anyText = true;
+    }
+    const float widthShare = anyText ? 0.34f : 0.5f;
+    const float diameter =
+      std::min({300.f, 0.85f * static_cast<float>(freeH), widthShare * static_cast<float>(freeW)});
+    out.rOuter = diameter / 2.f;
+    // 0,42 laesst innen Platz fuer den Knoten, um den es geht - die Mitte ist bewusst LEER und
+    // ohne Aktion (Steam Inputs "nevermind"-Bereich).
+    out.rInner = out.rOuter * 0.42f;
+
+    const std::vector<padring::Sector> sectors = padring::MakeSectors(static_cast<unsigned>(ctrls.size()));
+    const Window* const focused = view.GetFocus().GetFocused();
+    for(unsigned i = 0; i < ctrls.size(); ++i)
+    {
+        RingEntry e;
+        e.ctrl = ctrls[i];
+        e.sector = sectors[i];
+        e.enabled = ctrls[i]->CanActivate();
+        // DIE HERVORHEBUNG FOLGT DEM FOKUS und nicht der Zielrichtung. Beides waeren zwei
+        // Rechnungen, und die eine koennte neben der anderen veralten - dann leuchtete ein
+        // Sektor, den A gar nicht ausloest. Der Zeiger bewegt den Fokus, der Fokus faerbt den
+        // Sektor: eine Richtung, eine Wahrheit.
+        e.selected = (ctrls[i] == focused);
+        LayoutRingLabel(out, e);
+        out.entries.push_back(e);
+    }
+    return out;
+}
+
+void dskGameInterface::EmitRing(const RingLayout& layout,
+                                const std::function<void(const RingEntry&)>& emitSector,
+                                const std::function<void(const RingEntry&)>& emitLabel)
+{
+    // KEINE VERZWEIGUNG. Diese Schleife kann keinen Eintrag auslassen, weil sie keinen
+    // auswaehlt - derselbe Bau wie EmitBriefLines, und aus demselben Befund heraus (N7).
+    // Auch die LAGE wird hier nicht mehr gerechnet: sie steht im Eintrag (RingEntry::labelBox),
+    // und der Zeichner liest genau die Zahl, die ein Nachweis liest.
+    for(const RingEntry& e : layout.entries)
+    {
+        emitSector(e);
+        emitLabel(e);
+    }
+}
+
+void dskGameInterface::DrawRing(const PlayerView& view) const
+{
+    const RingLayout layout = LayoutRing(view);
+    if(layout.empty())
+        return;
+    const glFont& font = *NormalFont;
+    // GEZEICHNET WIRD MIT EIGENEN ECKPUNKTEN (glVertexPointer/glDrawArrays), nicht ueber
+    // IRenderer. Zwei gemessene Gruende:
+    //  1. DummyRenderer::DrawRect und ::DrawLine sind leere Rumpffunktionen - ein Primitiv im
+    //     IRenderer waere fuer JEDEN Nachweis unsichtbar. Ueber diesen Weg kann sich ein
+    //     Nachweis in glDrawArrays/glVertexPointer haengen und die Geometrie zurueck lesen.
+    //  2. glBegin, glDisable und glRotatef sind in der Testumgebung NULLZEIGER
+    //     (DummyRenderer::initOpenGL setzt sie nicht). Code, der sie ruft, stuerzt dort ab.
+    // Deshalb wird der Sektor TEXTURIERT gezeichnet und die Texturbindung auf 0 gesetzt: eine
+    // unvollstaendige Textur schaltet das Texturieren nach GL-Spezifikation fuer diese Einheit
+    // ab, das Fragment traegt dann genau glColor. Kein glDisable noetig.
+    std::vector<PointF> verts;
+    std::vector<PointF> tex;
+    EmitRing(
+      layout,
+      [&](const RingEntry& e) {
+          constexpr int steps = 8;
+          verts.clear();
+          for(int i = 0; i <= steps; ++i)
+          {
+              const float a =
+                e.sector.startAngle + (e.sector.endAngle - e.sector.startAngle) * static_cast<float>(i) / steps;
+              verts.push_back(padring::PointOnRing(PointF(layout.center), layout.rOuter, a));
+              verts.push_back(padring::PointOnRing(PointF(layout.center), layout.rInner, a));
+          }
+          tex.assign(verts.size(), PointF(0.f, 0.f));
+          const unsigned color = e.selected ? ringSelectedColor : (e.enabled ? ringSectorColor : ringLockedColor);
+          glVertexPointer(2, GL_FLOAT, 0, verts.data());
+          glTexCoordPointer(2, GL_FLOAT, 0, tex.data());
+          VIDEODRIVER.BindTexture(0);
+          glColor4ub(static_cast<GLubyte>(GetRed(color)), static_cast<GLubyte>(GetGreen(color)),
+                     static_cast<GLubyte>(GetBlue(color)), static_cast<GLubyte>(GetAlpha(color)));
+          glDrawArrays(GL_TRIANGLE_STRIP, 0, static_cast<GLsizei>(verts.size()));
+      },
+      [&](const RingEntry& e) {
+          const unsigned color = e.selected ? COLOR_YELLOW : (e.enabled ? COLOR_WHITE : 0x80FFFFFFu);
+          // Erst das Bild, sonst der Text - und beides kommt vom CONTROL selbst
+          // (Window::GetRingIcon / GetRingLabel). Waeren es eigene Zeichenketten im Ring, gaebe
+          // es zwei fuer denselben Knopf, und die eine veraltete neben der anderen.
+          //
+          // GEZEICHNET WIRD IN DEN KASTEN, den LayoutRingLabel gerechnet hat - keine zweite
+          // Lagerechnung im Zeichner (Befund K1).
+          if(e.icon)
+              e.icon->DrawFull(e.labelBox.getOrigin() + e.icon->GetOrigin(), color);
+          else
+          {
+              DrawPoint p = e.labelBox.getOrigin();
+              for(const std::string& line : e.labelLines)
+              {
+                  font.Draw(p, line, FontStyle::LEFT | FontStyle::TOP, color);
+                  p.y += static_cast<int>(font.getHeight());
+              }
+          }
+      });
+    // Die Farbe zuruecksetzen: glColor ist globaler Zustand.
+    glColor4ub(255, 255, 255, 255);
+}
+
+namespace {
+/// Die Kette der sichtbaren Reiter von aussen nach innen.
+///
+/// Gebraucht fuer das Blaettern: die Reiter SIND die Seiten, die es im Fenster schon gibt
+/// (iwAction: Bauen/Flagge/Anzeige, darin Huette/Haus/Burg). Eine eigene Kategorientabelle
+/// waere eine zweite Ordnung neben dieser - und CONTROLLER-UX.md Regel 3 verbietet ohnehin den
+/// verschachtelten Ring auf demselben Stick: Tiefe entsteht durch Blaettern.
+void collectTabs(Window& wnd, std::vector<ctrlTab*>& out)
+{
+    for(Window* child : wnd.GetCtrls<Window>())
+    {
+        if(!child->IsVisible())
+            continue;
+        if(auto* tab = dynamic_cast<ctrlTab*>(child))
+        {
+            out.push_back(tab);
+            if(ctrlGroup* grp = tab->GetCurrentGroup())
+                collectTabs(*grp, out);
+            return;
+        }
+        collectTabs(*child, out);
+    }
+}
+} // namespace
+
+bool dskGameInterface::RingHasMultipleTabs(const PlayerView& view)
+{
+    std::vector<ctrlTab*> tabs;
+    if(Window* const root = view.GetFocus().GetRoot())
+        collectTabs(*root, tabs);
+    for(const ctrlTab* const tab : tabs)
+    {
+        if(tab->GetNumTabs() > 1)
+            return true;
+    }
+    return false;
+}
+
+bool dskGameInterface::RingHasPages(const PlayerView& view)
+{
+    unsigned numPages = 1;
+    RingPageCtrls(view, numPages);
+    return numPages > 1 || RingHasMultipleTabs(view);
+}
+
+void dskGameInterface::RingTurnPage(PlayerView& view, const int dir)
+{
+    // BEFUND K2/4A: hier stand nichts, und deshalb wirkten LB und RB auch im EINSEITIGEN Ring -
+    // ungenannt und wortlos. Was sie dort taten: der Zweig unten fand keinen Reiter zum
+    // Weiterschalten, rief dann SetPage(0), und SetPage setzt den Zeiger in die Mitte zurueck;
+    // anschliessend sprang der Fokus auf den ersten Eintrag. Ein Druck auf LB im Systemmenue
+    // warf die Auswahl also von Sektor 5 auf Sektor 0, ohne dass irgendetwas es angekuendigt
+    // haette. Der Kommentar daneben behauptete dabei ausdruecklich das Gegenteil ("laeuft die
+    // Seite um") - ein Kommentar, der dem Code widerspricht, war schon in Phase 11 und 12 ein
+    // Befund.
+    //
+    // GEHEILT WIRD AN DER WIRKUNG, NICHT AN DER LEISTE, und mit DERSELBEN Funktion, aus der die
+    // Leiste ihr `ringHasPages` nimmt (dskGameInterface::RefreshBrief). Damit koennen Hinweis
+    // und Wirkung nicht mehr auseinanderlaufen - sie sind dieselbe Frage.
+    if(!RingHasPages(view))
+        return;
+    padring::Ring& ring = view.GetRing();
+    unsigned numPages = 1;
+    RingPageCtrls(view, numPages);
+    const int next = static_cast<int>(std::min(ring.GetPage(), numPages - 1)) + dir;
+    if(next >= 0 && next < static_cast<int>(numPages))
+    {
+        ring.SetPage(static_cast<unsigned>(next));
+    } else
+    {
+        // Seitenende: der naechste REITER. Ein Zaehlwerk von innen nach aussen - laeuft der
+        // innerste ueber, rueckt der naechstaeussere weiter. Dass es UEBERHAUPT etwas zu
+        // blaettern gibt, ist oben schon entschieden (RingHasPages); ein Ring ohne Ausweg waere
+        // die Falle, die Phase 11 und 12 je einmal gebaut haben - der Ausweg ist hier aber B
+        // bzw. Back und nicht die Schulter.
+        std::vector<ctrlTab*> tabs;
+        if(Window* const root = view.GetFocus().GetRoot())
+            collectTabs(*root, tabs);
+        for(auto it = tabs.rbegin(); it != tabs.rend(); ++it)
+        {
+            ctrlTab& tab = **it;
+            const unsigned short numTabs = tab.GetNumTabs();
+            if(numTabs <= 1)
+                continue;
+            unsigned short cur = 0;
+            for(unsigned short i = 0; i < numTabs; ++i)
+            {
+                if(tab.GetTabIdAt(i) == tab.GetCurrentTab())
+                    cur = i;
+            }
+            const int nextTab = static_cast<int>(cur) + dir;
+            if(nextTab < 0 || nextTab >= static_cast<int>(numTabs))
+                continue; // dieser Reiter laeuft ueber: der naechstaeussere ist dran
+            tab.SetSelection(static_cast<unsigned short>(nextTab), true);
+            break;
+        }
+        unsigned newPages = 1;
+        RingPageCtrls(view, newPages);
+        ring.SetPage(dir > 0 ? 0u : newPages - 1);
+    }
+    // Nach dem Blaettern steht der Fokus auf dem ERSTEN Eintrag der neuen Seite - also oben.
+    // Der Zeiger steht dabei wieder in der Mitte (Ring::SetPage), denn eine stehengebliebene
+    // Zielrichtung waere eine Auswahl, die der Spieler auf dieser Seite nie getroffen hat.
+    unsigned dummy = 1;
+    const std::vector<Window*> ctrls = RingPageCtrls(view, dummy);
+    if(!ctrls.empty())
+        view.GetFocus().FocusCtrl(ctrls.front());
+}
+
+void dskGameInterface::RingTurnSector(PlayerView& view, const int dir)
+{
+    unsigned numPages = 1;
+    const std::vector<Window*> ctrls = RingPageCtrls(view, numPages);
+    if(ctrls.empty())
+        return;
+    const Window* const focused = view.GetFocus().GetFocused();
+    int idx = 0;
+    for(unsigned i = 0; i < ctrls.size(); ++i)
+    {
+        if(ctrls[i] == focused)
+            idx = static_cast<int>(i);
+    }
+    const int n = static_cast<int>(ctrls.size());
+    idx = ((idx + dir) % n + n) % n;
+    // Der ZEIGER wandert mit. Sonst zeigte er nach einem Steuerkreuzdruck woandershin als der
+    // Fokus, und der naechste Stickausschlag spraenge zurueck.
+    view.GetRing().AimAtSector(static_cast<unsigned>(n), static_cast<unsigned>(idx));
+    view.GetFocus().FocusCtrl(ctrls[static_cast<unsigned>(idx)]);
+}
+
+void dskGameInterface::RingSyncFocus(PlayerView& view)
+{
+    unsigned numPages = 1;
+    const std::vector<Window*> ctrls = RingPageCtrls(view, numPages);
+    if(ctrls.empty())
+        return;
+    const int sector = padring::SectorAt(static_cast<unsigned>(ctrls.size()), view.GetRing().GetAim());
+    // Kein Sektor heisst: der Zeiger steht in der Mitte. Dann bleibt der Fokus, wo er ist -
+    // das ist die Barrierefreiheitsvorgabe "die Auswahl bleibt stehen, wenn der Stick in die
+    // Mitte zurueckkehrt" und zugleich die einzige Lesart, die ohne Stickzustand auskommt.
+    if(sector < 0 || sector >= static_cast<int>(ctrls.size()))
+        return;
+    view.GetFocus().FocusCtrl(ctrls[static_cast<unsigned>(sector)]);
+}
+
+void dskGameInterface::RingOnPadMove(PlayerView& view, const Position& delta)
+{
+    view.GetRing().Aim(delta);
+    RingSyncFocus(view);
+}
+
+bool dskGameInterface::OpenRing(PlayerView& view, IngameWindow* const wnd)
+{
+    if(!wnd)
+        return false;
+    if(!EnterWindow(view, wnd))
+        return false;
+    view.GetRing().Open();
+    // DER FOKUS MUSS AUF EINEM RINGEINTRAG STEHEN, nicht bloss auf irgendeiner Fokusstation.
+    //
+    // GEMESSEN: EnterWindow setzt ihn ueber FocusPath::FocusFirst, und dessen Sammlung enthaelt
+    // auch die REITERKOEPFE - im Aktionsfenster ist der erste Kandidat also ein Reiterkopf und
+    // gar kein Sektor. Der Ring haette dann keinen hervorgehobenen Eintrag, und A loeste einen
+    // Knopf aus, den niemand im Kreis sieht. Genau die Sorte Auseinanderlaufen, gegen die
+    // dieser Aufbau gebaut ist.
+    unsigned numPages = 1;
+    const std::vector<Window*> ctrls = RingPageCtrls(view, numPages);
+    if(ctrls.empty())
+    {
+        // Ein Fenster, das ausser Reiterkoepfen nichts hat, bekommt keinen Ring - es bleibt
+        // sichtbar und wird wie jedes andere Fenster bedient. Der Padspieler verliert nichts.
+        view.GetRing().Close();
+        return true;
+    }
+    view.GetFocus().FocusCtrl(ctrls.front());
+    // Ab hier zeichnet das Fenster nicht mehr, ist aber vollstaendig bedienbar - siehe die
+    // Begruendung am Kopf dieses Abschnitts.
+    wnd->SetVisible(false);
+    return true;
+}
+
+void dskGameInterface::CloseRing(PlayerView& view, const bool closeWindow)
+{
+    auto* const root = dynamic_cast<IngameWindow*>(view.GetFocus().GetRoot());
+    view.GetRing().Close();
+    ClearFocusRing(view, root);
+    if(!root)
+        return;
+    // Die Sichtbarkeit kommt IMMER zurueck, auch wenn das Fenster gleich zugeht. Sonst bliebe
+    // ein unsichtbares, aber bedienbares Fenster im Stapel liegen, sobald `closeWindow` einmal
+    // nicht greift - genau die Sorte stiller Rest, an der frueher schon Geisterstrassen und
+    // Geisterfokusse entstanden sind.
+    root->SetVisible(true);
+    // GESCHLOSSEN WIRD NACH DERSELBEN REGEL WIE BEIM RECHTSKLICK des Mausspielers und wie bei
+    // PadCloseTopMostWindow: nur Fenster, die sich ueberhaupt so schliessen lassen, und kein
+    // angeheftetes. Der RING geht in jedem Fall zu - er ist der Zustand DIESES Sitzplatzes, und
+    // ein Ring, den man nicht mehr loswird, waere die Falle. Das Fenster dahinter bleibt dann
+    // eben sichtbar stehen, genau wie es der Mausspieler festgesteckt hat.
+    if(closeWindow && !root->ShouldBeClosed() && root->getCloseBehavior() == CloseBehavior::Regular
+       && !root->IsPinned())
+        root->Close();
+}
+
+bool dskGameInterface::RingOnPadButton(PlayerView& view, const PadButton button, const bool down)
+{
+    // DER RING IST FUER SEINEN SITZPLATZ MODAL: solange er offen ist, wirkt kein Weltknopf.
+    // Sonst legte X mitten in der Gebaeudewahl eine Flagge auf den Knoten darunter.
+    if(!down)
+        return true;
+    switch(button)
+    {
+        // A LOEST DEN SEKTOR AUS - ueber FocusPath::Activate(), also woertlich derselbe Weg wie
+        // A im Fenster und wie der Mausklick. Der Ring verschickt nie selbst ein Kommando.
+        case PadButton::A: view.GetFocus().Activate(); break;
+        // B und Back schliessen. B ist auf jeder Ebene der Zurueck-Knopf; Back ist der Knopf,
+        // mit dem das Systemmenue aufging, und derselbe Knopf muss es wieder zumachen.
+        case PadButton::B:
+        case PadButton::Back: CloseRing(view, /*closeWindow*/ true); break;
+        // Das STEUERKREUZ dreht den Ring. In der Welt war es bis heute unbelegt (der einzige
+        // Leser von DpadLeft/Right ausserhalb von PadEvent.h ist FocusPath), es kostet also
+        // keinen Knopf - und XAG 112 verlangt zur Analognavigation eine digitale Alternative.
+        case PadButton::DpadLeft:
+        case PadButton::DpadUp: RingTurnSector(view, -1); break;
+        case PadButton::DpadRight:
+        case PadButton::DpadDown: RingTurnSector(view, +1); break;
+        // Blaettern. Kein verschachtelter Ring auf demselben Stick - CONTROLLER-UX.md Regel 3,
+        // und die Anno-1800-Rezensionen nennen genau die Verschachtelung als dessen Schwaeche.
+        case PadButton::LeftShoulder: RingTurnPage(view, -1); break;
+        case PadButton::RightShoulder: RingTurnPage(view, +1); break;
+        default: break;
+    }
+    return true;
+}
+
+void dskGameInterface::ToggleNamesFor(PlayerView& view)
+{
+    // Reine Anzeige - dieselbe Methode, die der Mausspieler mit der Taste c erreicht.
+    view.GetView().ToggleShowNames();
+}
+
+void dskGameInterface::ToggleProductivityFor(PlayerView& view)
+{
+    // Reine Anzeige - dieselbe Methode, die der Mausspieler mit der Taste s erreicht.
+    view.GetView().ToggleShowProductivity();
+}
+
+void dskGameInterface::EnterWatchOnly(PlayerView& view)
+{
+    // "wenn ich einfach nur ein wenig zuschauen will" - woertlich die zweite Bitte.
+    //
+    // Gemessen war dieser Zustand vorher UNERREICHBAR: von dreizehn Weltsymbolen und sechs
+    // Bildschirmelementen sind ganze zwei geschaltet, und der Klartextkasten (bis zu neun
+    // Zeilen, also ein Viertel der Hoehe einer Viertel-Ansicht) hatte gar keinen Schalter.
+    GameWorldView& gwv2 = view.GetView();
+    view.watchOnlySaved.showBQ = gwv2.IsShowingBQ();
+    view.watchOnlySaved.showNames = gwv2.IsShowingNames();
+    view.watchOnlySaved.showProductivity = gwv2.IsShowingProductivity();
+    if(gwv2.IsShowingBQ())
+        gwv2.ToggleShowBQ(); // setzt zugleich bqExplicitlyOff_, sonst kaeme sie beim naechsten A zurueck
+    if(gwv2.IsShowingNames())
+        gwv2.ToggleShowNames();
+    if(gwv2.IsShowingProductivity())
+        gwv2.ToggleShowProductivity();
+    view.SetWatchOnly(true);
+    // Der Ring und das Menue davor gehen mit - was der Spieler jetzt sehen will, ist die Welt.
+    if(view.GetRing().IsOpen())
+        CloseRing(view, /*closeWindow*/ true);
+    else
+        PadMenuLeaveTo(view, nullptr);
+}
+
+void dskGameInterface::LeaveWatchOnly(PlayerView& view)
+{
+    GameWorldView& gwv2 = view.GetView();
+    view.SetWatchOnly(false);
+    // GENAU die Werte von vorher zurueck. Der Kasten verspricht "B bringt alles zurueck", und
+    // ein Hinweis, der luegt, ist schlimmer als keiner.
+    if(gwv2.IsShowingBQ() != view.watchOnlySaved.showBQ)
+        gwv2.ToggleShowBQ();
+    if(gwv2.IsShowingNames() != view.watchOnlySaved.showNames)
+        gwv2.ToggleShowNames();
+    if(gwv2.IsShowingProductivity() != view.watchOnlySaved.showProductivity)
+        gwv2.ToggleShowProductivity();
 }
 
 void dskGameInterface::Msg_WindowClosed(IngameWindow& wnd)

@@ -15,6 +15,12 @@ public:
     /// liefert den GebäudeTyp des Icons.
     BuildingType GetType() const { return type; }
 
+    /// Das Bild, mit dem dieses Gebaeude im Kreismenue steht - DASSELBE, das Draw_ zeichnet.
+    /// Es kann nullptr sein: LOADER.GetNationIcon liest nationIcons_, und das fuellt allein
+    /// LoadFilesAtGame. In einer Umgebung ohne Originaldaten steht dort nichts, und der Ring
+    /// faellt dann auf seinen Text zurueck.
+    ITexture* GetRingIcon() const override;
+
 protected:
     /// zeichnet das Fenster.
     void Draw_() override;

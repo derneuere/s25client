@@ -17,6 +17,10 @@ public:
 
     void SetImage(ITexture* image) { img_ = image; }
     const ITexture* GetImage() const { return img_; }
+    /// Dasselbe Bild, ohne const - gebraucht vom Kreismenue (Window::GetRingIcon), das es
+    /// zeichnen und dafuer ITexture::DrawFull rufen muss. Der Zeiger liegt hier ohnehin
+    /// nicht-const; es ist derselbe, den SetImage bekommen hat.
+    ITexture* GetImagePtr() const { return img_; }
     /// Changes the color filter used for drawing
     void SetModulationColor(unsigned modulationColor) { modulationColor_ = modulationColor; }
     unsigned GetModulationColor() const { return modulationColor_; }

@@ -2197,6 +2197,9 @@ msgstr "Hier werden Ihre gesamten Vorräte an Waren und alle Einwohner Ihres Rei
 msgid "Hi, I'm an artifical player and I'm not very good yet!"
 msgstr "Hi, ich bin ein Computerspieler und bin noch nicht besonders gut!"
 
+msgid "Hides every symbol and every text of this seat, so you can just look at your land. The camera and the zoom keep working. B brings everything back."
+msgstr "Blendet jedes Symbol und jeden Text dieses Sitzplatzes aus, damit du einfach nur dein Land anschauen kannst. Kamera und Zoom laufen weiter. B bringt alles zurück."
+
 #: libs/s25main/ingameWindows/iwLobbyServerInfo.cpp:37
 msgid "Host:"
 msgstr "Host:"
@@ -2409,6 +2412,9 @@ msgstr "Schnellvorlauf beendet (%1$.3g Sekunden)."
 msgid "Jump to X:Y"
 msgstr "Springe zu X:Y"
 
+msgid "Just watch"
+msgstr "Nur zuschauen"
+
 #: libs/s25main/input/PlayerBrief.cpp:125
 msgid "Keep moving until this line tells you that something fits."
 msgstr "Fahr weiter, bis diese Zeile dir sagt, dass hier etwas passt."
@@ -2444,6 +2450,9 @@ msgstr "Sprache:"
 #: libs/s25main/gameData/BuildingConsts.cpp:25
 msgid "Leatherworks"
 msgstr "Lederverarbeitung"
+
+msgid "Left stick"
+msgstr "Linker Stick"
 
 #: libs/s25main/ingameWindows/iwPlayReplay.cpp:54
 msgid "Length"
@@ -3029,6 +3038,12 @@ msgstr "Namen und Auslastung: aus"
 msgid "Names and output: on"
 msgstr "Namen und Auslastung: an"
 
+msgid "Names: off"
+msgstr "Namen: aus"
+
+msgid "Names: on"
+msgstr "Namen: an"
+
 #: libs/s25main/addons/AddonCatapultGraphics.h:19
 msgid "Nation-specific catapult graphics"
 msgstr "Rassenspezifische Katapultgrafiken"
@@ -3386,6 +3401,12 @@ msgstr "Übersichtskarte"
 msgid "Output mineral"
 msgstr ""
 
+msgid "Output: off"
+msgstr "Auslastung: aus"
+
+msgid "Output: on"
+msgstr "Auslastung: an"
+
 #: libs/s25main/desktops/dskSelectMap.cpp:106
 msgid "Own maps"
 msgstr "Eigene"
@@ -3518,6 +3539,9 @@ msgstr "Bitte geben Sie einen Namen für das Spiel an!"
 msgid "Please wait..."
 msgstr "Bitte warten..."
 
+msgid "Point"
+msgstr "Zeigen"
+
 msgid "Point your allies here"
 msgstr "Verbündete hierher rufen"
 
@@ -3556,6 +3580,9 @@ msgstr "Presst Wein, den nur der Tempel verwendet."
 
 msgid "Previous"
 msgstr "Vorheriges"
+
+msgid "Previous page"
+msgstr "Vorige Seite"
 
 #: libs/s25main/gameData/JobConsts.cpp:40
 msgid "Private"
@@ -4354,6 +4381,9 @@ msgstr "Steine"
 msgid "Stop storage"
 msgstr "Einlagerung stoppen"
 
+msgid "Stop watching"
+msgstr "Zuschauen beenden"
+
 #: libs/s25main/gameData/BuildingConsts.cpp:39
 msgid "Storehouse"
 msgstr "Lagerhaus"
@@ -4857,6 +4887,9 @@ msgstr "Stammesoberhäupter um den Tisch versammelt..."
 msgid "Tsunami"
 msgstr ""
 
+msgid "Turn"
+msgstr "Drehen"
+
 #: libs/s25main/desktops/dskSelectMap.cpp:78
 msgid "Type"
 msgstr "Typ"
@@ -5149,6 +5182,9 @@ msgstr "Was du in diesem Reiter tun kannst:"
 msgid "What you can do with the road under the pointer."
 msgstr "Was du mit der Straße unter dem Zeiger tun kannst."
 
+msgid "What you see on the map"
+msgstr "Was auf der Karte zu sehen ist"
+
 #: libs/s25main/desktops/dskOptions.cpp:298
 msgid "Window pinning"
 msgstr ""
@@ -5197,6 +5233,12 @@ msgstr "Schreibt Namen und Auslastung jedes Gebäudes auf die Karte."
 
 msgid "Writes the name and the workload above every building. The workload tells you which of your works stand idle."
 msgstr "Schreibt Namen und Auslastung über jedes Gebäude. An der Auslastung siehst du, welche deiner Betriebe stillstehen."
+
+msgid "Writes the name of every building onto the map. Useful while you are still learning which building is which."
+msgstr "Schreibt den Namen jedes Gebäudes auf die Karte. Hilfreich, solange man noch lernt, welches Gebäude welches ist."
+
+msgid "Writes the output of every building onto the map: how busy it is, how many soldiers are inside, how far a construction site has come."
+msgstr "Schreibt die Auslastung jedes Gebäudes auf die Karte: wie gut es ausgelastet ist, wie viele Soldaten darin sind, wie weit eine Baustelle gekommen ist."
 
 #: libs/s25main/network/ClientError.cpp:14
 msgid "Wrong Password!"

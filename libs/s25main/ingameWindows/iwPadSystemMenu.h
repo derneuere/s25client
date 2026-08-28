@@ -46,7 +46,22 @@ public:
         ID_MINIMAP,
         ID_POST,
         ID_CONSTRUCTION_AID,
-        ID_NAMES_PRODUCTIVITY,
+        /// PHASE 13, GETRENNT: bis hierher kippte EIN Knopf beide Anzeigen zusammen
+        /// (ToggleShowNamesAndProductivity). Das war ein Platzkompromiss der Knopfliste und
+        /// keine Entscheidung - der MAUSspieler hat die Trennung seit jeher (Taste c und
+        /// Taste s), und fuer einen Anfaenger ist sie die richtige: NAMEN sind Lernstoff
+        /// ("welches Gebaeude ist das?" - woertlich der Phase-9-Befund mit Steinbruch und
+        /// Holzfaeller), AUSLASTUNG ist eine Expertenzahl. Wer beides zusammen einschaltet,
+        /// bekommt ueber jedem Haus zwei Zeilen Text.
+        ///
+        /// Der Ring hat den Platz, den die Liste nicht hatte. ToggleShowNames und
+        /// ToggleShowProductivity gibt es laengst und sie sind laengst je Ansicht - es entsteht
+        /// KEIN neuer Mechanismus.
+        ID_NAMES,
+        ID_PRODUCTIVITY,
+        /// PHASE 13, NEU: der Sammelschalter, nach dem der Auftraggeber woertlich gefragt hat
+        /// ("wenn ich einfach nur ein wenig zuschauen will").
+        ID_WATCH_ONLY,
         ID_MAIN_SELECTION
     };
 
@@ -54,6 +69,7 @@ public:
 
     void Msg_ButtonClick(unsigned ctrl_id) override;
     void Msg_PaintBefore() override;
+    brief::Brief GetPadBrief(const Window* focused) const override;
 
 private:
     /// Schreibt die beiden Umschalter neu, damit die Beschriftung den ZUSTAND nennt und nicht
@@ -67,4 +83,6 @@ private:
     /// jeden Frame Zeichenketten neu baut.
     bool lastShowBQ_;
     bool lastShowNames_;
+    bool lastShowProductivity_;
+    bool lastWatchOnly_;
 };

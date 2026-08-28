@@ -154,8 +154,15 @@ glArchivItem_Bitmap* Loader::GetNationIcon(Nation nation, BuildingType bld)
 {
     if(bld == BuildingType::Charburner)
         return LOADER.GetImageN("charburner", rttr::enum_cast(nation) * 8 + 8);
-    else
-        return convertChecked<glArchivItem_Bitmap*>(nationIcons_[nation]->get(rttr::enum_cast(bld)));
+    // nationIcons_ fuellt ausschliesslich LoadFilesAtGame. Ohne Originaldaten - und damit in
+    // JEDER Testumgebung - steht dort ein Nullzeiger, und `->get()` griff darauf zu. Der
+    // einzige bisherige Aufrufer im Zeichenweg (ctrlBuildingIcon::Draw_) prueft das Ergebnis
+    // schon auf nullptr, also war die Absicht immer "es kann keins geben"; nur die Abfrage
+    // fehlte eine Ebene zu tief. GEMESSEN in Phase 13 an einem Zugriff auf Adresse 0x8, sobald
+    // das Kreismenue nach dem Gebaeudebild fragt.
+    if(!nationIcons_[nation])
+        return nullptr;
+    return convertChecked<glArchivItem_Bitmap*>(nationIcons_[nation]->get(rttr::enum_cast(bld)));
 }
 
 ITexture* Loader::GetBuildingTex(Nation nation, BuildingType bld)

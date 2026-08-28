@@ -334,6 +334,27 @@ IngameWindow* WindowManager::FindWindowAtPos(const Position& pos) const
     // Fenster durchgehen ( von hinten nach vorn, da die vordersten ja zuerst geprüft werden müssen !! )
     for(const auto& window : helpers::reverse(windows))
     {
+        // WAS NICHT GEZEICHNET WIRD, DARF DIE MAUS NICHT FANGEN (Befund K3, Phase 13).
+        //
+        // Der GEMESSENE Fehler: das Kreismenue eines Padspielers setzt das Fenster, dessen
+        // Knoepfe es im Kreis zeigt, auf SetVisible(false) und laesst es mit unveraendertem
+        // Rechteck im Stapel stehen. Diese Schleife fragte die Sichtbarkeit nicht. Bei zwei
+        // Sitzplaetzen liegt das unsichtbare Ringfenster mitten in der Karte, die der Mensch an
+        // der Maus dort sieht. Sein Rechtsklick landete im Fenster - Msg_RightDown schliesst
+        // das gefundene Fenster VOR jedem Weiterreichen -, kam auf der Karte nie an und riss
+        // dem Padspieler nebenbei den Ring weg. Der Linksklick wurde nach derselben Kette
+        // verschluckt.
+        //
+        // FUER DEN HEUTIGEN EINZELSPIELER AENDERT DAS NICHTS: ein unsichtbares IngameWindow
+        // entsteht an genau EINER Stelle im ganzen Baum, naemlich beim Oeffnen des Rings
+        // (dskGameInterface::OpenRing). Ohne Pad gibt es keinen Ring, also kein unsichtbares
+        // Fenster - die Bedingung hier trifft dann nie zu.
+        //
+        // Im Fensterinneren gilt dieselbe Regel schon laenger: Window::RelayMouseMessage prueft
+        // visible_, IngameWindow::IsMessageRelayAllowed prueft IsVisible(). Nur dieser Einstieg
+        // fragte nicht - und er ist der einzige, der ohne Weiterreichen schliesst.
+        if(!window->IsVisible())
+            continue;
         // FensterRect für Kollisionsabfrage
         Rect window_rect = window->GetDrawRect();
 

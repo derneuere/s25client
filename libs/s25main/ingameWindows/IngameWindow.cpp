@@ -544,8 +544,11 @@ void IngameWindow::Msg_PaintAfter()
     Window::Msg_PaintAfter();
     // Der Rahmen liegt UEBER den Controls dieses Fensters und wird von darueberliegenden
     // Fenstern korrekt verdeckt: WindowManager::Draw ruft je Fenster PaintBefore/Draw/PaintAfter.
-    if(IsMinimized())
+    if(IsMinimized() || !IsVisible())
         return; // was nicht gezeichnet wird, bekommt auch keinen Rahmen (Befund B3)
+    // !IsVisible() ist neu in Phase 13: das Kreismenue setzt das Fenster, dessen Knoepfe es im
+    // Kreis zeigt, auf UNSICHTBAR und zeichnet stattdessen selbst. Ohne diese Bedingung stuende
+    // der Fokusrahmen des Rings mitten im Bild, um ein Control, das niemand sieht.
     for(const FocusRing& ring : focusRings_)
         ring.focus->DrawRing(ring.color);
 }
@@ -572,7 +575,11 @@ void IngameWindow::MoveNextToMouse()
 
 bool IngameWindow::IsMessageRelayAllowed() const
 {
-    return !isMinimized_ && !isMoving;
+    // !IsVisible() ist neu in Phase 13, aus demselben Grund wie in Msg_PaintAfter: ein Fenster,
+    // das nicht gezeichnet wird, darf keine Maus- und keine Tastaturmeldung bekommen. Sonst
+    // traefe ein Mausklick die Knoepfe des Kreismenues eines PADspielers - an einer Stelle des
+    // Bildschirms, an der fuer den Mausspieler nichts zu sehen ist.
+    return !isMinimized_ && !isMoving && IsVisible();
 }
 
 void IngameWindow::SaveOpenStatus(bool isOpen) const

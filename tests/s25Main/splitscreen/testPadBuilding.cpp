@@ -411,14 +411,19 @@ BOOST_FIXTURE_TEST_CASE(TheRoadButtonActsOnThePressedWindowEvenWithTwoOpen, PadV
 // 5. Beide Reiterreihen von iwAction sind per Fokus erreichbar
 // ============================================================================================
 
-/// Die offene Frage dieser Runde war, ob die Fokusnavigation im ZWEISTUFIGEN Reitersystem von
-/// iwAction wirklich traegt: ein Haupttab (Bauen/Flagge setzen/Anzeigeoptionen) und darunter,
-/// nur im Baureiter, eine zweite Reihe (Huette/Haus/Burg) ueber dem Icongitter.
+/// PHASE 13: DIESER FALL MISST JETZT DEN RING, und der Grund ist ein Paradigmenwechsel und
+/// keine Bequemlichkeit.
 ///
-/// Gemessen, nicht behauptet: die Reiterkoepfe sind ctrlButton und damit seit Phase 4
-/// fokussierbar; sie liegen geometrisch UEBER dem Gitter, also findet der Fokus sie mit
-/// DpadUp/Down; und ein A auf einem Kopf schaltet den Reiter wirklich um.
-BOOST_FIXTURE_TEST_CASE(BothTabRowsOfTheActionWindowAreReachableByPad, PadViewFixture<2>)
+/// Was er VORHER mass: das zweistufige Reitersystem von iwAction, mit dem Steuerkreuz von den
+/// Haupt- in die Baureiter und ins Icongitter. Seit Phase 13 oeffnet A das Fenster als
+/// KREISMENUE - die Reiterkoepfe sind keine Fokusstationen mehr, sondern die BLAETTERACHSE
+/// (LB/RB), und das Icongitter ist der Ring. Die alte Navigation gibt es nicht mehr; sie durch
+/// eine Zusicherung am Leben zu halten hiesse, einen Weg zu pruefen, den kein Spieler mehr geht.
+///
+/// Was er JETZT misst - und das ist dieselbe Frage in der neuen Bedienform: kommt ein
+/// Padspieler an ALLE Gebaeude eines Schlossplatzes heran, also ueber alle drei Groessenreiter
+/// hinweg? Ausschliesslich ueber den produktiven Weg (Padereignis -> UpdateInput).
+BOOST_FIXTURE_TEST_CASE(EveryBuildingTierIsReachableByTurningTheRingPages, PadViewFixture<2>)
 {
     const MapPoint spot = findBuildSpot(worldFixture.world, view(1).GetViewer(), BuildingQuality::Castle);
     BOOST_TEST_REQUIRE(spot.isValid());
@@ -432,6 +437,13 @@ BOOST_FIXTURE_TEST_CASE(BothTabRowsOfTheActionWindowAreReachableByPad, PadViewFi
     press(11, PadButton::A);
     iwAction* const wnd = view(1).actionwindow;
     BOOST_TEST_REQUIRE(wnd != static_cast<iwAction*>(nullptr));
+    // DER RING IST OFFEN und der Fokus steht darin - ohne ein einziges Y. Das ist der
+    // Unterschied zur alten Bedienform.
+    BOOST_TEST_REQUIRE(view(1).GetRing().IsOpen());
+    BOOST_TEST_REQUIRE(view(1).GetFocus().IsActive());
+    // Das Fenster wird nicht mehr gezeichnet - der Ring zeichnet an seiner Stelle.
+    BOOST_TEST(!wnd->IsVisible());
+
     auto* mainTab = wnd->GetCtrl<ctrlTab>(0);
     BOOST_TEST_REQUIRE(mainTab != static_cast<ctrlTab*>(nullptr));
     ctrlGroup* buildGroup = mainTab->GetGroup(1); // TAB_BUILD
@@ -439,59 +451,49 @@ BOOST_FIXTURE_TEST_CASE(BothTabRowsOfTheActionWindowAreReachableByPad, PadViewFi
     auto* buildTab = buildGroup->GetCtrl<ctrlTab>(1);
     BOOST_TEST_REQUIRE(buildTab != static_cast<ctrlTab*>(nullptr));
 
-    press(11, PadButton::Y);
-    BOOST_TEST_REQUIRE(focusedOf(view(1)) == static_cast<const Window*>(mainTab->GetCtrl<ctrlButton>(0)));
-
-    // Eine Reihe tiefer: die zweite Reiterreihe, NICHT gleich das Icongitter.
-    press(11, PadButton::DpadDown);
-    BOOST_TEST_REQUIRE(focusedOf(view(1)) == static_cast<const Window*>(buildTab->GetCtrl<ctrlButton>(0)));
-    BOOST_TEST_REQUIRE(buildTab->GetCurrentTab() == unsigned(iwAction::BuildTab::Hut));
-
-    // Nach rechts auf den Reiter "Haus" und mit A umschalten.
-    press(11, PadButton::DpadRight);
-    BOOST_TEST_REQUIRE(focusedOf(view(1)) == static_cast<const Window*>(buildTab->GetCtrl<ctrlButton>(1)));
-    press(11, PadButton::A);
-    BOOST_TEST(buildTab->GetCurrentTab() == unsigned(iwAction::BuildTab::House));
-
-    // ... und das Gitter darunter zeigt jetzt wirklich die Haus-Gebaeude.
-    press(11, PadButton::DpadDown);
+    // Der Ringeintrag unter dem Fokus ist ein GEBAEUDE, kein Reiterkopf.
     const auto* icon = dynamic_cast<const ctrlBuildingIcon*>(view(1).GetFocus().GetFocused());
     BOOST_TEST_REQUIRE(icon != static_cast<const ctrlBuildingIcon*>(nullptr));
-    static const std::vector<BuildingType> houseTier = {
-      BuildingType::Sawmill,   BuildingType::Slaughterhouse, BuildingType::Mill,       BuildingType::Bakery,
-      BuildingType::Ironsmelter, BuildingType::Metalworks,   BuildingType::Armory,     BuildingType::Mint,
-      BuildingType::Shipyard,  BuildingType::Brewery,        BuildingType::Winery,     BuildingType::Tannery,
-      BuildingType::LeatherWorks, BuildingType::Storehouse,  BuildingType::Watchtower, BuildingType::Catapult};
-    BOOST_TEST((std::find(houseTier.begin(), houseTier.end(), icon->GetType()) != houseTier.end()));
+    BOOST_TEST_REQUIRE(buildTab->GetCurrentTab() == unsigned(iwAction::BuildTab::Hut));
 
-    // Zurueck nach oben: eine Reihe in die Bau-Reiter, die naechste in die Haupt-Reiter. Der
-    // Weg ist senkrecht, der Fokus bleibt also in derselben Spalte - genau das, was die
-    // geometrische Navigation zusichert.
-    press(11, PadButton::DpadUp);
-    BOOST_TEST_REQUIRE(focusedOf(view(1)) == static_cast<const Window*>(buildTab->GetCtrl<ctrlButton>(1)));
-    press(11, PadButton::DpadUp);
-    BOOST_TEST_REQUIRE(focusedOf(view(1)) == static_cast<const Window*>(mainTab->GetCtrl<ctrlButton>(1)));
+    // ALLE Gebaeude einsammeln, die der Ring ueber alle Seiten hinweg zeigt - immer nur mit RB.
+    // 40 Druecke sind reichlich: drei Reiter mit hoechstens je zwei Seiten.
+    std::vector<BuildingType> seen;
+    std::vector<unsigned> tiersSeen;
+    for(unsigned i = 0; i < 40u; ++i)
+    {
+        unsigned numPages = 1;
+        for(const Window* const ctrl : dskGameInterface::RingPageCtrls(view(1), numPages))
+        {
+            if(const auto* const bi = dynamic_cast<const ctrlBuildingIcon*>(ctrl))
+            {
+                if(std::find(seen.begin(), seen.end(), bi->GetType()) == seen.end())
+                    seen.push_back(bi->GetType());
+            }
+        }
+        const unsigned tier = buildTab->GetCurrentTab();
+        if(std::find(tiersSeen.begin(), tiersSeen.end(), tier) == tiersSeen.end())
+            tiersSeen.push_back(tier);
+        press(11, PadButton::RightShoulder);
+    }
+    BOOST_TEST_MESSAGE("AUDIT: ueber den Ring erreichte Gebaeude = " << seen.size()
+                                                                     << ", Groessenreiter = " << tiersSeen.size());
+    // Alle drei Groessenreiter eines Schlossplatzes sind wirklich vorbeigekommen.
+    BOOST_TEST(tiersSeen.size() >= 3u);
+    // Und je ein Vertreter aus jeder Reihe ist dabei - Huette, Haus, Burg.
+    BOOST_TEST((std::find(seen.begin(), seen.end(), BuildingType::Woodcutter) != seen.end()));
+    BOOST_TEST((std::find(seen.begin(), seen.end(), BuildingType::Sawmill) != seen.end()));
+    BOOST_TEST((std::find(seen.begin(), seen.end(), BuildingType::Farm) != seen.end()));
 
-    // Der zweite HAUPTreiter - und damit der Nachweis, dass ein Padspieler aus dem Baureiter
-    // auch wieder herauskommt. tabs.watch setzt ContextClick unbedingt, es gibt hier also
-    // immer mindestens zwei.
-    press(11, PadButton::A);
-    BOOST_TEST(mainTab->GetCurrentTab() != 1u); // nicht mehr TAB_BUILD
-    // ... und zurueck in den Baureiter. Hin UND her.
-    press(11, PadButton::DpadLeft);
-    BOOST_TEST_REQUIRE(focusedOf(view(1)) == static_cast<const Window*>(mainTab->GetCtrl<ctrlButton>(0)));
-    press(11, PadButton::A);
-    BOOST_TEST(mainTab->GetCurrentTab() == 1u); // TAB_BUILD
-
-    // B verlaesst das Fenster wieder - der Rueckweg in die Welt.
+    // B fuehrt aus dem Ring heraus - und nimmt das Fenster mit. EIN Druck, nicht zwei: der Ring
+    // ist das Fenster, nicht etwas darin.
     press(11, PadButton::B);
+    BOOST_TEST(!view(1).GetRing().IsOpen());
     BOOST_TEST(!view(1).GetFocus().IsActive());
+    BOOST_TEST(wnd->ShouldBeClosed());
 
-    // Zugemacht wird vor dem Zeichnen, und zwar aus einem Grund, der NICHTS mit dem Padpfad zu
-    // tun hat: der Baureiter zeichnet Gebaeudeicons ueber Loader::GetNationIcon, und die
-    // Nationsgrafiken gibt es in der Testumgebung nicht (LoadDummyMapFiles laedt nur die
-    // Kartentexturen). Das ist eine Grenze der Testumgebung, keine des Spiels.
-    view(1).actionwindow->Close();
+    if(view(1).actionwindow && !view(1).actionwindow->ShouldBeClosed())
+        view(1).actionwindow->Close();
     WINDOWMANAGER.Draw();
 }
 

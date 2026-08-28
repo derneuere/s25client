@@ -28,3 +28,8 @@ void ctrlBuildingIcon::Draw_()
 }
 
 void ctrlBuildingIcon::DrawContent() const {}
+
+ITexture* ctrlBuildingIcon::GetRingIcon() const
+{
+    return LOADER.GetNationIcon(nation, type);
+}

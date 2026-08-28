@@ -693,13 +693,19 @@ void GameWorldView::ToggleShowBQ()
     // faellt dabei weg - ein ausdruecklicher Wille schlaegt eine Bequemlichkeitsvorgabe.
     show_bq = !IsShowingBQ();
     forcedShowBQ_ = false;
+    // Ein ausdrueckliches "aus" bleibt stehen, bis derselbe Mensch wieder "an" sagt - siehe
+    // die Begruendung an bqExplicitlyOff_.
+    bqExplicitlyOff_ = !show_bq;
     SaveIngameSettingsValues();
     onHudSettingsChanged();
 }
 
 void GameWorldView::ForceShowBQ()
 {
-    if(forcedShowBQ_)
+    // Der Wille des Menschen schlaegt die Bequemlichkeitsvorgabe. Ohne diese Zeile ist der
+    // Bauhilfe-Schalter im Ring wirkungslos, sobald der Spieler das naechste Mal A auf Bauland
+    // drueckt - und das ist die haeufigste Handlung des Spiels.
+    if(bqExplicitlyOff_ || forcedShowBQ_)
         return;
     forcedShowBQ_ = true;
     // BEWUSST OHNE SaveIngameSettingsValues() - siehe die Begruendung an der Deklaration.
@@ -737,6 +743,7 @@ void GameWorldView::CopyHudSettingsTo(GameWorldView& other, bool copyBQ) const
     // Der einzige Aufrufer (iwObservate) uebergibt copyBQ == false, dort ist beides aus.
     other.show_bq = (copyBQ ? show_bq : false);
     other.forcedShowBQ_ = (copyBQ ? forcedShowBQ_ : false);
+    other.bqExplicitlyOff_ = (copyBQ ? bqExplicitlyOff_ : false);
     other.show_names = show_names;
     other.show_productivity = show_productivity;
 }

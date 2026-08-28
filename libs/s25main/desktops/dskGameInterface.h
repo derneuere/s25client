@@ -15,6 +15,7 @@
 #include "ingameWindows/iwAction.h"
 #include "ingameWindows/iwChat.h"
 #include "input/IPadTarget.h"
+#include "input/PadRing.h"
 #include "input/PadRouter.h"
 #include "network/ClientInterface.h"
 #include "WindowManager.h"
@@ -28,9 +29,11 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 class IngameWindow;
+class ITexture;
 class glArchivItem_Bitmap;
 class GlobalGameSettings;
 struct MouseCoords;
@@ -410,7 +413,19 @@ public:
     /// Netzverkehr, kein Simulationszustand; die Begruendung steht an der Umsetzung.
     void ToggleConstructionAidFor(PlayerView& view);
     /// Gebaeudenamen und Auslastung dieser Ansicht an/aus. Ebenfalls reine Anzeige.
+    /// Bleibt fuer die KNOPFLEISTE des Mausspielers stehen - dort gibt es nur einen Knopf.
     void ToggleNamesAndProductivityFor(PlayerView& view);
+    /// Die beiden EINZELN - der Ring hat den Platz, den die Knopfliste nicht hatte (Phase 13).
+    /// Ebenfalls reine Anzeige, und es sind dieselben Methoden, die der Mausspieler mit den
+    /// Tasten c und s schon immer erreicht.
+    void ToggleNamesFor(PlayerView& view);
+    void ToggleProductivityFor(PlayerView& view);
+    /// "NUR ZUSCHAUEN" an bzw. aus - der Sammelschalter, nach dem der Auftraggeber gefragt hat.
+    /// EnterWatchOnly merkt sich die drei Anzeigeschalter und legt sie um; LeaveWatchOnly stellt
+    /// GENAU DIESE Werte wieder her. Ohne das Zuruecklegen waere "nur zuschauen" eine Einbahn,
+    /// die dem Spieler seine Einstellungen wegnimmt.
+    void EnterWatchOnly(PlayerView& view);
+    void LeaveWatchOnly(PlayerView& view);
     /// Postfenster DIESER Ansicht, mit IHREM Postfach.
     IngameWindow* OpenPostOfficeFor(PlayerView& view);
     /// Das Padmenue dieser Ansicht schliessen und den Fokus in das gerade geoeffnete Fenster
@@ -423,6 +438,120 @@ public:
     bool PadOpenSystemMenu(PlayerView& view);
     /// Fokus dieser Ansicht aufloesen und den Rahmen am uebergebenen Wurzelfenster abmelden.
     void ClearFocusRing(PlayerView& view, Window* root);
+
+    // --- DAS KREISMENUE (Phase 13) ----------------------------------------------------------
+    //
+    // DREI SCHICHTEN, nach dem Vorbild LayoutBrief / EmitBriefLines / DrawBrief - und aus
+    // demselben Grund (Befund B4 und N7): eine reine Rechnung, eine Schleife ohne Verzweigung
+    // und ein Zeichner ohne Entscheidung. Ein Nachweis kann damit auf drei unabhaengigen Ebenen
+    // messen, und nichts kann aus dem Zeichenweg fallen, ohne aus der Rechnung zu verschwinden.
+    //
+    // DER RING IST KEIN FENSTER. Er ist eine Zeichenschicht im Viewport wie der Klartextkasten.
+    // Ein IngameWindow klemmt gegen tv::WindowBoundsRect, also gegen die GANZE Renderflaeche -
+    // ein Ring am Viewportrand raegte ins Bild des Nachbarn.
+
+    /// Die drei Sektorfarben. Halbdurchsichtiges Dunkelblau als Grund, der GEWAEHLTE Sektor
+    /// deutlich heller und fast deckend, der GESPERRTE stark gedaempft. Aus drei Metern vor
+    /// einem 55-Zoll-Fernseher ist der Helligkeitsunterschied das, was traegt - Farbtoene
+    /// allein sind es nicht (TV-RECHERCHE.md). Oeffentlich, weil ein Nachweis sie am
+    /// Zeichenaufruf wiederfinden muss.
+    static constexpr unsigned ringSectorColor = 0xC8102040;
+    static constexpr unsigned ringSelectedColor = 0xF0F0D060;
+    static constexpr unsigned ringLockedColor = 0x60101820;
+
+    /// Ein Eintrag des Rings, in Sektorreihenfolge.
+    struct RingEntry
+    {
+        Window* ctrl = nullptr;
+        /// Sektor dieses Eintrags, in Bildschirmwinkeln.
+        padring::Sector sector;
+        /// A wuerde hier etwas bewirken (Window::CanActivate). Gesperrte Eintraege bleiben AUF
+        /// IHRER POSITION stehen und werden nur abgedunkelt - feste Lage ist die Bedingung
+        /// fuer das Muskelgedaechtnis, und der Grund steht im Klartextkasten.
+        bool enabled = true;
+        /// Dieser Eintrag traegt gerade den Fokus dieses Spielers.
+        bool selected = false;
+
+        // --- DIE BESCHRIFTUNG, GERECHNET STATT GERATEN (Befund K1) ---------------------------
+        //
+        // Bis hierher rechnete DrawRing die Textlage selbst aus und niemand konnte sie messen;
+        // der Umsetzer hat an genau dieser einen Stelle GERECHNET statt gemessen, und genau
+        // dort war das Ergebnis verkehrt (sechs von sieben Beschriftungen zu breit fuer ihren
+        // Sektor, eine breiter als der ganze Ring). Jetzt liegt der KASTEN, in den gezeichnet
+        // wird, im Layout - dieselbe Zahl, die der Zeichner benutzt, kann ein Nachweis lesen.
+        // Verschmolzen, nicht abgeschrieben: dieselbe Linie wie bei der Tastenhinweisleiste.
+
+        /// Das Bild dieses Eintrags (Window::GetRingIcon), oder nullptr. Dann traegt der
+        /// Eintrag Text.
+        ITexture* icon = nullptr;
+        /// Der umgebrochene Text dieses Eintrags. Leer, wenn er ein Bild traegt oder gar keine
+        /// Beschriftung hat.
+        std::vector<std::string> labelLines;
+        /// GENAU DER KASTEN, in den die Zeilen gezeichnet werden. Bei einem Bild der Kasten des
+        /// Bildes. Leeres Rechteck heisst: dieser Eintrag zeichnet nichts.
+        Rect labelBox;
+    };
+    /// ALLES, was DrawRing zeichnet.
+    struct RingLayout
+    {
+        Position center{0, 0};
+        float rInner = 0.f;
+        float rOuter = 0.f;
+        std::vector<RingEntry> entries;
+        unsigned page = 0;
+        unsigned numPages = 1;
+        /// Die freie Flaeche, in der der Ring MIT seinen Beschriftungen liegt: Viewport,
+        /// geschnitten mit der Safe Area, oberhalb des Klartextkastens. Nichts darf hier heraus.
+        Rect freeArea;
+        bool empty() const { return entries.empty(); }
+    };
+
+    /// Die Fokusstationen des Wurzelfensters dieser Ansicht OHNE die Reiterkoepfe.
+    ///
+    /// Die Reiterkoepfe eines ctrlTab sind Kinder DES REITERS (ctrlTab::AddTab legt sie mit den
+    /// Kennungen 0..n-1 an); alles andere haengt an einer Gruppe. Genau daran werden sie hier
+    /// erkannt. Sie sind keine Ringeintraege, sondern die BLAETTERACHSE - LB und RB.
+    static std::vector<FocusPath::Candidate> RingCandidates(const PlayerView& view);
+    /// Die Eintraege der aktuellen Seite. Setzt numPages.
+    static std::vector<Window*> RingPageCtrls(const PlayerView& view, unsigned& numPages);
+    /// Lage, Groesse und Sektoren - rein, ohne einen Zeichenaufruf.
+    RingLayout LayoutRing(const PlayerView& view) const;
+    /// Setzt icon, labelLines und labelBox EINES Eintrags. Herausgezogen, damit die Textlage
+    /// eine eigene, benannte Rechnung ist und nicht im Zeichner steckt (Befund K1).
+    static void LayoutRingLabel(const RingLayout& layout, RingEntry& e);
+    /// DIE SCHLEIFE, DIE WIRKLICH ZEICHNET. Statisch, ohne Ansicht, ohne Verzweigung.
+    static void EmitRing(const RingLayout& layout,
+                         const std::function<void(const RingEntry&)>& emitSector,
+                         const std::function<void(const RingEntry&)>& emitLabel);
+    void DrawRing(const PlayerView& view) const;
+
+    /// Oeffnet den Ring auf diesem Fenster: Fokus hinein, Fenster unsichtbar. false, wenn das
+    /// Fenster gar keine Fokusstation hat - dann bleibt alles, wie es war.
+    bool OpenRing(PlayerView& view, IngameWindow* wnd);
+    /// Ring zu. `closeWindow` schliesst auch das Fenster dahinter - das ist der Normalfall (B).
+    void CloseRing(PlayerView& view, bool closeWindow);
+    /// true = die Flanke ist verbraucht. Der Ring ist fuer SEINEN Sitzplatz modal: solange er
+    /// offen ist, wirkt kein Weltknopf.
+    bool RingOnPadButton(PlayerView& view, PadButton button, bool down);
+    /// Zielrichtung fortschreiben und den Fokus auf den getroffenen Sektor setzen.
+    void RingOnPadMove(PlayerView& view, const Position& delta);
+    /// Gibt es im Wurzelfenster ueberhaupt einen Reiter mit mehr als einem Blatt? Woertlich
+    /// die zweite Haelfte der Frage, die RingTurnPage beantwortet - und deshalb dieselbe
+    /// Funktion und keine Abschrift: die Leiste darf LB/RB nur nennen, wo sie wirken.
+    static bool RingHasMultipleTabs(const PlayerView& view);
+    /// GIBT ES UEBERHAUPT ETWAS ZU BLAETTERN? Mehr als eine Seite oder mehr als ein Reiter.
+    ///
+    /// DIE EINE Frage, an der LB und RB haengen - und zwar an BEIDEN Enden: RingTurnPage tut
+    /// nichts, wenn sie nein sagt, und die Tastenhinweisleiste nennt die Schultern nicht, wenn
+    /// sie nein sagt. Verschmolzen und nicht abgeschrieben (Befund K2/4A); vorher stand die
+    /// Bedingung nur in der Leiste, und die Wirkung kannte sie nicht.
+    static bool RingHasPages(const PlayerView& view);
+    /// Eine Seite weiter (dir > 0) oder zurueck. Am Seitenende wechselt der Reiter.
+    void RingTurnPage(PlayerView& view, int dir);
+    /// Einen Sektor weiter (Steuerkreuz).
+    void RingTurnSector(PlayerView& view, int dir);
+    /// Fokus auf den Sektor, in den der Zeiger zeigt. Ohne Zielrichtung bleibt er, wo er ist.
+    void RingSyncFocus(PlayerView& view);
 
     /// Rechnet den Klartext DIESER Ansicht neu. Im Produktivcode die einzige Schreibstelle von
     /// PlayerView::SetBrief, gerufen einmal je Frame und Ansicht am Ende von UpdateInput -

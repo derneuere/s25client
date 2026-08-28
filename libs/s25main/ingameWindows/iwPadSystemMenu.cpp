@@ -7,6 +7,7 @@
 #include "controls/ctrlTextButton.h"
 #include "desktops/PlayerView.h"
 #include "desktops/dskGameInterface.h"
+#include "input/PlayerBrief.h"
 #include "ogl/glFont.h"
 #include "world/GameWorldView.h"
 #include "gameData/const_gui_ids.h"
@@ -18,7 +19,7 @@ namespace {
 constexpr Extent btnSize(232, 26);
 constexpr int margin = 8;
 constexpr int gap = 4;
-constexpr unsigned numButtons = 5;
+constexpr unsigned numButtons = 7;
 } // namespace
 
 iwPadSystemMenu::iwPadSystemMenu(dskGameInterface& dsk, PlayerView& view, const DrawPoint& pos)
@@ -26,7 +27,8 @@ iwPadSystemMenu::iwPadSystemMenu(dskGameInterface& dsk, PlayerView& view, const 
                    Extent(btnSize.x + 2 * margin, numButtons * (btnSize.y + gap) - gap + 2 * margin), _("Menu"),
                    LOADER.GetImageN("resource", 41)),
       dsk_(dsk), view_(view), lastShowBQ_(view.GetView().IsShowingBQ()),
-      lastShowNames_(view.GetView().IsShowingNamesAndProductivity())
+      lastShowNames_(view.GetView().IsShowingNames()),
+      lastShowProductivity_(view.GetView().IsShowingProductivity()), lastWatchOnly_(view.IsWatchOnly())
 {
     // Die Tooltips sind hier KEIN Mauskomfort, sondern der Klartext des Padspielers:
     // brief::ForControl liest den Tooltip des fokussierten Controls und schreibt ihn in den
@@ -43,8 +45,17 @@ iwPadSystemMenu::iwPadSystemMenu(dskGameInterface& dsk, PlayerView& view, const 
     AddTextButton(ID_CONSTRUCTION_AID, p, btnSize, TextureColor::Green2, "", NormalFont,
                   _("Draws a symbol on every spot: what fits there - a flag, a hut, a house, a castle or a mine."));
     p.y += btnSize.y + gap;
-    AddTextButton(ID_NAMES_PRODUCTIVITY, p, btnSize, TextureColor::Green2, "", NormalFont,
-                  _("Writes the name and the output of every building onto the map."));
+    AddTextButton(ID_NAMES, p, btnSize, TextureColor::Green2, "", NormalFont,
+                  _("Writes the name of every building onto the map. Useful while you are still learning "
+                    "which building is which."));
+    p.y += btnSize.y + gap;
+    AddTextButton(ID_PRODUCTIVITY, p, btnSize, TextureColor::Green2, "", NormalFont,
+                  _("Writes the output of every building onto the map: how busy it is, how many soldiers are "
+                    "inside, how far a construction site has come."));
+    p.y += btnSize.y + gap;
+    AddTextButton(ID_WATCH_ONLY, p, btnSize, TextureColor::Green2, "", NormalFont,
+                  _("Hides every symbol and every text of this seat, so you can just look at your land. The "
+                    "camera and the zoom keep working. B brings everything back."));
     p.y += btnSize.y + gap;
     AddTextButton(ID_MAIN_SELECTION, p, btnSize, TextureColor::Green2, _("Main selection"), NormalFont,
                   _("Statistics, goods, tools, military - and saving, giving up and leaving the game."));
@@ -55,11 +66,30 @@ iwPadSystemMenu::iwPadSystemMenu(dskGameInterface& dsk, PlayerView& view, const 
 void iwPadSystemMenu::UpdateToggleLabels()
 {
     lastShowBQ_ = view_.GetView().IsShowingBQ();
-    lastShowNames_ = view_.GetView().IsShowingNamesAndProductivity();
+    lastShowNames_ = view_.GetView().IsShowingNames();
+    lastShowProductivity_ = view_.GetView().IsShowingProductivity();
+    lastWatchOnly_ = view_.IsWatchOnly();
+    // Die Beschriftungen sind KURZ, weil sie im Kreismenue in einem Sektorbogen stehen (rund
+    // 115 Punkte bei acht Sektoren). Der erklaerende Satz steht weiterhin im Klartextkasten
+    // darunter - er kommt ueber den Tooltip dieses Knopfes dorthin (brief::ForControl) und ist
+    // damit dieselbe Zeichenkette wie die des Mauspfades.
     GetCtrl<ctrlTextButton>(ID_CONSTRUCTION_AID)
       ->SetText(lastShowBQ_ ? _("Construction aid: on") : _("Construction aid: off"));
-    GetCtrl<ctrlTextButton>(ID_NAMES_PRODUCTIVITY)
-      ->SetText(lastShowNames_ ? _("Names and output: on") : _("Names and output: off"));
+    GetCtrl<ctrlTextButton>(ID_NAMES)->SetText(lastShowNames_ ? _("Names: on") : _("Names: off"));
+    GetCtrl<ctrlTextButton>(ID_PRODUCTIVITY)
+      ->SetText(lastShowProductivity_ ? _("Output: on") : _("Output: off"));
+    GetCtrl<ctrlTextButton>(ID_WATCH_ONLY)->SetText(_("Just watch"));
+}
+
+brief::Brief iwPadSystemMenu::GetPadBrief(const Window* const focused) const
+{
+    // DER TITEL IST DIE ANTWORT AUF EINE WORTLUECKE, nicht auf eine Weglueck: der Auftraggeber
+    // sucht "die Symbole", und auf dem Schirm stand "Bauhilfe" und "Namen und Auslastung".
+    // Keiner der beiden Begriffe enthaelt das Wort, mit dem er denkt. Der Ring nennt sich
+    // deshalb nach dem, wonach gesucht wird.
+    brief::Brief b = brief::ForControl(focused);
+    b.title = _("What you see on the map");
+    return b;
 }
 
 void iwPadSystemMenu::Msg_PaintBefore()
@@ -69,8 +99,9 @@ void iwPadSystemMenu::Msg_PaintBefore()
     // "Anzeigeoptionen" im Aktionsfenster, erzwungene Bauhilfe beim Oeffnen des Baumenues).
     // Stuende die Beschriftung nur beim Bau fest, behauptete das Menue danach das Gegenteil
     // dessen, was der Spieler sieht.
-    if(lastShowBQ_ != view_.GetView().IsShowingBQ()
-       || lastShowNames_ != view_.GetView().IsShowingNamesAndProductivity())
+    if(lastShowBQ_ != view_.GetView().IsShowingBQ() || lastShowNames_ != view_.GetView().IsShowingNames()
+       || lastShowProductivity_ != view_.GetView().IsShowingProductivity()
+       || lastWatchOnly_ != view_.IsWatchOnly())
         UpdateToggleLabels();
 }
 
@@ -95,9 +126,17 @@ void iwPadSystemMenu::Msg_ButtonClick(const unsigned ctrl_id)
             dsk_.ToggleConstructionAidFor(view_);
             UpdateToggleLabels();
             break;
-        case ID_NAMES_PRODUCTIVITY:
-            dsk_.ToggleNamesAndProductivityFor(view_);
+        case ID_NAMES:
+            dsk_.ToggleNamesFor(view_);
             UpdateToggleLabels();
             break;
+        case ID_PRODUCTIVITY:
+            dsk_.ToggleProductivityFor(view_);
+            UpdateToggleLabels();
+            break;
+        // "Nur zuschauen" SCHLIESST das Menue - anders als die drei Umschalter darueber, und
+        // aus genau demselben Grund, aus dem jene stehenbleiben: was der Spieler danach sehen
+        // will, ist die WELT. Ein Menue davor waere das Gegenteil der Bitte.
+        case ID_WATCH_ONLY: dsk_.EnterWatchOnly(view_); break;
     }
 }
